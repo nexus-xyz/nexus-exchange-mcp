@@ -173,6 +173,179 @@ test("limit order without price is rejected by schema", () => {
   assert.equal(parsed.success, false);
 });
 
+/** Capture every fetch call (url + method + parsed JSON body) for a handler. */
+async function captureCalls(
+  run: (client: ExchangeClient) => Promise<unknown>,
+): Promise<Array<{ url: string; method: string; body?: any }>> {
+  const client = new ExchangeClient({
+    baseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00",
+  });
+  const calls: Array<{ url: string; method: string; body?: any }> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const raw = init.body
+      ? Buffer.from(init.body as Uint8Array).toString("utf8")
+      : undefined;
+    calls.push({
+      url,
+      method: (init.method as string) ?? "GET",
+      body: raw ? JSON.parse(raw) : undefined,
+    });
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await run(client);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  return calls;
+}
+
+test("public market-data tools hit the right unsigned paths with query params", async () => {
+  const candles = await captureCalls((c) =>
+    findTool("get_candles")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      timeframe: "5m",
+      limit: 100,
+    }),
+  );
+  assert.equal(candles.length, 1);
+  assert.equal(candles[0].method, "GET");
+  assert.equal(
+    candles[0].url,
+    "http://example.test/markets/BTC-USDX-PERP/candles?timeframe=5m&limit=100",
+  );
+
+  const trades = await captureCalls((c) =>
+    findTool("get_trades")!.handler(c, { market_id: "ETH-USDX-PERP" }),
+  );
+  // No limit -> no query string.
+  assert.equal(
+    trades[0].url,
+    "http://example.test/markets/ETH-USDX-PERP/trades",
+  );
+
+  const funding = await captureCalls((c) =>
+    findTool("get_funding_history")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      limit: 5,
+    }),
+  );
+  assert.equal(
+    funding[0].url,
+    "http://example.test/markets/BTC-USDX-PERP/funding?limit=5",
+  );
+
+  const mark = await captureCalls((c) =>
+    findTool("get_mark_price")!.handler(c, { market_id: "BTC-USDX-PERP" }),
+  );
+  assert.equal(
+    mark[0].url,
+    "http://example.test/markets/BTC-USDX-PERP/mark-price",
+  );
+});
+
+test("get_order and get_adl_history encode path segments and forward limit", async () => {
+  const order = await captureCalls((c) =>
+    findTool("get_order")!.handler(c, { order_id: "abc/123" }),
+  );
+  assert.equal(order[0].method, "GET");
+  assert.equal(order[0].url, "http://example.test/orders/abc%2F123");
+
+  const adl = await captureCalls((c) =>
+    findTool("get_adl_history")!.handler(c, { address: "0xABC", limit: 10 }),
+  );
+  assert.equal(
+    adl[0].url,
+    "http://example.test/account/0xABC/adl-history?limit=10",
+  );
+});
+
+test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", async () => {
+  for (const name of [
+    "get_fills",
+    "get_withdrawals",
+    "get_rate_limit_status",
+  ]) {
+    const client = new ExchangeClient({ baseUrl: "http://example.test" });
+    await assert.rejects(
+      () => findTool(name)!.handler(client, {}) as Promise<unknown>,
+      MissingCredentialsError,
+      `${name} should require credentials`,
+    );
+  }
+});
+
+test("get_ws_token POSTs to /ws-tokens and is signed", async () => {
+  const calls = await captureCalls((c) =>
+    findTool("get_ws_token")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, "http://example.test/ws-tokens");
+
+  const client = new ExchangeClient({ baseUrl: "http://example.test" });
+  await assert.rejects(
+    () => findTool("get_ws_token")!.handler(client, {}) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("place_orders_batch maps each order to the engine wire shape", async () => {
+  const calls = await captureCalls((c) =>
+    findTool("place_orders_batch")!.handler(c, {
+      orders: [
+        {
+          market_id: "BTC-USDX-PERP",
+          side: "buy",
+          type: "limit",
+          size: "0.5",
+          price: "60000",
+        },
+        {
+          market_id: "ETH-USDX-PERP",
+          side: "sell",
+          type: "market",
+          size: "2",
+        },
+      ],
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, "http://example.test/orders/batch");
+  assert.deepEqual(calls[0].body, [
+    {
+      market_id: "BTC-USDX-PERP",
+      side: "Buy",
+      order_type: "Limit",
+      quantity: "0.5",
+      time_in_force: "GTC",
+      price: "60000",
+    },
+    {
+      market_id: "ETH-USDX-PERP",
+      side: "Sell",
+      order_type: "Market",
+      quantity: "2",
+      time_in_force: "IOC",
+    },
+  ]);
+});
+
+test("place_orders_batch rejects an empty list and limit orders missing price", () => {
+  const tool = findTool("place_orders_batch")!;
+  assert.equal(tool.zod.safeParse({ orders: [] }).success, false);
+  assert.equal(
+    tool.zod.safeParse({
+      orders: [
+        { market_id: "BTC-USDX-PERP", side: "buy", type: "limit", size: "1" },
+      ],
+    }).success,
+    false,
+  );
+});
+
 test("pending tools return an honest not-yet-available message", async () => {
   const client = new ExchangeClient({ baseUrl: "http://example.test" });
   const deposit = (await findTool("get_deposit_target")!.handler(

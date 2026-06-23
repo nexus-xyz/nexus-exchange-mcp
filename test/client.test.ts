@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
-import { ExchangeClient, MissingCredentialsError } from "../src/client.js";
+import {
+  ExchangeApiError,
+  ExchangeClient,
+  MissingCredentialsError,
+  sanitizeErrorBody,
+} from "../src/client.js";
 import { findTool, tools } from "../src/tools/index.js";
 
 /**
@@ -146,8 +151,8 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
       order_id: "abc/123",
       market_id: "BTC-USDX-PERP",
     });
-    // (b) cancel-all: /orders with no id and no query.
-    await tool.handler(client, {});
+    // (b) explicit mass-cancel: /orders with no id and no query.
+    await tool.handler(client, { cancel_all: true });
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -160,6 +165,80 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   );
   assert.equal(calls[1].method, "DELETE");
   assert.equal(calls[1].url, "http://example.test/orders");
+});
+
+test("cancel_order refuses to mass-cancel without an explicit cancel_all flag", async () => {
+  const tool = findTool("cancel_order")!;
+  const client = new ExchangeClient({
+    baseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00",
+  });
+
+  let fetchCalled = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    // Argless call must throw, not mass-cancel.
+    await assert.rejects(
+      async () => tool.handler(client, {}),
+      /cancel_all: true/,
+    );
+    // cancel_all: false is equally rejected.
+    await assert.rejects(
+      async () => tool.handler(client, { cancel_all: false }),
+      /cancel_all: true/,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(fetchCalled, false, "no request should be sent");
+});
+
+test("sanitizeErrorBody bounds length and redacts secret-looking tokens", () => {
+  // Bounding: long bodies are truncated well under the old 2000-char cap.
+  const long = "x".repeat(5000);
+  const bounded = sanitizeErrorBody(long);
+  assert.ok(bounded.length < 600, "body is bounded");
+  assert.ok(bounded.endsWith("[truncated]"), "truncation is marked");
+
+  // Redaction: credential-shaped fields are scrubbed.
+  const body =
+    '{"error":"bad","api_key":"nx_live_abc123","signature":"deadbeef"}';
+  const scrubbed = sanitizeErrorBody(body);
+  assert.ok(!scrubbed.includes("nx_live_abc123"), "api_key redacted");
+  assert.ok(!scrubbed.includes("deadbeef"), "signature redacted");
+  assert.ok(scrubbed.includes("[REDACTED]"));
+  assert.ok(scrubbed.includes("bad"), "non-secret content preserved");
+
+  const bearer = sanitizeErrorBody("Authorization: Bearer abc.def.ghi");
+  assert.ok(!bearer.includes("abc.def.ghi"), "bearer token redacted");
+});
+
+test("ExchangeApiError carries the sanitized, bounded body", async () => {
+  const client = new ExchangeClient({ baseUrl: "http://example.test" });
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response('{"api_key":"nx_live_secret","msg":"nope"}', {
+      status: 401,
+    })) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => client.request({ path: "/markets/summary" }),
+      (err: unknown) => {
+        assert.ok(err instanceof ExchangeApiError);
+        assert.equal(err.status, 401);
+        assert.ok(!err.body.includes("nx_live_secret"), "secret scrubbed");
+        assert.ok(err.body.includes("nope"), "message preserved");
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });
 
 test("limit order without price is rejected by schema", () => {

@@ -66,7 +66,9 @@ export function createServer(): Server {
       const message = err instanceof Error ? err.message : String(err);
       return {
         isError: true,
-        content: [{ type: "text", text: `Error calling ${tool.name}: ${message}` }],
+        content: [
+          { type: "text", text: `Error calling ${tool.name}: ${message}` },
+        ],
       };
     }
   });

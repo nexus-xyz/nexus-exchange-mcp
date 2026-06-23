@@ -10,21 +10,21 @@ read from environment variables.
 
 ## What works today
 
-| Tool | Status | Endpoint |
-| --- | --- | --- |
-| `list_markets` | ✅ Live (public) | `GET /markets/summary` |
-| `get_ticker` | ✅ Live (public) | `GET /markets/{id}/ticker` |
-| `get_orderbook` | ✅ Live (public) | `GET /markets/{id}/orderbook` |
-| `get_demo_account` | ✅ Live (public) | `GET /demo/account` |
-| `get_demo_positions` | ✅ Live (public) | `GET /demo/positions` |
-| `get_demo_orders` | ✅ Live (public) | `GET /demo/orders` |
-| `get_balance` | ✅ Live (needs key + direct gateway) | `GET /account` |
-| `get_positions` | ✅ Live (needs key + direct gateway) | `GET /positions` |
-| `get_open_orders` | ✅ Live (needs key + direct gateway) | `GET /orders` |
-| `place_order` | ✅ Live (needs key + direct gateway) | `POST /orders` |
-| `cancel_order` | ✅ Live (needs key + direct gateway) | `DELETE /orders[/{id}]` |
-| `get_deposit_target` | 🚧 Pending — server-side endpoint not built yet | none yet |
-| `register_agent` | 🚧 Pending — server-side capability not built yet | none yet |
+| Tool                 | Status                                            | Endpoint                      |
+| -------------------- | ------------------------------------------------- | ----------------------------- |
+| `list_markets`       | ✅ Live (public)                                  | `GET /markets/summary`        |
+| `get_ticker`         | ✅ Live (public)                                  | `GET /markets/{id}/ticker`    |
+| `get_orderbook`      | ✅ Live (public)                                  | `GET /markets/{id}/orderbook` |
+| `get_demo_account`   | ✅ Live (public)                                  | `GET /demo/account`           |
+| `get_demo_positions` | ✅ Live (public)                                  | `GET /demo/positions`         |
+| `get_demo_orders`    | ✅ Live (public)                                  | `GET /demo/orders`            |
+| `get_balance`        | ✅ Live (needs key + direct gateway)              | `GET /account`                |
+| `get_positions`      | ✅ Live (needs key + direct gateway)              | `GET /positions`              |
+| `get_open_orders`    | ✅ Live (needs key + direct gateway)              | `GET /orders`                 |
+| `place_order`        | ✅ Live (needs key + direct gateway)              | `POST /orders`                |
+| `cancel_order`       | ✅ Live (needs key + direct gateway)              | `DELETE /orders[/{id}]`       |
+| `get_deposit_target` | 🚧 Pending — server-side endpoint not built yet   | none yet                      |
+| `register_agent`     | 🚧 Pending — server-side capability not built yet | none yet                      |
 
 The two pending tools are wired into the agent flow but return a clear
 `not_yet_available` message rather than faking a result. They light up when the
@@ -53,11 +53,11 @@ Expected output ends with `list_markets OK -> N markets`.
 Copy `.env.example` and set as needed. Only trading/account tools need
 credentials — never commit real secrets.
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `NEXUS_EXCHANGE_API_URL` | No | API base URL. Defaults to `https://exchange.nexus.xyz/api/exchange`. |
-| `NEXUS_EXCHANGE_API_KEY` | For account/trade tools | HMAC API key id (`x-api-key`). |
-| `NEXUS_EXCHANGE_API_SECRET` | For account/trade tools | HMAC secret (hex). |
+| Variable                    | Required                | Purpose                                                              |
+| --------------------------- | ----------------------- | -------------------------------------------------------------------- |
+| `NEXUS_EXCHANGE_API_URL`    | No                      | API base URL. Defaults to `https://exchange.nexus.xyz/api/exchange`. |
+| `NEXUS_EXCHANGE_API_KEY`    | For account/trade tools | HMAC API key id (`x-api-key`).                                       |
+| `NEXUS_EXCHANGE_API_SECRET` | For account/trade tools | HMAC secret (hex).                                                   |
 
 ## Authentication
 
@@ -120,7 +120,9 @@ agent authenticates per-user instead of sharing one API key from env.
 ## Development
 
 ```bash
-npm run lint       # tsc --noEmit
+npm run format     # prettier --write
+npm run lint       # eslint
+npm run typecheck  # tsc --noEmit
 npm test           # unit tests (HMAC scheme, arg mapping, schemas)
 npm run smoke      # live end-to-end check against the gateway
 ```

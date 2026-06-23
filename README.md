@@ -1,5 +1,7 @@
 # Nexus Exchange MCP Server
 
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
+
 An [MCP](https://modelcontextprotocol.io) server that exposes the Nexus
 Exchange API as tools an AI agent (Claude Desktop / Claude Code) can call to
 read market data and place trades.
@@ -126,3 +128,8 @@ npm run typecheck  # tsc --noEmit
 npm test           # unit tests (HMAC scheme, arg mapping, schemas)
 npm run smoke      # live end-to-end check against the gateway
 ```
+
+## License
+
+Dual-licensed under [MIT](./LICENSE-MIT) or [Apache-2.0](./LICENSE-APACHE), at
+your option — same as the other Nexus Exchange SDKs.

@@ -26,10 +26,20 @@ export interface ExchangeConfig {
   apiKey?: string;
   /** HMAC secret (hex). Optional — only needed for private tools. */
   apiSecret?: string;
+  /**
+   * User-Agent sent on every outbound request, for client-type attribution
+   * (so MCP traffic is distinguishable from the SDK / CLI / web in usage
+   * metrics). Defaults to {@link DEFAULT_USER_AGENT}; the hosted server
+   * appends "(hosted)".
+   */
+  userAgent?: string;
 }
 
 /** Default to the public production gateway (README.md §"Base URLs"). */
 const DEFAULT_BASE_URL = "https://exchange.nexus.xyz/api/exchange";
+
+/** Identifies MCP-originated traffic in the exchange's per-client metrics. */
+export const DEFAULT_USER_AGENT = "nexus-exchange-mcp/0.1.0";
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExchangeConfig {
   const baseUrl = (env.NEXUS_EXCHANGE_API_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");

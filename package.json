@@ -11,13 +11,16 @@
   "homepage": "https://github.com/nexus-xyz/nexus-exchange-mcp#readme",
   "type": "module",
   "bin": {
-    "nexus-exchange-mcp": "dist/index.js"
+    "nexus-exchange-mcp": "dist/index.js",
+    "nexus-exchange-mcp-http": "dist/serve-http.js"
   },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:http": "node dist/serve-http.js",
     "dev": "tsc -p tsconfig.json --watch",
+    "dev:http": "node --import tsx --watch src/serve-http.ts",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx test/*.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts"

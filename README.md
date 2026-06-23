@@ -33,7 +33,6 @@ server-side capability ships.
 ## Quick start
 
 ```bash
-cd eng/apps/exchange/mcp
 npm install
 npm run build
 npm start          # runs the stdio MCP server
@@ -91,7 +90,7 @@ adjusting the absolute path to this package's `dist/index.js`:
   "mcpServers": {
     "nexus-exchange": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/eng/apps/exchange/mcp/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
       "env": {
         "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz/api/exchange"
       }
@@ -112,11 +111,36 @@ to the `env` block and set `NEXUS_EXCHANGE_API_URL` to a direct gateway.
 3. Ask: "What's in the demo account and its open positions?" — Claude calls
    `get_demo_account` and `get_demo_positions` against the live exchange.
 
-## Productionization path
+## Hosted (Streamable HTTP)
 
-stdio is used here because it is the simplest transport to demo. The
-production target is a hosted Streamable HTTP MCP server with OAuth, so each
-agent authenticates per-user instead of sharing one API key from env.
+For multi-user / agent access, run the hosted transport instead of stdio. One
+process serves many callers — each request authenticates as itself via the
+`Authorization` header, so there is no shared env key:
+
+```bash
+npm run build
+npm run start:http      # listens on $PORT (default 8080), endpoint POST /mcp
+curl localhost:8080/healthz
+```
+
+Auth is **bearer passthrough** (MVP): callers send their own scoped key as
+
+```text
+Authorization: Bearer <api-key-id>:<secret-hex>
+```
+
+Public market-data tools work with no header. Point `NEXUS_EXCHANGE_API_URL` at
+a direct indexer gateway (one that verifies client HMAC) so per-caller
+credentials are honored. Connect an agent:
+
+```bash
+claude mcp add nexus --transport http http://localhost:8080/mcp
+```
+
+Next (follow-up to this MVP): an OAuth 2.1 grant that mints a scoped
+**trade-not-withdraw** key replaces bearer passthrough, so callers never paste
+a raw secret. Outbound requests are tagged `User-Agent: nexus-exchange-mcp
+(hosted)` for per-client usage attribution.
 
 ## Development
 

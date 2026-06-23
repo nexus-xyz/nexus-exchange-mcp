@@ -5,10 +5,12 @@
  */
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ExchangeClient } from "./client.js";
+import { loadConfig } from "./config.js";
 import { createServer } from "./server.js";
 
 async function main(): Promise<void> {
-  const server = createServer();
+  const server = createServer(new ExchangeClient(loadConfig()));
   const transport = new StdioServerTransport();
   await server.connect(transport);
   // Log to stderr so we never corrupt the stdio JSON-RPC stream on stdout.

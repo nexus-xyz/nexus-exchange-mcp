@@ -12,7 +12,7 @@
  */
 
 import { createHash, createHmac } from "node:crypto";
-import { hasCredentials, type ExchangeConfig } from "./config.js";
+import { DEFAULT_USER_AGENT, hasCredentials, type ExchangeConfig } from "./config.js";
 
 export class ExchangeApiError extends Error {
   constructor(
@@ -76,7 +76,9 @@ export class ExchangeClient {
     const bodyBytes =
       opts.body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(opts.body), "utf8");
 
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      "user-agent": this.cfg.userAgent ?? DEFAULT_USER_AGENT,
+    };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
     if (opts.signed) {

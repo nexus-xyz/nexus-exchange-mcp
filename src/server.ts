@@ -1,12 +1,13 @@
 /**
- * Nexus Exchange MCP server (stdio transport).
+ * Nexus Exchange MCP server (transport-agnostic).
  *
  * Exposes the exchange's market-data and trading surface as MCP tools so an
  * AI agent (Claude Desktop / Claude Code) can read markets and place trades.
  *
- * stdio is used because it is the simplest transport to demo locally. The
- * productionization path is a hosted Streamable HTTP server with OAuth, so
- * agents authenticate per-user instead of sharing one API key from env.
+ * createServer() takes the ExchangeClient to use, so the caller owns credential
+ * selection: index.ts (stdio) passes one env-derived client; http.ts (hosted)
+ * passes a fresh per-request client built from the caller's Authorization
+ * header, so each agent acts as itself.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,14 +15,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { loadConfig } from "./config.js";
-import { ExchangeClient } from "./client.js";
+import type { ExchangeClient } from "./client.js";
 import { findTool, tools } from "./tools/index.js";
 
-export function createServer(): Server {
-  const cfg = loadConfig();
-  const client = new ExchangeClient(cfg);
-
+export function createServer(client: ExchangeClient): Server {
   const server = new Server(
     { name: "nexus-exchange-mcp", version: "0.1.0" },
     { capabilities: { tools: {} } },

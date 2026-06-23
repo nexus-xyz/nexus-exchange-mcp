@@ -33,7 +33,6 @@ server-side capability ships.
 ## Quick start
 
 ```bash
-cd eng/apps/exchange/mcp
 npm install
 npm run build
 npm start          # runs the stdio MCP server
@@ -91,7 +90,7 @@ adjusting the absolute path to this package's `dist/index.js`:
   "mcpServers": {
     "nexus-exchange": {
       "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/eng/apps/exchange/mcp/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
       "env": {
         "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz/api/exchange"
       }

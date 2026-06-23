@@ -22,7 +22,10 @@ export interface ToolDef {
   handler: (client: ExchangeClient, args: unknown) => Promise<unknown>;
 }
 
-function jsonSchema(properties: Record<string, unknown>, required: string[] = []) {
+function jsonSchema(
+  properties: Record<string, unknown>,
+  required: string[] = [],
+) {
   return {
     type: "object",
     properties,
@@ -57,14 +60,21 @@ export const tools: ToolDef[] = [
       "Get the ticker (last price, bid/ask, 24h stats) for one market, e.g. " +
       '"BTC-USDX-PERP". Public — no credentials needed.',
     inputSchema: jsonSchema(
-      { market_id: { type: "string", description: 'Market id, e.g. "BTC-USDX-PERP".' } },
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
       ["market_id"],
     ),
     zod: z.object({ market_id: z.string().min(1) }).strict(),
     requiresAuth: false,
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
-      return client.request({ path: `/markets/${encodeURIComponent(market_id)}/ticker` });
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/ticker`,
+      });
     },
   },
   {
@@ -73,14 +83,21 @@ export const tools: ToolDef[] = [
       "Get the current order book (bids/asks with price + size) for one market. " +
       "Public — no credentials needed.",
     inputSchema: jsonSchema(
-      { market_id: { type: "string", description: 'Market id, e.g. "BTC-USDX-PERP".' } },
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
       ["market_id"],
     ),
     zod: z.object({ market_id: z.string().min(1) }).strict(),
     requiresAuth: false,
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
-      return client.request({ path: `/markets/${encodeURIComponent(market_id)}/orderbook` });
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/orderbook`,
+      });
     },
   },
 
@@ -101,7 +118,8 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_demo_positions",
-    description: "Get the public demo account's open positions. No credentials needed.",
+    description:
+      "Get the public demo account's open positions. No credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
@@ -109,7 +127,8 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_demo_orders",
-    description: "Get the public demo account's open orders. No credentials needed.",
+    description:
+      "Get the public demo account's open orders. No credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
@@ -129,7 +148,8 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_positions",
-    description: "Get the authenticated account's open positions. Requires API credentials.",
+    description:
+      "Get the authenticated account's open positions. Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
@@ -137,7 +157,8 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_open_orders",
-    description: "Get the authenticated account's resting (open) orders. Requires API credentials.",
+    description:
+      "Get the authenticated account's resting (open) orders. Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
@@ -153,20 +174,39 @@ export const tools: ToolDef[] = [
       "submits a REAL order to the matching engine.",
     inputSchema: jsonSchema(
       {
-        market_id: { type: "string", description: 'Market id, e.g. "BTC-USDX-PERP".' },
-        side: { type: "string", enum: ["buy", "sell"], description: "Order side." },
-        type: { type: "string", enum: ["limit", "market"], description: "Order type." },
-        size: { type: "string", description: "Order quantity in base units, as a string." },
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        side: {
+          type: "string",
+          enum: ["buy", "sell"],
+          description: "Order side.",
+        },
+        type: {
+          type: "string",
+          enum: ["limit", "market"],
+          description: "Order type.",
+        },
+        size: {
+          type: "string",
+          description: "Order quantity in base units, as a string.",
+        },
         price: {
           type: "string",
-          description: "Limit price as a string. Required for limit orders, ignored for market.",
+          description:
+            "Limit price as a string. Required for limit orders, ignored for market.",
         },
         time_in_force: {
           type: "string",
           enum: ["GTC", "IOC", "FOK"],
-          description: "Time in force. Defaults to GTC for limit, IOC for market.",
+          description:
+            "Time in force. Defaults to GTC for limit, IOC for market.",
         },
-        reduce_only: { type: "boolean", description: "If true, only reduces an existing position." },
+        reduce_only: {
+          type: "boolean",
+          description: "If true, only reduces an existing position.",
+        },
       },
       ["market_id", "side", "type", "size"],
     ),
@@ -207,7 +247,12 @@ export const tools: ToolDef[] = [
       };
       if (a.type === "limit") body.price = a.price;
       if (a.reduce_only) body.reduce_only = true;
-      return client.request({ method: "POST", path: "/orders", body, signed: true });
+      return client.request({
+        method: "POST",
+        path: "/orders",
+        body,
+        signed: true,
+      });
     },
   },
   {
@@ -226,15 +271,24 @@ export const tools: ToolDef[] = [
       },
     }),
     zod: z
-      .object({ order_id: z.string().optional(), market_id: z.string().optional() })
+      .object({
+        order_id: z.string().optional(),
+        market_id: z.string().optional(),
+      })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { order_id?: string; market_id?: string };
       if (!a.order_id) {
-        return client.request({ method: "DELETE", path: "/orders", signed: true });
+        return client.request({
+          method: "DELETE",
+          path: "/orders",
+          signed: true,
+        });
       }
-      const query = a.market_id ? `market_id=${encodeURIComponent(a.market_id)}` : "";
+      const query = a.market_id
+        ? `market_id=${encodeURIComponent(a.market_id)}`
+        : "";
       return client.request({
         method: "DELETE",
         path: `/orders/${encodeURIComponent(a.order_id)}`,
@@ -252,11 +306,15 @@ export const tools: ToolDef[] = [
       "Not yet available — the gateway exposes deposit submission but no " +
       "deposit-address endpoint yet.",
     inputSchema: jsonSchema({
-      asset: { type: "string", description: 'Asset to deposit, e.g. "USDX". Optional.' },
+      asset: {
+        type: "string",
+        description: 'Asset to deposit, e.g. "USDX". Optional.',
+      },
     }),
     zod: z.object({ asset: z.string().optional() }).strict(),
     requiresAuth: false,
-    handler: async () => PENDING("Deposit-target (on-chain deposit address) lookup"),
+    handler: async () =>
+      PENDING("Deposit-target (on-chain deposit address) lookup"),
   },
   {
     name: "register_agent",
@@ -266,10 +324,18 @@ export const tools: ToolDef[] = [
       "agent-key registration is still scaffolding server-side and requires a " +
       "wallet EIP-712 signature this server cannot produce.",
     inputSchema: jsonSchema({
-      wallet: { type: "string", description: "Owner wallet address (0x...). Optional." },
-      agent: { type: "string", description: "Agent public key/address to delegate to. Optional." },
+      wallet: {
+        type: "string",
+        description: "Owner wallet address (0x...). Optional.",
+      },
+      agent: {
+        type: "string",
+        description: "Agent public key/address to delegate to. Optional.",
+      },
     }),
-    zod: z.object({ wallet: z.string().optional(), agent: z.string().optional() }).strict(),
+    zod: z
+      .object({ wallet: z.string().optional(), agent: z.string().optional() })
+      .strict(),
     requiresAuth: false,
     handler: async () => PENDING("Delegated agent-key registration"),
   },

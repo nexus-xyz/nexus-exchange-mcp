@@ -64,9 +64,17 @@ export class ExchangeClient {
     }
     const timestamp = Date.now().toString();
     const bodyHash = createHash("sha256").update(bodyBytes).digest("hex");
-    const canonical = [timestamp, method.toUpperCase(), path, query, bodyHash].join("\n");
+    const canonical = [
+      timestamp,
+      method.toUpperCase(),
+      path,
+      query,
+      bodyHash,
+    ].join("\n");
     const secret = Buffer.from(this.cfg.apiSecret, "hex");
-    const signature = createHmac("sha256", secret).update(canonical).digest("hex");
+    const signature = createHmac("sha256", secret)
+      .update(canonical)
+      .digest("hex");
     return { timestamp, signature, apiKey: this.cfg.apiKey };
   }
 
@@ -74,7 +82,9 @@ export class ExchangeClient {
     const method = opts.method ?? "GET";
     const query = opts.query ?? "";
     const bodyBytes =
-      opts.body === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(opts.body), "utf8");
+      opts.body === undefined
+        ? Buffer.alloc(0)
+        : Buffer.from(JSON.stringify(opts.body), "utf8");
 
     const headers: Record<string, string> = {};
     if (opts.body !== undefined) headers["content-type"] = "application/json";
@@ -83,7 +93,12 @@ export class ExchangeClient {
       if (!this.hasCredentials()) {
         throw new MissingCredentialsError(`${method} ${opts.path}`);
       }
-      const { timestamp, signature, apiKey } = this.sign(method, opts.path, query, bodyBytes);
+      const { timestamp, signature, apiKey } = this.sign(
+        method,
+        opts.path,
+        query,
+        bodyBytes,
+      );
       headers["x-api-key"] = apiKey;
       headers["x-timestamp"] = timestamp;
       headers["x-signature"] = signature;

@@ -13,14 +13,20 @@ import { createServer } from "../src/server.js";
 
 async function main(): Promise<void> {
   const server = createServer();
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
 
-  const client = new Client({ name: "smoke", version: "0.0.0" }, { capabilities: {} });
+  const client = new Client(
+    { name: "smoke", version: "0.0.0" },
+    { capabilities: {} },
+  );
   await client.connect(clientTransport);
 
   const list = await client.listTools();
-  console.error(`tools/list -> ${list.tools.length} tools: ${list.tools.map((t) => t.name).join(", ")}`);
+  console.error(
+    `tools/list -> ${list.tools.length} tools: ${list.tools.map((t) => t.name).join(", ")}`,
+  );
 
   const res = await client.callTool({ name: "list_markets", arguments: {} });
   const content = res.content as Array<{ type: string; text?: string }>;

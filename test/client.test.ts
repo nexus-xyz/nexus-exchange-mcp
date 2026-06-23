@@ -20,13 +20,22 @@ function referenceSign(
   body: Buffer,
 ): string {
   const bodyHash = createHash("sha256").update(body).digest("hex");
-  const canonical = [ts, method.toUpperCase(), path, query, bodyHash].join("\n");
-  return createHmac("sha256", Buffer.from(secretHex, "hex")).update(canonical).digest("hex");
+  const canonical = [ts, method.toUpperCase(), path, query, bodyHash].join(
+    "\n",
+  );
+  return createHmac("sha256", Buffer.from(secretHex, "hex"))
+    .update(canonical)
+    .digest("hex");
 }
 
 test("signs requests with the indexer's canonical HMAC scheme", async () => {
-  const secretHex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
-  const cfg = { baseUrl: "http://example.test", apiKey: "nx_test", apiSecret: secretHex };
+  const secretHex =
+    "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+  const cfg = {
+    baseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: secretHex,
+  };
   const client = new ExchangeClient(cfg);
 
   let captured: { url: string; headers: Headers; body?: Buffer } | undefined;
@@ -44,7 +53,14 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
     await client.request({
       method: "POST",
       path: "/orders",
-      body: { market_id: "BTC-USDX-PERP", side: "Buy", order_type: "Limit", quantity: "1", price: "50000", time_in_force: "GTC" },
+      body: {
+        market_id: "BTC-USDX-PERP",
+        side: "Buy",
+        order_type: "Limit",
+        quantity: "1",
+        price: "50000",
+        time_in_force: "GTC",
+      },
       signed: true,
     });
   } finally {
@@ -54,7 +70,14 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
   assert.ok(captured, "fetch was called");
   const ts = captured!.headers.get("x-timestamp")!;
   assert.equal(captured!.headers.get("x-api-key"), "nx_test");
-  const expected = referenceSign(secretHex, ts, "POST", "/orders", "", captured!.body!);
+  const expected = referenceSign(
+    secretHex,
+    ts,
+    "POST",
+    "/orders",
+    "",
+    captured!.body!,
+  );
   assert.equal(captured!.headers.get("x-signature"), expected);
   assert.equal(captured!.url, "http://example.test/orders");
 });
@@ -119,7 +142,10 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   }) as typeof fetch;
   try {
     // (a) single cancel: /orders/<encoded id>?market_id=... — id is encoded.
-    await tool.handler(client, { order_id: "abc/123", market_id: "BTC-USDX-PERP" });
+    await tool.handler(client, {
+      order_id: "abc/123",
+      market_id: "BTC-USDX-PERP",
+    });
     // (b) cancel-all: /orders with no id and no query.
     await tool.handler(client, {});
   } finally {
@@ -128,7 +154,10 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].method, "DELETE");
-  assert.equal(calls[0].url, "http://example.test/orders/abc%2F123?market_id=BTC-USDX-PERP");
+  assert.equal(
+    calls[0].url,
+    "http://example.test/orders/abc%2F123?market_id=BTC-USDX-PERP",
+  );
   assert.equal(calls[1].method, "DELETE");
   assert.equal(calls[1].url, "http://example.test/orders");
 });
@@ -146,7 +175,10 @@ test("limit order without price is rejected by schema", () => {
 
 test("pending tools return an honest not-yet-available message", async () => {
   const client = new ExchangeClient({ baseUrl: "http://example.test" });
-  const deposit = (await findTool("get_deposit_target")!.handler(client, {})) as any;
+  const deposit = (await findTool("get_deposit_target")!.handler(
+    client,
+    {},
+  )) as any;
   assert.equal(deposit.status, "not_yet_available");
 
   const agent = (await findTool("register_agent")!.handler(client, {})) as any;
@@ -157,6 +189,10 @@ test("every tool advertises a name, description, and object input schema", () =>
   for (const t of tools) {
     assert.ok(t.name.length > 0, "name");
     assert.ok(t.description.length > 0, `${t.name} description`);
-    assert.equal((t.inputSchema as any).type, "object", `${t.name} schema type`);
+    assert.equal(
+      (t.inputSchema as any).type,
+      "object",
+      `${t.name} schema type`,
+    );
   }
 });

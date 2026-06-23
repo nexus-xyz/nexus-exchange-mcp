@@ -31,8 +31,13 @@ export interface ExchangeConfig {
 /** Default to the public production gateway (README.md §"Base URLs"). */
 const DEFAULT_BASE_URL = "https://exchange.nexus.xyz/api/exchange";
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExchangeConfig {
-  const baseUrl = (env.NEXUS_EXCHANGE_API_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): ExchangeConfig {
+  const baseUrl = (env.NEXUS_EXCHANGE_API_URL || DEFAULT_BASE_URL).replace(
+    /\/+$/,
+    "",
+  );
   return {
     baseUrl,
     apiKey: env.NEXUS_EXCHANGE_API_KEY || undefined,

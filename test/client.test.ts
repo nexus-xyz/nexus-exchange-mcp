@@ -162,6 +162,61 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   assert.equal(calls[1].url, "http://example.test/orders");
 });
 
+test("get_candles maps market_id + interval + limit to the candles URL", async () => {
+  const tool = findTool("get_candles")!;
+  const client = new ExchangeClient({ baseUrl: "http://example.test" });
+
+  let url: string | undefined;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: string) => {
+    url = u;
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await tool.handler(client, {
+      market_id: "BTC-USDX-PERP",
+      interval: "1h",
+      limit: 100,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  // Friendly `interval` arg maps to the gateway `timeframe` query param.
+  assert.equal(
+    url,
+    "http://example.test/markets/BTC-USDX-PERP/candles?timeframe=1h&limit=100",
+  );
+});
+
+test("get_funding_payments builds filtered and unfiltered URLs", async () => {
+  const tool = findTool("get_funding_payments")!;
+  const client = new ExchangeClient({
+    baseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00",
+  });
+
+  const urls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (u: string) => {
+    urls.push(u);
+    return new Response("[]", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await tool.handler(client, { market_id: "BTC-USDX-PERP" });
+    await tool.handler(client, {});
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  assert.equal(
+    urls[0],
+    "http://example.test/funding-payments?market_id=BTC-USDX-PERP",
+  );
+  assert.equal(urls[1], "http://example.test/funding-payments");
+});
+
 test("limit order without price is rejected by schema", () => {
   const tool = findTool("place_order")!;
   const parsed = tool.zod.safeParse({

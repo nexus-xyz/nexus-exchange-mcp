@@ -100,6 +100,166 @@ export const tools: ToolDef[] = [
       });
     },
   },
+  {
+    name: "get_recent_trades",
+    description:
+      "Get recent public trades for one market (newest first), optionally " +
+      "limited. Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        limit: {
+          type: "number",
+          description: "Max number of trades to return. Optional.",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as { market_id: string; limit?: number };
+      const query = a.limit !== undefined ? `limit=${a.limit}` : "";
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/trades`,
+        query,
+      });
+    },
+  },
+  {
+    name: "get_candles",
+    description:
+      "Get OHLCV candles for one market, with an optional interval " +
+      '(e.g. "1m", "1h", "1d") and limit. Public — no credentials needed.',
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        interval: {
+          type: "string",
+          description:
+            'Candle interval/timeframe, e.g. "1m", "1h", "1d". Optional.',
+        },
+        limit: {
+          type: "number",
+          description: "Max number of candles to return. Optional.",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        interval: z.string().min(1).optional(),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as {
+        market_id: string;
+        interval?: string;
+        limit?: number;
+      };
+      // Gateway query param is `timeframe` (rest.rs::fetch_ohlcv).
+      const params: string[] = [];
+      if (a.interval !== undefined)
+        params.push(`timeframe=${encodeURIComponent(a.interval)}`);
+      if (a.limit !== undefined) params.push(`limit=${a.limit}`);
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/candles`,
+        query: params.join("&"),
+      });
+    },
+  },
+  {
+    name: "get_mark_price",
+    description:
+      "Get the current mark price for one market. Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z.object({ market_id: z.string().min(1) }).strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const { market_id } = args as { market_id: string };
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/mark-price`,
+      });
+    },
+  },
+  {
+    name: "get_market_status",
+    description:
+      "Get the lifecycle / halt status for one market. Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z.object({ market_id: z.string().min(1) }).strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const { market_id } = args as { market_id: string };
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/status`,
+      });
+    },
+  },
+  {
+    name: "get_funding",
+    description:
+      "Get the funding-rate history for one market, optionally limited. " +
+      "Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        limit: {
+          type: "number",
+          description: "Max number of samples to return. Optional.",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as { market_id: string; limit?: number };
+      const query = a.limit !== undefined ? `limit=${a.limit}` : "";
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/funding`,
+        query,
+      });
+    },
+  },
 
   // ── Public demo account (no credentials) ──────────────────────────────────
   // The indexer exposes a read-only demo namespace bound to a live bot
@@ -163,6 +323,37 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) => client.request({ path: "/orders", signed: true }),
+  },
+  {
+    name: "get_fills",
+    description:
+      "Get the authenticated account's recent fills (private trade executions). " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) => client.request({ path: "/fills", signed: true }),
+  },
+  {
+    name: "get_funding_payments",
+    description:
+      "Get the authenticated account's funding-payment history, optionally " +
+      "filtered to a single market. Requires API credentials.",
+    inputSchema: jsonSchema({
+      market_id: {
+        type: "string",
+        description: 'Market id to filter to, e.g. "BTC-USDX-PERP". Optional.',
+      },
+    }),
+    zod: z.object({ market_id: z.string().min(1).optional() }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { market_id?: string };
+      const query = a.market_id
+        ? `market_id=${encodeURIComponent(a.market_id)}`
+        : "";
+      return client.request({ path: "/funding-payments", query, signed: true });
+    },
   },
 
   // ── Trade actions (require credentials) ───────────────────────────────────

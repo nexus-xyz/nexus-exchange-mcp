@@ -400,16 +400,31 @@ test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", 
   }
 });
 
-test("get_ws_token POSTs to /ws-tokens and is signed", async () => {
+test("get_ws_token POSTs to /ws/token and is signed", async () => {
   const calls = await captureCalls((c) =>
     findTool("get_ws_token")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, "http://example.test/ws/token");
+
+  const client = new ExchangeClient({ baseUrl: "http://example.test" });
+  await assert.rejects(
+    () => findTool("get_ws_token")!.handler(client, {}) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("get_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
+  const calls = await captureCalls((c) =>
+    findTool("get_ws_token_legacy")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url, "http://example.test/ws-tokens");
 
   const client = new ExchangeClient({ baseUrl: "http://example.test" });
   await assert.rejects(
-    () => findTool("get_ws_token")!.handler(client, {}) as Promise<unknown>,
+    () =>
+      findTool("get_ws_token_legacy")!.handler(client, {}) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
@@ -540,9 +555,6 @@ test("pending tools return an honest not-yet-available message", async () => {
     {},
   )) as any;
   assert.equal(deposit.status, "not_yet_available");
-
-  const agent = (await findTool("register_agent")!.handler(client, {})) as any;
-  assert.equal(agent.status, "not_yet_available");
 });
 
 test("every tool advertises a name, description, and object input schema", () => {

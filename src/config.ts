@@ -26,6 +26,27 @@ export interface ExchangeConfig {
   apiKey?: string;
   /** HMAC secret (hex). Optional — only needed for private tools. */
   apiSecret?: string;
+  /**
+   * Session token (Bearer) from `POST /auth/login`. Optional — only needed for
+   * the API-key-management tools (`/keys`), which authenticate with a session
+   * token rather than HMAC. See README "Authentication".
+   */
+  sessionToken?: string;
+  /**
+   * Admin secret (the gateway's `ADMIN_SECRET`). Optional — only needed for the
+   * admin tier-management tools, which are gated off by default (see
+   * `enableAdminTools`). Carries operator-level authority; never set this on an
+   * untrusted agent surface.
+   */
+  adminSecret?: string;
+  /**
+   * Whether to register the admin tier-management tools (`list_tiers`,
+   * `set_tier`, `delete_tier`). Off by default: these use the operator-level
+   * admin secret and mutate other accounts' fee tiers, so they must not be
+   * exposed to a general trading agent. Set
+   * `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS=1` to opt in (and provide `adminSecret`).
+   */
+  enableAdminTools: boolean;
 }
 
 /** Default to the public production gateway (README.md §"Base URLs"). */
@@ -42,9 +63,26 @@ export function loadConfig(
     baseUrl,
     apiKey: env.NEXUS_EXCHANGE_API_KEY || undefined,
     apiSecret: env.NEXUS_EXCHANGE_API_SECRET || undefined,
+    sessionToken: env.NEXUS_EXCHANGE_SESSION_TOKEN || undefined,
+    adminSecret: env.NEXUS_EXCHANGE_ADMIN_SECRET || undefined,
+    enableAdminTools: isTruthy(env.NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS),
   };
+}
+
+/** Treat `1`/`true`/`yes`/`on` (any case) as enabled; everything else is off. */
+function isTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 export function hasCredentials(cfg: ExchangeConfig): boolean {
   return Boolean(cfg.apiKey && cfg.apiSecret);
+}
+
+export function hasSessionToken(cfg: ExchangeConfig): boolean {
+  return Boolean(cfg.sessionToken);
+}
+
+export function hasAdminSecret(cfg: ExchangeConfig): boolean {
+  return Boolean(cfg.adminSecret);
 }

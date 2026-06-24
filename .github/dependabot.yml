@@ -1,0 +1,31 @@
+version: 2
+updates:
+  # npm dependencies (package.json / package-lock.json).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
+    groups:
+      # Collapse routine patch/minor bumps into one PR to cut review noise;
+      # majors still open individually so breaking changes get scrutiny.
+      npm-minor:
+        update-types:
+          - minor
+          - patch
+
+  # GitHub Actions used by our workflows.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions-minor:
+        update-types:
+          - minor
+          - patch

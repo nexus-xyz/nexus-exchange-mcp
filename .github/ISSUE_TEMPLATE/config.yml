@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Exchange API spec
+    url: https://github.com/nexus-xyz/nexus-exchange-api
+    about: Issues with the API itself (not this MCP server) belong in the spec repo.
+  - name: Security disclosure
+    url: https://github.com/nexus-xyz/nexus-exchange-mcp/security/advisories/new
+    about: Report security vulnerabilities privately — please do not open a public issue.

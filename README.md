@@ -76,7 +76,9 @@ credentials — never commit real secrets.
 ## API version
 
 <!-- api-version-sync:start -->
-This MCP server currently targets Exchange API spec **`v0.3.5`**.
+
+Currently targets Exchange API spec **`v0.3.5`**.
+
 <!-- api-version-sync:end -->
 
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is

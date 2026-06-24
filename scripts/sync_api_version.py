@@ -130,8 +130,8 @@ def update_readme(new_tag):
             f"managed block under '## API version' so the bot has a line to own."
         )
     block = (
-        f"{MARK_START}\n"
-        f"This MCP server currently targets Exchange API spec **`{new_tag}`**.\n"
+        f"{MARK_START}\n\n"
+        f"Currently targets Exchange API spec **`{new_tag}`**.\n\n"
         f"{MARK_END}"
     )
     new_text = MANAGED_BLOCK_RE.sub(lambda _: block, text, count=1)

@@ -1,5 +1,5 @@
-# Default reviewers: any member of @nexus-xyz/eng can review and unblock, plus
-# @collinjackson explicitly. Team membership means any eng engineer satisfies the
-# required codeowner review (no single-person bottleneck).
+# Default reviewers. Any member of @nexus-xyz/eng can review and unblock — no
+# single-person bottleneck. @Luc-Campos (SDK lead) and @collinjackson are listed
+# explicitly so both are auto-requested on every PR.
 # Docs: https://docs.github.com/articles/about-code-owners
-* @nexus-xyz/eng @collinjackson
+* @nexus-xyz/eng @Luc-Campos @collinjackson

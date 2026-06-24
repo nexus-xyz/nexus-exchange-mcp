@@ -12,21 +12,35 @@ read from environment variables.
 
 ## What works today
 
-| Tool                 | Status                                            | Endpoint                      |
-| -------------------- | ------------------------------------------------- | ----------------------------- |
-| `list_markets`       | ✅ Live (public)                                  | `GET /markets/summary`        |
-| `get_ticker`         | ✅ Live (public)                                  | `GET /markets/{id}/ticker`    |
-| `get_orderbook`      | ✅ Live (public)                                  | `GET /markets/{id}/orderbook` |
-| `get_demo_account`   | ✅ Live (public)                                  | `GET /demo/account`           |
-| `get_demo_positions` | ✅ Live (public)                                  | `GET /demo/positions`         |
-| `get_demo_orders`    | ✅ Live (public)                                  | `GET /demo/orders`            |
-| `get_balance`        | ✅ Live (needs key + direct gateway)              | `GET /account`                |
-| `get_positions`      | ✅ Live (needs key + direct gateway)              | `GET /positions`              |
-| `get_open_orders`    | ✅ Live (needs key + direct gateway)              | `GET /orders`                 |
-| `place_order`        | ✅ Live (needs key + direct gateway)              | `POST /orders`                |
-| `cancel_order`       | ✅ Live (needs key + direct gateway)              | `DELETE /orders[/{id}]`       |
-| `get_deposit_target` | 🚧 Pending — server-side endpoint not built yet   | none yet                      |
-| `register_agent`     | 🚧 Pending — server-side capability not built yet | none yet                      |
+| Tool                    | Status                                            | Endpoint                          |
+| ----------------------- | ------------------------------------------------- | --------------------------------- |
+| `list_markets`          | ✅ Live (public)                                  | `GET /markets/summary`            |
+| `list_market_specs`     | ✅ Live (public)                                  | `GET /markets`                    |
+| `get_ticker`            | ✅ Live (public)                                  | `GET /markets/{id}/ticker`        |
+| `get_tickers`           | ✅ Live (public)                                  | `GET /tickers`                    |
+| `get_orderbook`         | ✅ Live (public)                                  | `GET /markets/{id}/orderbook`     |
+| `get_mark_price`        | ✅ Live (public)                                  | `GET /markets/{id}/mark-price`    |
+| `get_market_status`     | ✅ Live (public)                                  | `GET /markets/{id}/status`        |
+| `get_trades`            | ✅ Live (public)                                  | `GET /markets/{id}/trades`        |
+| `get_candles`           | ✅ Live (public)                                  | `GET /markets/{id}/candles`       |
+| `get_funding_history`   | ✅ Live (public)                                  | `GET /markets/{id}/funding`       |
+| `get_demo_account`      | ✅ Live (public)                                  | `GET /demo/account`               |
+| `get_demo_positions`    | ✅ Live (public)                                  | `GET /demo/positions`             |
+| `get_demo_orders`       | ✅ Live (public)                                  | `GET /demo/orders`                |
+| `get_balance`           | ✅ Live (needs key + direct gateway)              | `GET /account`                    |
+| `get_positions`         | ✅ Live (needs key + direct gateway)              | `GET /positions`                  |
+| `get_open_orders`       | ✅ Live (needs key + direct gateway)              | `GET /orders`                     |
+| `get_order`             | ✅ Live (needs key + direct gateway)              | `GET /orders/{id}`                |
+| `get_fills`             | ✅ Live (needs key + direct gateway)              | `GET /fills`                      |
+| `get_withdrawals`       | ✅ Live (needs key + direct gateway)              | `GET /withdrawals`                |
+| `get_rate_limit_status` | ✅ Live (needs key + direct gateway)              | `GET /account/rate-limit`         |
+| `get_adl_history`       | ✅ Live (needs key + direct gateway)              | `GET /account/{addr}/adl-history` |
+| `get_ws_token`          | ✅ Live (needs key + direct gateway)              | `POST /ws-tokens`                 |
+| `place_order`           | ✅ Live (needs key + direct gateway)              | `POST /orders`                    |
+| `place_orders_batch`    | ✅ Live (needs key + direct gateway)              | `POST /orders/batch`              |
+| `cancel_order`          | ✅ Live (needs key + direct gateway)              | `DELETE /orders[/{id}]`           |
+| `get_deposit_target`    | 🚧 Pending — server-side endpoint not built yet   | none yet                          |
+| `register_agent`        | 🚧 Pending — server-side capability not built yet | none yet                          |
 
 The two pending tools are wired into the agent flow but return a clear
 `not_yet_available` message rather than faking a result. They light up when the

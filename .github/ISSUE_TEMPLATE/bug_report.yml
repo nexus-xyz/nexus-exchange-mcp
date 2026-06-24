@@ -1,0 +1,76 @@
+name: Bug report
+description: Report a problem with the nexus-exchange-mcp server.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please search existing issues first to avoid duplicates.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected instead.
+      placeholder: Calling the `list_markets` tool returned … but I expected …
+    validations:
+      required: true
+  - type: input
+    id: tool
+    attributes:
+      label: Which tool?
+      description: The MCP tool involved, if applicable.
+      placeholder: "place_order"
+    validations:
+      required: false
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The tool call(s) or command sequence that triggers the bug.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / output
+      description: Relevant stderr output or error text from the server or client.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      description: Version of `@nexus/exchange-mcp` (or git rev) you're running.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: node-version
+    attributes:
+      label: Node version
+      description: Output of `node --version`.
+      placeholder: "v20.11.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: mcp-client
+    attributes:
+      label: MCP client
+      description: Which client is talking to the server?
+      options:
+        - Claude Desktop
+        - Claude Code
+        - Custom / SDK client
+        - Other
+    validations:
+      required: false
+  - type: input
+    id: api-version
+    attributes:
+      label: API spec version
+      description: Value of `.api-version` you're targeting, if relevant.
+      placeholder: "v0.3.5"
+    validations:
+      required: false

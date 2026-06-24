@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest a tool, argument, or capability for the MCP server.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea? Note that this server is a **thin MCP wrapper** over the
+        Exchange API — requests that expose an existing API endpoint as a tool
+        are most likely to land; broad business logic generally belongs in your
+        agent or application.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do that the server doesn't support today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: >
+        What tool or argument would you like? Name the tool and sketch its
+        input schema if you can. Remember additive tools and optional args are
+        the easiest changes to land (see CONTRIBUTING.md).
+    validations:
+      required: false
+  - type: input
+    id: tool
+    attributes:
+      label: Which tool?
+      description: New tool name, or an existing tool you'd extend.
+      placeholder: "get_funding_history"
+    validations:
+      required: false
+  - type: input
+    id: api-route
+    attributes:
+      label: Related API endpoint / spec section
+      description: If this maps to an Exchange API endpoint, link or name it.
+      placeholder: "GET /markets/{market_id}/funding"
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

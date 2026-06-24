@@ -3,8 +3,8 @@
  *
  * Each tool maps to a real indexer gateway endpoint. Two tools
  * (`register_agent`, `get_deposit_target`) describe capabilities that are not
- * yet built server-side; they return an honest "pending" message that names
- * the tracking Linear issue rather than faking a result.
+ * yet built server-side; they return an honest "pending" message rather than
+ * faking a result.
  */
 
 import { z } from "zod";

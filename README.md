@@ -156,6 +156,7 @@ npm run format     # prettier --write
 npm run lint       # eslint
 npm run typecheck  # tsc --noEmit
 npm test           # unit tests (HMAC scheme, arg mapping, schemas)
+npm run test:coverage # unit tests + coverage (text/lcov/json-summary); CI emits the %
 npm run smoke      # live end-to-end check against the gateway
 ```
 

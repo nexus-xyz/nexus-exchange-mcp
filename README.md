@@ -73,6 +73,20 @@ credentials — never commit real secrets.
 | `NEXUS_EXCHANGE_API_KEY`    | For account/trade tools | HMAC API key id (`x-api-key`).                                       |
 | `NEXUS_EXCHANGE_API_SECRET` | For account/trade tools | HMAC secret (hex).                                                   |
 
+## API version
+
+<!-- api-version-sync:start -->
+This MCP server currently targets Exchange API spec **`v0.3.5`**.
+<!-- api-version-sync:end -->
+
+The pinned version lives in [`.api-version`](./.api-version); the spec itself is
+published by
+[`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
+This repo does not vendor a copy — the `drift` CI job fetches the pinned release
+to check for drift, and the scheduled `api-version-sync` workflow opens a PR when
+a newer spec releases. The line above is bot-managed; everything around it is
+human-owned.
+
 ## Authentication
 
 Signed requests use the same canonical HMAC-SHA256 scheme the indexer verifies

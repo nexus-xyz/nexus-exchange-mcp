@@ -414,6 +414,28 @@ test("get_ws_token POSTs to /ws-tokens and is signed", async () => {
   );
 });
 
+test("get_funding_payments builds filtered and unfiltered signed URLs", async () => {
+  const calls = await captureCalls(async (c) => {
+    await findTool("get_funding_payments")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+    });
+    await findTool("get_funding_payments")!.handler(c, {});
+  });
+
+  assert.equal(
+    calls[0].url,
+    "http://example.test/funding-payments?market_id=BTC-USDX-PERP",
+  );
+  assert.equal(calls[1].url, "http://example.test/funding-payments");
+
+  const client = new ExchangeClient({ baseUrl: "http://example.test" });
+  await assert.rejects(
+    () =>
+      findTool("get_funding_payments")!.handler(client, {}) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
 test("place_orders_batch maps each order to the engine wire shape", async () => {
   const calls = await captureCalls((c) =>
     findTool("place_orders_batch")!.handler(c, {

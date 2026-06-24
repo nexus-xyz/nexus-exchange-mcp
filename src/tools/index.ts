@@ -496,6 +496,27 @@ export const tools: ToolDef[] = [
     },
   },
   {
+    name: "get_funding_payments",
+    description:
+      "Get the authenticated account's funding-payment history, optionally " +
+      "filtered to a single market. Requires API credentials.",
+    inputSchema: jsonSchema({
+      market_id: {
+        type: "string",
+        description: 'Market id to filter to, e.g. "BTC-USDX-PERP". Optional.',
+      },
+    }),
+    zod: z.object({ market_id: z.string().min(1).optional() }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { market_id?: string };
+      const query = a.market_id
+        ? `market_id=${encodeURIComponent(a.market_id)}`
+        : "";
+      return client.request({ path: "/funding-payments", query, signed: true });
+    },
+  },
+  {
     name: "get_withdrawals",
     description:
       "List the authenticated account's withdrawal history. Requires API " +

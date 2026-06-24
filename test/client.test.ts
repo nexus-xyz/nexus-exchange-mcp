@@ -198,6 +198,49 @@ test("cancel_order refuses to mass-cancel without an explicit cancel_all flag", 
   assert.equal(fetchCalled, false, "no request should be sent");
 });
 
+test("cancel_order: order_id wins the tie-break when cancel_all is also true", async () => {
+  // Tie-break safety: if both `order_id` and `cancel_all: true` are passed, the
+  // narrower, less destructive action wins — we cancel only the named order and
+  // ignore cancel_all. The guard must never escalate an ambiguous request into a
+  // mass-cancel. This matches the tool description ("ignored when `order_id` is
+  // given").
+  const tool = findTool("cancel_order")!;
+  const client = new ExchangeClient({
+    baseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00",
+  });
+
+  const calls: Array<{ url: string; method: string }> = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    calls.push({ url, method: init.method as string });
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    await tool.handler(client, {
+      order_id: "abc/123",
+      market_id: "BTC-USDX-PERP",
+      cancel_all: true,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, "DELETE");
+  // Single-cancel URL for the named order — NOT the mass-cancel `/orders`.
+  assert.equal(
+    calls[0].url,
+    "http://example.test/orders/abc%2F123?market_id=BTC-USDX-PERP",
+  );
+  assert.notEqual(
+    calls[0].url,
+    "http://example.test/orders",
+    "must not fall through to mass-cancel",
+  );
+});
+
 test("sanitizeErrorBody bounds length and redacts secret-looking tokens", () => {
   // Bounding: long bodies are truncated well under the old 2000-char cap.
   const long = "x".repeat(5000);

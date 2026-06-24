@@ -16,11 +16,16 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
 import { ExchangeClient } from "./client.js";
-import { findTool, tools } from "./tools/index.js";
+import { findTool, visibleTools } from "./tools/index.js";
 
 export function createServer(): Server {
   const cfg = loadConfig();
   const client = new ExchangeClient(cfg);
+
+  // Tools advertised/callable for this config. Admin tools are hidden unless
+  // explicitly enabled, so they never reach a general trading agent.
+  const enabled = visibleTools({ enableAdminTools: cfg.enableAdminTools });
+  const enabledNames = new Set(enabled.map((t) => t.name));
 
   const server = new Server(
     { name: "nexus-exchange-mcp", version: "0.1.0" },
@@ -28,7 +33,7 @@ export function createServer(): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((t) => ({
+    tools: enabled.map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
@@ -36,7 +41,9 @@ export function createServer(): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = findTool(req.params.name);
+    const tool = enabledNames.has(req.params.name)
+      ? findTool(req.params.name)
+      : undefined;
     if (!tool) {
       return {
         isError: true,

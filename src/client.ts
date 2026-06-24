@@ -12,7 +12,12 @@
  */
 
 import { createHash, createHmac } from "node:crypto";
-import { hasCredentials, type ExchangeConfig } from "./config.js";
+import {
+  hasAdminSecret,
+  hasCredentials,
+  hasSessionToken,
+  type ExchangeConfig,
+} from "./config.js";
 
 /**
  * Max upstream-body length forwarded into an agent-visible error. Kept tight:
@@ -75,16 +80,53 @@ export class MissingCredentialsError extends Error {
   }
 }
 
+export class MissingSessionTokenError extends Error {
+  constructor(tool: string) {
+    super(
+      `Tool "${tool}" requires a session token. Sign in with the \`login\` tool ` +
+        `(or POST /auth/login) and set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
+        `environment. See the package README.`,
+    );
+    this.name = "MissingSessionTokenError";
+  }
+}
+
+export class MissingAdminSecretError extends Error {
+  constructor(tool: string) {
+    super(
+      `Tool "${tool}" requires the admin secret. Set NEXUS_EXCHANGE_ADMIN_SECRET ` +
+        `in the environment. Admin tools are operator-only.`,
+    );
+    this.name = "MissingAdminSecretError";
+  }
+}
+
+/**
+ * How a request authenticates:
+ * - `"hmac"`   — per-account HMAC (x-api-key/x-timestamp/x-signature).
+ * - `"bearer"` — session token from /auth/login (Authorization: Bearer …),
+ *                used by the /keys management endpoints.
+ * - `"admin"`  — operator admin secret (Authorization: Bearer …), used by the
+ *                /admin endpoints.
+ */
+export type AuthMode = "hmac" | "bearer" | "admin";
+
 interface RequestOptions {
-  method?: "GET" | "POST" | "DELETE" | "PATCH";
+  method?: "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
   /** Path component only, leading slash, no query. e.g. "/orders" */
   path: string;
   /** Query string without the leading "?". e.g. "limit=50" */
   query?: string;
   /** JSON-serializable body for writes. */
   body?: unknown;
-  /** Whether this request must be authenticated. */
+  /** Whether this request must be authenticated with per-account HMAC. */
   signed?: boolean;
+  /**
+   * Non-HMAC authentication mode for endpoints that use a Bearer token instead
+   * of HMAC (`/keys` → `"bearer"`, `/admin` → `"admin"`). Mutually exclusive
+   * with `signed`. Omit for public requests.
+   */
+  auth?: AuthMode;
 }
 
 export class ExchangeClient {
@@ -92,6 +134,14 @@ export class ExchangeClient {
 
   hasCredentials(): boolean {
     return hasCredentials(this.cfg);
+  }
+
+  hasSessionToken(): boolean {
+    return hasSessionToken(this.cfg);
+  }
+
+  hasAdminSecret(): boolean {
+    return hasAdminSecret(this.cfg);
   }
 
   private sign(
@@ -130,9 +180,13 @@ export class ExchangeClient {
     const headers: Record<string, string> = {};
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
-    if (opts.signed) {
+    // `signed: true` is shorthand for HMAC; `auth` selects a non-HMAC mode.
+    const authMode: AuthMode | undefined = opts.signed ? "hmac" : opts.auth;
+    const where = `${method} ${opts.path}`;
+
+    if (authMode === "hmac") {
       if (!this.hasCredentials()) {
-        throw new MissingCredentialsError(`${method} ${opts.path}`);
+        throw new MissingCredentialsError(where);
       }
       const { timestamp, signature, apiKey } = this.sign(
         method,
@@ -143,6 +197,16 @@ export class ExchangeClient {
       headers["x-api-key"] = apiKey;
       headers["x-timestamp"] = timestamp;
       headers["x-signature"] = signature;
+    } else if (authMode === "bearer") {
+      if (!this.hasSessionToken()) {
+        throw new MissingSessionTokenError(where);
+      }
+      headers["authorization"] = `Bearer ${this.cfg.sessionToken}`;
+    } else if (authMode === "admin") {
+      if (!this.hasAdminSecret()) {
+        throw new MissingAdminSecretError(where);
+      }
+      headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
     }
 
     const url = `${this.cfg.baseUrl}${opts.path}${query ? `?${query}` : ""}`;

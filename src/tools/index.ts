@@ -624,28 +624,49 @@ export const tools: ToolDef[] = [
   {
     name: "cancel_order",
     description:
-      "Cancel one resting order by id, or all open orders if `order_id` is " +
-      "omitted. Requires API credentials.",
+      "Cancel a resting order. Pass `order_id` to cancel one order. To cancel " +
+      "ALL open orders you must explicitly pass `cancel_all: true` — an empty " +
+      "or argless call is rejected so a stray call can't mass-cancel by " +
+      "accident. Requires API credentials.",
     inputSchema: jsonSchema({
       order_id: {
         type: "string",
-        description: "Order id to cancel. Omit to cancel ALL open orders.",
+        description: "Order id to cancel a single order.",
       },
       market_id: {
         type: "string",
         description: "Market id (recommended when cancelling a single order).",
+      },
+      cancel_all: {
+        type: "boolean",
+        description:
+          "Set true to cancel ALL open orders. Required (and the only way) to " +
+          "trigger a mass-cancel; ignored when `order_id` is given.",
       },
     }),
     zod: z
       .object({
         order_id: z.string().optional(),
         market_id: z.string().optional(),
+        cancel_all: z.boolean().optional(),
       })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { order_id?: string; market_id?: string };
+      const a = args as {
+        order_id?: string;
+        market_id?: string;
+        cancel_all?: boolean;
+      };
       if (!a.order_id) {
+        // Mass-cancel is destructive; require an explicit opt-in flag so an
+        // empty/argless call errors instead of silently cancelling everything.
+        if (!a.cancel_all) {
+          throw new Error(
+            "Refusing to cancel: pass `order_id` to cancel one order, or " +
+              "`cancel_all: true` to explicitly cancel ALL open orders.",
+          );
+        }
         return client.request({
           method: "DELETE",
           path: "/orders",

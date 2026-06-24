@@ -11,12 +11,14 @@
   "homepage": "https://github.com/nexus-xyz/nexus-exchange-mcp#readme",
   "type": "module",
   "bin": {
-    "nexus-exchange-mcp": "dist/index.js"
+    "nexus-exchange-mcp": "dist/index.js",
+    "nexus-exchange-mcp-http": "dist/http-index.js"
   },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "start:http": "node dist/http-index.js",
     "dev": "tsc -p tsconfig.json --watch",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

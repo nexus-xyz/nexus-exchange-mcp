@@ -47,10 +47,23 @@ export interface ExchangeConfig {
    * `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS=1` to opt in (and provide `adminSecret`).
    */
   enableAdminTools: boolean;
+  /**
+   * Client identifier sent as `User-Agent` on every gateway request so usage
+   * can be attributed to a specific surface (stdio CLI vs. hosted MCP) in the
+   * exchange dashboard. Optional; defaults to {@link DEFAULT_USER_AGENT}.
+   */
+  userAgent?: string;
 }
 
 /** Default to the public production gateway (README.md §"Base URLs"). */
 const DEFAULT_BASE_URL = "https://exchange.nexus.xyz/api/exchange";
+
+/**
+ * Default `User-Agent` for gateway requests. The hosted Streamable HTTP server
+ * overrides this with an `-http` suffix (see src/http.ts) so the dashboard can
+ * tell stdio traffic apart from the hosted MCP front door.
+ */
+export const DEFAULT_USER_AGENT = "nexus-exchange-mcp/0.1.0";
 
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,

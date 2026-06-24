@@ -34,6 +34,29 @@ function jsonSchema(
   };
 }
 
+/**
+ * Maximum number of orders accepted in a single `place_orders_batch` call.
+ * The gateway does not document a batch cap in this repo, so this is a
+ * defensive client-side bound to prevent accidental flood submissions
+ * (e.g. an agent looping). 100 is a generous ceiling for interactive use;
+ * raise it to match the API's documented limit once that is published.
+ */
+const MAX_BATCH_ORDERS = 100;
+
+/**
+ * Positive-decimal string: one or more digits, optional fractional part, and
+ * strictly greater than zero. Rejects `"0"`, `"0.0"`, negatives, and anything
+ * non-numeric. Used for order `size`/`price`, which are carried as strings to
+ * preserve precision.
+ */
+const positiveDecimal = (field: string) =>
+  z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, `${field} must be a positive decimal string`)
+    .refine((v) => Number(v) > 0, {
+      message: `${field} must be greater than 0`,
+    });
+
 /** Friendly order args accepted by `place_order` / `place_orders_batch`. */
 interface FriendlyOrder {
   market_id: string;
@@ -51,13 +74,13 @@ const friendlyOrderSchema = z
     market_id: z.string().min(1),
     side: z.enum(["buy", "sell"]),
     type: z.enum(["limit", "market"]),
-    size: z.string().min(1),
-    price: z.string().optional(),
+    size: positiveDecimal("size"),
+    price: positiveDecimal("price").optional(),
     time_in_force: z.enum(["GTC", "IOC", "FOK"]).optional(),
     reduce_only: z.boolean().optional(),
   })
   .strict()
-  .refine((v) => v.type !== "limit" || (v.price && v.price.length > 0), {
+  .refine((v) => v.type !== "limit" || v.price !== undefined, {
     message: "price is required for limit orders",
     path: ["price"],
   });
@@ -76,12 +99,14 @@ const orderProps: Record<string, unknown> = {
   },
   size: {
     type: "string",
-    description: "Order quantity in base units, as a string.",
+    description:
+      "Order quantity in base units, as a positive decimal string (> 0).",
   },
   price: {
     type: "string",
     description:
-      "Limit price as a string. Required for limit orders, ignored for market.",
+      "Limit price as a positive decimal string (> 0). Required for limit " +
+      "orders, ignored for market.",
   },
   time_in_force: {
     type: "string",
@@ -571,13 +596,18 @@ export const tools: ToolDef[] = [
         orders: {
           type: "array",
           minItems: 1,
-          description: "Orders to submit. Each uses the place_order arg shape.",
+          maxItems: MAX_BATCH_ORDERS,
+          description: `Orders to submit (1–${MAX_BATCH_ORDERS}). Each uses the place_order arg shape.`,
           items: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
         },
       },
       ["orders"],
     ),
-    zod: z.object({ orders: z.array(friendlyOrderSchema).min(1) }).strict(),
+    zod: z
+      .object({
+        orders: z.array(friendlyOrderSchema).min(1).max(MAX_BATCH_ORDERS),
+      })
+      .strict(),
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { orders: FriendlyOrder[] };

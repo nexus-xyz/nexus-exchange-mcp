@@ -346,6 +346,71 @@ test("place_orders_batch rejects an empty list and limit orders missing price", 
   );
 });
 
+test("order schema rejects non-positive / non-decimal size", () => {
+  const tool = findTool("place_order")!;
+  const base = {
+    market_id: "BTC-USDX-PERP",
+    side: "buy",
+    type: "market",
+  } as const;
+  // "0", negative, and non-numeric sizes are all rejected.
+  for (const size of ["0", "0.0", "-1", "-0.5", "abc", "1e3", ""]) {
+    assert.equal(
+      tool.zod.safeParse({ ...base, size }).success,
+      false,
+      `size ${JSON.stringify(size)} should be rejected`,
+    );
+  }
+  // Valid positive decimals are accepted.
+  for (const size of ["1", "0.5", "100", "0.0001"]) {
+    assert.equal(
+      tool.zod.safeParse({ ...base, size }).success,
+      true,
+      `size ${JSON.stringify(size)} should be accepted`,
+    );
+  }
+});
+
+test("order schema rejects non-positive / non-decimal price", () => {
+  const tool = findTool("place_order")!;
+  const base = {
+    market_id: "BTC-USDX-PERP",
+    side: "buy",
+    type: "limit",
+    size: "1",
+  } as const;
+  for (const price of ["0", "-5", "abc"]) {
+    assert.equal(
+      tool.zod.safeParse({ ...base, price }).success,
+      false,
+      `price ${JSON.stringify(price)} should be rejected`,
+    );
+  }
+  assert.equal(tool.zod.safeParse({ ...base, price: "60000" }).success, true);
+});
+
+test("place_orders_batch enforces the max-length bound", () => {
+  const tool = findTool("place_orders_batch")!;
+  const order = {
+    market_id: "BTC-USDX-PERP",
+    side: "buy",
+    type: "market",
+    size: "1",
+  };
+  // 100 orders is the documented cap (MAX_BATCH_ORDERS) — accepted.
+  assert.equal(
+    tool.zod.safeParse({ orders: Array(100).fill(order) }).success,
+    true,
+  );
+  // 101 orders exceeds the cap — rejected.
+  assert.equal(
+    tool.zod.safeParse({ orders: Array(101).fill(order) }).success,
+    false,
+  );
+  // The advertised JSON Schema mirrors the bound.
+  assert.equal((tool.inputSchema as any).properties.orders.maxItems, 100);
+});
+
 test("pending tools return an honest not-yet-available message", async () => {
   const client = new ExchangeClient({ baseUrl: "http://example.test" });
   const deposit = (await findTool("get_deposit_target")!.handler(

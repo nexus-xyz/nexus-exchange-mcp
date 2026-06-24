@@ -34,6 +34,109 @@ function jsonSchema(
   };
 }
 
+/**
+ * Maximum number of orders accepted in a single `place_orders_batch` call.
+ * The gateway does not document a batch cap in this repo, so this is a
+ * defensive client-side bound to prevent accidental flood submissions
+ * (e.g. an agent looping). 100 is a generous ceiling for interactive use;
+ * raise it to match the API's documented limit once that is published.
+ */
+const MAX_BATCH_ORDERS = 100;
+
+/**
+ * Positive-decimal string: one or more digits, optional fractional part, and
+ * strictly greater than zero. Rejects `"0"`, `"0.0"`, negatives, and anything
+ * non-numeric. Used for order `size`/`price`, which are carried as strings to
+ * preserve precision.
+ */
+const positiveDecimal = (field: string) =>
+  z
+    .string()
+    .regex(/^\d+(\.\d+)?$/, `${field} must be a positive decimal string`)
+    .refine((v) => Number(v) > 0, {
+      message: `${field} must be greater than 0`,
+    });
+
+/** Friendly order args accepted by `place_order` / `place_orders_batch`. */
+interface FriendlyOrder {
+  market_id: string;
+  side: "buy" | "sell";
+  type: "limit" | "market";
+  size: string;
+  price?: string;
+  time_in_force?: "GTC" | "IOC" | "FOK";
+  reduce_only?: boolean;
+}
+
+/** Zod schema for one friendly order (shared by single + batch tools). */
+const friendlyOrderSchema = z
+  .object({
+    market_id: z.string().min(1),
+    side: z.enum(["buy", "sell"]),
+    type: z.enum(["limit", "market"]),
+    size: positiveDecimal("size"),
+    price: positiveDecimal("price").optional(),
+    time_in_force: z.enum(["GTC", "IOC", "FOK"]).optional(),
+    reduce_only: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => v.type !== "limit" || v.price !== undefined, {
+    message: "price is required for limit orders",
+    path: ["price"],
+  });
+
+/** JSON Schema properties for one friendly order (shared by single + batch). */
+const orderProps: Record<string, unknown> = {
+  market_id: {
+    type: "string",
+    description: 'Market id, e.g. "BTC-USDX-PERP".',
+  },
+  side: { type: "string", enum: ["buy", "sell"], description: "Order side." },
+  type: {
+    type: "string",
+    enum: ["limit", "market"],
+    description: "Order type.",
+  },
+  size: {
+    type: "string",
+    description:
+      "Order quantity in base units, as a positive decimal string (> 0).",
+  },
+  price: {
+    type: "string",
+    description:
+      "Limit price as a positive decimal string (> 0). Required for limit " +
+      "orders, ignored for market.",
+  },
+  time_in_force: {
+    type: "string",
+    enum: ["GTC", "IOC", "FOK"],
+    description: "Time in force. Defaults to GTC for limit, IOC for market.",
+  },
+  reduce_only: {
+    type: "boolean",
+    description: "If true, only reduces an existing position.",
+  },
+};
+
+/**
+ * Map one friendly order to the engine wire shape (bots/src/client.rs
+ * OrderRequest): capitalized side, order_type, quantity, optional price,
+ * time_in_force.
+ */
+function toWireOrder(a: FriendlyOrder): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    market_id: a.market_id,
+    side: a.side === "buy" ? "Buy" : "Sell",
+    order_type: a.type === "limit" ? "Limit" : "Market",
+    quantity: a.size,
+    time_in_force: a.time_in_force ?? (a.type === "limit" ? "GTC" : "IOC"),
+  };
+  if (a.type === "limit") body.price = a.price;
+  if (a.reduce_only) body.reduce_only = true;
+  return body;
+}
+
 const PENDING = (capability: string) => ({
   status: "not_yet_available",
   capability,
@@ -101,6 +204,190 @@ export const tools: ToolDef[] = [
     },
   },
 
+  {
+    name: "list_market_specs",
+    description:
+      "List all markets with their static specs (tick size, lot size, leverage, " +
+      "contract details) — the raw market definitions without live summary " +
+      "stats. Public — no credentials needed. (Use `list_markets` for live " +
+      "mark price / volume / funding.)",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ path: "/markets" }),
+  },
+  {
+    name: "get_tickers",
+    description:
+      "Get tickers (last price, bid/ask, 24h stats) for ALL markets in one " +
+      "call. Public — no credentials needed.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ path: "/tickers" }),
+  },
+  {
+    name: "get_mark_price",
+    description:
+      "Get the current mark price for one market. Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z.object({ market_id: z.string().min(1) }).strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const { market_id } = args as { market_id: string };
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/mark-price`,
+      });
+    },
+  },
+  {
+    name: "get_market_status",
+    description:
+      "Get a market's trading status and halt info (whether trading is open, " +
+      "halted, or in auction). Public — no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z.object({ market_id: z.string().min(1) }).strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const { market_id } = args as { market_id: string };
+      return client.request({
+        path: `/markets/${encodeURIComponent(market_id)}/status`,
+      });
+    },
+  },
+  {
+    name: "get_trades",
+    description:
+      "Get recent public trades (prints) for one market. Public — no " +
+      "credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum number of trades to return.",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as { market_id: string; limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/trades`,
+        query,
+      });
+    },
+  },
+  {
+    name: "get_candles",
+    description:
+      "Get OHLCV candles for one market. Public — no credentials needed. " +
+      "Timeframe is one of 1s, 1m, 5m, 1h (default 1m).",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        timeframe: {
+          type: "string",
+          enum: ["1s", "1m", "5m", "1h"],
+          description: "Candle interval. Defaults to 1m.",
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum number of candles to return (max 1000).",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        timeframe: z.enum(["1s", "1m", "5m", "1h"]).optional(),
+        limit: z.number().int().positive().max(1000).optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as {
+        market_id: string;
+        timeframe?: string;
+        limit?: number;
+      };
+      const params = new URLSearchParams();
+      if (a.timeframe) params.set("timeframe", a.timeframe);
+      if (a.limit !== undefined) params.set("limit", String(a.limit));
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/candles`,
+        query: params.toString(),
+      });
+    },
+  },
+  {
+    name: "get_funding_history",
+    description:
+      "Get the funding-rate history for one perpetual market. Public — no " +
+      "credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum number of funding records to return.",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as { market_id: string; limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: `/markets/${encodeURIComponent(a.market_id)}/funding`,
+        query,
+      });
+    },
+  },
+
   // ── Public demo account (no credentials) ──────────────────────────────────
   // The indexer exposes a read-only demo namespace bound to a live bot
   // account (api.ts: indexer.demoAccount/demoPositions/demoOrders). Lets the
@@ -164,6 +451,118 @@ export const tools: ToolDef[] = [
     requiresAuth: true,
     handler: (client) => client.request({ path: "/orders", signed: true }),
   },
+  {
+    name: "get_order",
+    description:
+      "Get a single order by its id (status, fills, remaining size). Requires " +
+      "API credentials.",
+    inputSchema: jsonSchema(
+      {
+        order_id: {
+          type: "string",
+          description: "Order id to look up.",
+        },
+      },
+      ["order_id"],
+    ),
+    zod: z.object({ order_id: z.string().min(1) }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { order_id } = args as { order_id: string };
+      return client.request({
+        path: `/orders/${encodeURIComponent(order_id)}`,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "get_fills",
+    description:
+      "List the authenticated account's recent fills (executed trades). " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of fills to return.",
+      },
+    }),
+    zod: z.object({ limit: z.number().int().positive().optional() }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({ path: "/fills", query, signed: true });
+    },
+  },
+  {
+    name: "get_withdrawals",
+    description:
+      "List the authenticated account's withdrawal history. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return.",
+      },
+    }),
+    zod: z.object({ limit: z.number().int().positive().optional() }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({ path: "/withdrawals", query, signed: true });
+    },
+  },
+  {
+    name: "get_rate_limit_status",
+    description:
+      "Get the authenticated account's current rate-limit status (remaining " +
+      "request budget). Useful for an agent to pace itself. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/account/rate-limit", signed: true }),
+  },
+  {
+    name: "get_adl_history",
+    description:
+      "Get the auto-deleveraging (ADL) events that touched a given account. " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        address: {
+          type: "string",
+          description: "Account address (0x-prefixed hex).",
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum number of records to return.",
+        },
+      },
+      ["address"],
+    ),
+    zod: z
+      .object({
+        address: z.string().min(1),
+        limit: z.number().int().positive().optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { address: string; limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: `/account/${encodeURIComponent(a.address)}/adl-history`,
+        query,
+        signed: true,
+      });
+    },
+  },
 
   // ── Trade actions (require credentials) ───────────────────────────────────
   {
@@ -172,84 +571,51 @@ export const tools: ToolDef[] = [
       "Place an order on a market. Supports limit and market orders, buy/sell. " +
       "For limit orders a `price` is required. Requires API credentials. This " +
       "submits a REAL order to the matching engine.",
-    inputSchema: jsonSchema(
-      {
-        market_id: {
-          type: "string",
-          description: 'Market id, e.g. "BTC-USDX-PERP".',
-        },
-        side: {
-          type: "string",
-          enum: ["buy", "sell"],
-          description: "Order side.",
-        },
-        type: {
-          type: "string",
-          enum: ["limit", "market"],
-          description: "Order type.",
-        },
-        size: {
-          type: "string",
-          description: "Order quantity in base units, as a string.",
-        },
-        price: {
-          type: "string",
-          description:
-            "Limit price as a string. Required for limit orders, ignored for market.",
-        },
-        time_in_force: {
-          type: "string",
-          enum: ["GTC", "IOC", "FOK"],
-          description:
-            "Time in force. Defaults to GTC for limit, IOC for market.",
-        },
-        reduce_only: {
-          type: "boolean",
-          description: "If true, only reduces an existing position.",
-        },
-      },
-      ["market_id", "side", "type", "size"],
-    ),
-    zod: z
-      .object({
-        market_id: z.string().min(1),
-        side: z.enum(["buy", "sell"]),
-        type: z.enum(["limit", "market"]),
-        size: z.string().min(1),
-        price: z.string().optional(),
-        time_in_force: z.enum(["GTC", "IOC", "FOK"]).optional(),
-        reduce_only: z.boolean().optional(),
-      })
-      .strict()
-      .refine((v) => v.type !== "limit" || (v.price && v.price.length > 0), {
-        message: "price is required for limit orders",
-        path: ["price"],
-      }),
+    inputSchema: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
+    zod: friendlyOrderSchema,
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as {
-        market_id: string;
-        side: "buy" | "sell";
-        type: "limit" | "market";
-        size: string;
-        price?: string;
-        time_in_force?: "GTC" | "IOC" | "FOK";
-        reduce_only?: boolean;
-      };
-      // Engine wire shape (bots/src/client.rs OrderRequest): capitalized side,
-      // order_type, quantity, optional price, time_in_force.
-      const body: Record<string, unknown> = {
-        market_id: a.market_id,
-        side: a.side === "buy" ? "Buy" : "Sell",
-        order_type: a.type === "limit" ? "Limit" : "Market",
-        quantity: a.size,
-        time_in_force: a.time_in_force ?? (a.type === "limit" ? "GTC" : "IOC"),
-      };
-      if (a.type === "limit") body.price = a.price;
-      if (a.reduce_only) body.reduce_only = true;
+      const body = toWireOrder(args as FriendlyOrder);
       return client.request({
         method: "POST",
         path: "/orders",
+        body,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "place_orders_batch",
+    description:
+      "Submit multiple orders in one request. Each order has the same shape as " +
+      "`place_order` (market_id, side, type, size, optional price/" +
+      "time_in_force/reduce_only). Requires API credentials. This submits REAL " +
+      "orders to the matching engine.",
+    inputSchema: jsonSchema(
+      {
+        orders: {
+          type: "array",
+          minItems: 1,
+          maxItems: MAX_BATCH_ORDERS,
+          description: `Orders to submit (1–${MAX_BATCH_ORDERS}). Each uses the place_order arg shape.`,
+          items: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
+        },
+      },
+      ["orders"],
+    ),
+    zod: z
+      .object({
+        orders: z.array(friendlyOrderSchema).min(1).max(MAX_BATCH_ORDERS),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { orders: FriendlyOrder[] };
+      // Spec /orders/batch takes a bare JSON array of OrderRequest.
+      const body = a.orders.map(toWireOrder);
+      return client.request({
+        method: "POST",
+        path: "/orders/batch",
         body,
         signed: true,
       });
@@ -317,6 +683,21 @@ export const tools: ToolDef[] = [
         signed: true,
       });
     },
+  },
+
+  // ── WebSocket access (requires credentials) ───────────────────────────────
+  {
+    name: "get_ws_token",
+    description:
+      "Mint a short-lived token for opening an authenticated per-account " +
+      "WebSocket stream (order/fill/position updates). Returns the token; the " +
+      "caller connects to the exchange WS endpoint with it. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ method: "POST", path: "/ws-tokens", signed: true }),
   },
 
   // ── Capabilities pending sibling issues (honest, not faked) ───────────────

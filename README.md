@@ -190,11 +190,53 @@ to the `env` block and set `NEXUS_EXCHANGE_API_URL` to a direct gateway.
 3. Ask: "What's in the demo account and its open positions?" — Claude calls
    `get_demo_account` and `get_demo_positions` against the live exchange.
 
-## Productionization path
+## Hosted HTTP server (remote MCP)
 
-stdio is used here because it is the simplest transport to demo. The
-production target is a hosted Streamable HTTP MCP server with OAuth, so each
-agent authenticates per-user instead of sharing one API key from env.
+The stdio server above runs locally and holds your API key on your machine. The
+hosted **Streamable HTTP** server is the remote front door: it lets a trader
+add Nexus as a remote MCP server without running any key-holding software
+locally.
+
+```bash
+npm run build
+npm run start:http   # listens on :8080, MCP endpoint at /mcp, probe at /healthz
+```
+
+Behind a TLS-terminating ingress this is the public endpoint
+`https://mcp.exchange.nexus.xyz/mcp`. A client adds it with:
+
+```bash
+claude mcp add --transport http nexus https://mcp.exchange.nexus.xyz/mcp
+```
+
+It exposes the **same tool surface** as the stdio server — both transports
+register the identical `ToolDef[]` from `src/tools/` via
+`createServerForClient` in `src/server.ts`, so the tools never drift. The
+transport is the SDK's `StreamableHTTPServerTransport` in stateful mode (one
+MCP session per `mcp-session-id`), which also serves the SSE fallback stream
+for server→client messages. Hosted traffic is tagged with a distinct
+`User-Agent` (`nexus-exchange-mcp-http/...`) so usage attributes to "MCP" in
+the dashboard.
+
+### Authentication (MVP — no OAuth yet)
+
+> **OAuth 2.1 is out of scope for this MVP** (tracked under the hardening work,
+> ENG-3598, and scoped-key minting, ENG-3486). Until that lands, the hosted
+> server takes the caller's existing Exchange HMAC credential as request
+> headers, captured once at session initialize and reused for the session:
+>
+> ```text
+> X-Nexus-Api-Key:    <hmac key id>
+> X-Nexus-Api-Secret: <hmac secret, hex>
+> ```
+>
+> These are deliberately **not** named `x-api-key` / `x-signature` (the
+> upstream gateway's own headers) to avoid confusion. With no credential
+> headers a session still serves public market-data tools and falls back to any
+> server-env credentials. **Open question for review:** header passthrough is
+> the simplest defensible MVP, but the long-term answer is OAuth-minted scoped
+> (trade-not-withdraw) keys so the caller never hands us a raw secret — see
+> ENG-3598 / ENG-3486.
 
 ## Development
 

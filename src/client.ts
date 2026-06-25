@@ -13,6 +13,7 @@
 
 import { createHash, createHmac } from "node:crypto";
 import {
+  DEFAULT_USER_AGENT,
   hasAdminSecret,
   hasCredentials,
   hasSessionToken,
@@ -132,6 +133,15 @@ interface RequestOptions {
 export class ExchangeClient {
   constructor(private readonly cfg: ExchangeConfig) {}
 
+  /**
+   * Whether the admin tier-management tools should be registered for this
+   * client (mirrors `ExchangeConfig.enableAdminTools`). Off by default so a
+   * general trading agent never sees the operator-only tools.
+   */
+  enableAdminTools(): boolean {
+    return this.cfg.enableAdminTools;
+  }
+
   hasCredentials(): boolean {
     return hasCredentials(this.cfg);
   }
@@ -177,7 +187,11 @@ export class ExchangeClient {
         ? Buffer.alloc(0)
         : Buffer.from(JSON.stringify(opts.body), "utf8");
 
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      // Identifies the calling surface (stdio CLI vs. hosted MCP) so usage can
+      // be attributed in the exchange dashboard.
+      "user-agent": this.cfg.userAgent ?? DEFAULT_USER_AGENT,
+    };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
     // `signed: true` is shorthand for HMAC; `auth` selects a non-HMAC mode.

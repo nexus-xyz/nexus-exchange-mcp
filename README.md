@@ -32,6 +32,7 @@ read from environment variables.
 | `get_open_orders`       | ✅ Live (needs key + direct gateway)            | `GET /orders`                     |
 | `get_order`             | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}`                |
 | `get_fills`             | ✅ Live (needs key + direct gateway)            | `GET /fills`                      |
+| `get_funding_payments`  | ✅ Live (needs key + direct gateway)            | `GET /funding-payments`           |
 | `get_withdrawals`       | ✅ Live (needs key + direct gateway)            | `GET /withdrawals`                |
 | `get_rate_limit_status` | ✅ Live (needs key + direct gateway)            | `GET /account/rate-limit`         |
 | `get_adl_history`       | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history` |

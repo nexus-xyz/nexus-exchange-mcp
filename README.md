@@ -4,45 +4,91 @@ An [MCP](https://modelcontextprotocol.io) server that exposes the Nexus
 Exchange API as tools an AI agent (Claude Desktop / Claude Code) can call to
 read market data and place trades.
 
-It talks to the real, public exchange gateway. Market-data and demo tools work
-with zero configuration; account and trading tools use HMAC API credentials
-read from environment variables.
+It talks to the real, public exchange. Market-data and demo tools work with
+zero configuration; account and trading tools use HMAC API credentials read
+from environment variables.
+
+> [!WARNING]
+> **Depends on an unmerged spec PR — do not deploy against production yet.**
+> This server now targets the direct-indexer `/api/v1` surface (parent
+> **ENG-4740**), defined by
+> [`nexus-xyz/nexus-exchange-api#41`](https://github.com/nexus-xyz/nexus-exchange-api/pull/41)
+> (**ENG-4943**), which is **NOT MERGED**. Its release-please tag (`v0.6.1`,
+> pinned in `.api-version`) does not exist yet, and the producer endpoints
+> (monorepo `nexus-xyz/nexus#2770` / `#2820`) are not deployed. Until then the
+> `/api/v1/*` routes will 404 in production.
+>
+> **Prerequisite:** merge `nexus-exchange-api#41` and cut `v0.6.1` first.
+> **On merge, restore to `main`:** in `.github/workflows/ci.yml` drop the
+> `SPEC_PENDING_BRANCH` transitional block (the drift gate then points back at
+> the release / `main`), and confirm `.api-version` is `v0.6.1`. See the
+> "Migration to `/api/v1`" section below.
 
 ## What works today
 
-| Tool                    | Status                                            | Endpoint                          |
-| ----------------------- | ------------------------------------------------- | --------------------------------- |
-| `list_markets`          | ✅ Live (public)                                  | `GET /markets/summary`            |
-| `list_market_specs`     | ✅ Live (public)                                  | `GET /markets`                    |
-| `get_ticker`            | ✅ Live (public)                                  | `GET /markets/{id}/ticker`        |
-| `get_tickers`           | ✅ Live (public)                                  | `GET /tickers`                    |
-| `get_orderbook`         | ✅ Live (public)                                  | `GET /markets/{id}/orderbook`     |
-| `get_mark_price`        | ✅ Live (public)                                  | `GET /markets/{id}/mark-price`    |
-| `get_market_status`     | ✅ Live (public)                                  | `GET /markets/{id}/status`        |
-| `get_trades`            | ✅ Live (public)                                  | `GET /markets/{id}/trades`        |
-| `get_candles`           | ✅ Live (public)                                  | `GET /markets/{id}/candles`       |
-| `get_funding_history`   | ✅ Live (public)                                  | `GET /markets/{id}/funding`       |
-| `get_demo_account`      | ✅ Live (public)                                  | `GET /demo/account`               |
-| `get_demo_positions`    | ✅ Live (public)                                  | `GET /demo/positions`             |
-| `get_demo_orders`       | ✅ Live (public)                                  | `GET /demo/orders`                |
-| `get_balance`           | ✅ Live (needs key + direct gateway)              | `GET /account`                    |
-| `get_positions`         | ✅ Live (needs key + direct gateway)              | `GET /positions`                  |
-| `get_open_orders`       | ✅ Live (needs key + direct gateway)              | `GET /orders`                     |
-| `get_order`             | ✅ Live (needs key + direct gateway)              | `GET /orders/{id}`                |
-| `get_fills`             | ✅ Live (needs key + direct gateway)              | `GET /fills`                      |
-| `get_withdrawals`       | ✅ Live (needs key + direct gateway)              | `GET /withdrawals`                |
-| `get_rate_limit_status` | ✅ Live (needs key + direct gateway)              | `GET /account/rate-limit`         |
-| `get_adl_history`       | ✅ Live (needs key + direct gateway)              | `GET /account/{addr}/adl-history` |
-| `get_ws_token`          | ✅ Live (needs key + direct gateway)              | `POST /ws-tokens`                 |
-| `place_order`           | ✅ Live (needs key + direct gateway)              | `POST /orders`                    |
-| `place_orders_batch`    | ✅ Live (needs key + direct gateway)              | `POST /orders/batch`              |
-| `cancel_order`          | ✅ Live (needs key + direct gateway)              | `DELETE /orders[/{id}]`           |
-| `get_deposit_target`    | 🚧 Pending — server-side endpoint not built yet   | none yet                          |
-| `register_agent`        | 🚧 Pending — server-side capability not built yet | none yet                          |
+Most tools now hit the direct-indexer **`/api/v1`** surface (served at the host
+root). The routes that were **not** migrated in `nexus-exchange-api#41` stay on
+the **legacy `/api/exchange`** gateway, which remains live dual-stack
+(ENG-4751), so nothing breaks.
+
+| Tool                    | Status                                            | Endpoint (surface)                         |
+| ----------------------- | ------------------------------------------------- | ------------------------------------------ |
+| `list_markets`          | ✅ Live (public)                                  | `GET /api/v1/markets/summary`              |
+| `list_market_specs`     | ✅ Live (public)                                  | `GET /markets` (legacy — no v1 route)      |
+| `get_ticker`            | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/ticker`          |
+| `get_tickers`           | ✅ Live (public)                                  | `GET /api/v1/tickers`                      |
+| `get_orderbook`         | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/orderbook`       |
+| `get_mark_price`        | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/mark-price`      |
+| `get_market_status`     | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/status`          |
+| `get_trades`            | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/trades`          |
+| `get_candles`           | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/candles`         |
+| `get_funding_history`   | ✅ Live (public)                                  | `GET /api/v1/markets/{id}/funding`         |
+| `get_demo_account`      | ✅ Live (public)                                  | `GET /demo/account` (legacy — no v1)       |
+| `get_demo_positions`    | ✅ Live (public)                                  | `GET /demo/positions` (legacy — no v1)     |
+| `get_demo_orders`       | ✅ Live (public)                                  | `GET /demo/orders` (legacy — no v1)        |
+| `get_balance`           | ✅ Live (needs key + direct gateway)              | `GET /api/v1/account`                      |
+| `get_positions`         | ✅ Live (needs key + direct gateway)              | `GET /api/v1/positions`                    |
+| `get_open_orders`       | ✅ Live (needs key + direct gateway)              | `GET /api/v1/orders`                       |
+| `get_order`             | ✅ Live (needs key + direct gateway)              | `GET /orders/{id}` (legacy — no v1)        |
+| `get_fills`             | ✅ Live (needs key + direct gateway)              | `GET /api/v1/fills`                        |
+| `get_withdrawals`       | ✅ Live (needs key + direct gateway)              | `GET /withdrawals` (legacy — no v1)        |
+| `get_rate_limit_status` | ✅ Live (needs key + direct gateway)              | `GET /api/v1/account/rate-limit`           |
+| `get_adl_history`       | ✅ Live (needs key + direct gateway)              | `GET /account/{addr}/adl-history` (legacy) |
+| `get_ws_token`          | ✅ Live (needs key + direct gateway)              | `POST /ws-tokens` (legacy — no v1)         |
+| `place_order`           | ✅ Live (needs key + direct gateway)              | `POST /api/v1/orders`                      |
+| `place_orders_batch`    | ✅ Live (needs key + direct gateway)              | `POST /api/v1/orders/batch`                |
+| `cancel_order`          | ✅ Live (needs key + direct gateway)              | `DELETE /api/v1/orders[/{id}]`             |
+| `get_deposit_target`    | 🚧 Pending — server-side endpoint not built yet   | none yet                                   |
+| `register_agent`        | 🚧 Pending — server-side capability not built yet | none yet                                   |
 
 The two pending tools are wired into the agent flow but return a clear
 `not_yet_available` message rather than faking a result. They light up when the
 server-side capability ships.
+
+## Migration to `/api/v1`
+
+Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
+service exposes its own REST API, and the indexer now serves the exchange
+surface directly under `/api/v1` at the host root. This server was updated
+(**ENG-4948**) to call those routes.
+
+- **Base URL is now the host root** (`https://exchange.nexus.xyz`), not the
+  `…/api/exchange` gateway path. `/api/v1/*` resolves at the root; the few
+  legacy-only routes append `/api/exchange`. A legacy `NEXUS_EXCHANGE_API_URL`
+  that still ends in `/api/exchange` is accepted and normalized.
+- **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
+  v1 routes, the bare route (e.g. `/orders`) for legacy ones.
+- **`cancel_order` now requires `market_id`** when cancelling a single order
+  (v1 marks it required); `market_id` is optional with `cancel_all` to scope a
+  mass-cancel to one market.
+- **Not migrated (stay legacy):** `list_market_specs`, `get_order` (v1 mounts
+  only edit/cancel on `/orders/{id}`), `get_withdrawals`, `get_adl_history`,
+  `get_ws_token`, and the `demo/*` reads — these were excluded from
+  `nexus-exchange-api#41` and still hit the dual-stack gateway.
+
+**Spec pin (`.api-version`) is transitional** at `v0.6.1` until the blocker PR
+merges and release-please cuts that tag — see the warning at the top for the
+exact revert steps.
 
 ## Quick start
 
@@ -67,11 +113,11 @@ Expected output ends with `list_markets OK -> N markets`.
 Copy `.env.example` and set as needed. Only trading/account tools need
 credentials — never commit real secrets.
 
-| Variable                    | Required                | Purpose                                                              |
-| --------------------------- | ----------------------- | -------------------------------------------------------------------- |
-| `NEXUS_EXCHANGE_API_URL`    | No                      | API base URL. Defaults to `https://exchange.nexus.xyz/api/exchange`. |
-| `NEXUS_EXCHANGE_API_KEY`    | For account/trade tools | HMAC API key id (`x-api-key`).                                       |
-| `NEXUS_EXCHANGE_API_SECRET` | For account/trade tools | HMAC secret (hex).                                                   |
+| Variable                    | Required                | Purpose                                                                 |
+| --------------------------- | ----------------------- | ----------------------------------------------------------------------- |
+| `NEXUS_EXCHANGE_API_URL`    | No                      | API base URL — the host root. Defaults to `https://exchange.nexus.xyz`. |
+| `NEXUS_EXCHANGE_API_KEY`    | For account/trade tools | HMAC API key id (`x-api-key`).                                          |
+| `NEXUS_EXCHANGE_API_SECRET` | For account/trade tools | HMAC secret (hex).                                                      |
 
 ## Authentication
 
@@ -83,15 +129,19 @@ Signed requests use the same canonical HMAC-SHA256 scheme the indexer verifies
 ```
 
 signed with the hex-decoded secret and sent as `x-signature` alongside
-`x-api-key` and `x-timestamp`.
+`x-api-key` and `x-timestamp`. The signature covers the **full path** the
+server verifies — `/api/v1/orders` for the direct v1 surface, the bare route
+(e.g. `/orders`) for legacy routes.
 
-Important: the default public base URL (`/api/exchange`) is a proxy that signs
-with the site's own frontend key, so it does not honor per-caller HMAC headers —
-authenticated tools through it resolve to the site account, not yours. To trade
-as a specific account, point `NEXUS_EXCHANGE_API_URL` at a direct indexer
-gateway that verifies client HMAC (for example a local `http://localhost:9090`
-from the exchange `docker-compose`). Until then, use the public `get_demo_*`
-tools to demo the account flow with no secrets.
+Important: the legacy `/api/exchange` gateway is a proxy that signs with the
+site's own frontend key, so it does not honor per-caller HMAC headers —
+authenticated tools that still resolve through it (see the legacy rows in the
+table) act as the site account, not yours. The direct `/api/v1` surface
+verifies client HMAC. To trade as a specific account, point
+`NEXUS_EXCHANGE_API_URL` at a direct indexer gateway (for example a local
+`http://localhost:9090` from the exchange `docker-compose`). Until credentials
+are wired up, use the public `get_demo_*` tools to demo the account flow with
+no secrets.
 
 ## Claude Desktop config
 
@@ -106,7 +156,7 @@ adjusting the absolute path to this package's `dist/index.js`:
       "command": "node",
       "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
       "env": {
-        "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz/api/exchange"
+        "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz"
       }
     }
   }

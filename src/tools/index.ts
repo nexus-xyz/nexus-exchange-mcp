@@ -155,7 +155,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/markets/summary" }),
+    handler: (client) => client.request({ path: "/api/v1/markets/summary" }),
   },
   {
     name: "get_ticker",
@@ -176,7 +176,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/ticker`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/ticker`,
       });
     },
   },
@@ -199,7 +199,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/orderbook`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/orderbook`,
       });
     },
   },
@@ -214,7 +214,10 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/markets" }),
+    // No /api/v1 equivalent (nexus-exchange-api#41 migrated /markets/summary
+    // but not the bare /markets spec list); served by the legacy gateway.
+    handler: (client) =>
+      client.request({ path: "/markets", surface: "gateway" }),
   },
   {
     name: "get_tickers",
@@ -224,7 +227,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/tickers" }),
+    handler: (client) => client.request({ path: "/api/v1/tickers" }),
   },
   {
     name: "get_mark_price",
@@ -244,7 +247,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/mark-price`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/mark-price`,
       });
     },
   },
@@ -267,7 +270,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/status`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/status`,
       });
     },
   },
@@ -301,7 +304,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/trades`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/trades`,
         query,
       });
     },
@@ -347,7 +350,7 @@ export const tools: ToolDef[] = [
       if (a.timeframe) params.set("timeframe", a.timeframe);
       if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/candles`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/candles`,
         query: params.toString(),
       });
     },
@@ -382,7 +385,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/funding`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/funding`,
         query,
       });
     },
@@ -392,6 +395,8 @@ export const tools: ToolDef[] = [
   // The indexer exposes a read-only demo namespace bound to a live bot
   // account (api.ts: indexer.demoAccount/demoPositions/demoOrders). Lets the
   // demo show real balances/positions/orders with zero secrets.
+  // No /api/v1 equivalent (the demo namespace was not migrated in
+  // nexus-exchange-api#41); served by the legacy gateway.
   {
     name: "get_demo_account",
     description:
@@ -401,7 +406,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/account" }),
+    handler: (client) =>
+      client.request({ path: "/demo/account", surface: "gateway" }),
   },
   {
     name: "get_demo_positions",
@@ -410,7 +416,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/positions" }),
+    handler: (client) =>
+      client.request({ path: "/demo/positions", surface: "gateway" }),
   },
   {
     name: "get_demo_orders",
@@ -419,7 +426,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/orders" }),
+    handler: (client) =>
+      client.request({ path: "/demo/orders", surface: "gateway" }),
   },
 
   // ── Account reads (require credentials) ───────────────────────────────────
@@ -431,7 +439,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/account", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/account", signed: true }),
   },
   {
     name: "get_positions",
@@ -440,7 +449,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/positions", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/positions", signed: true }),
   },
   {
     name: "get_open_orders",
@@ -449,13 +459,15 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/orders", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/orders", signed: true }),
   },
   {
     name: "get_order",
     description:
       "Get a single order by its id (status, fills, remaining size). Requires " +
-      "API credentials.",
+      "API credentials. Note: GET-by-id is not on /api/v1 yet (only edit/" +
+      "cancel are) — use `get_open_orders` for resting orders.",
     inputSchema: jsonSchema(
       {
         order_id: {
@@ -467,11 +479,14 @@ export const tools: ToolDef[] = [
     ),
     zod: z.object({ order_id: z.string().min(1) }).strict(),
     requiresAuth: true,
+    // No /api/v1 equivalent: nexus-exchange-api#41 mounts only PATCH + DELETE
+    // on /api/v1/orders/{order_id}; GET-by-id stays on the legacy gateway.
     handler: (client, args) => {
       const { order_id } = args as { order_id: string };
       return client.request({
         path: `/orders/${encodeURIComponent(order_id)}`,
         signed: true,
+        surface: "gateway",
       });
     },
   },
@@ -492,7 +507,7 @@ export const tools: ToolDef[] = [
       const a = args as { limit?: number };
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({ path: "/fills", query, signed: true });
+      return client.request({ path: "/api/v1/fills", query, signed: true });
     },
   },
   {
@@ -508,11 +523,17 @@ export const tools: ToolDef[] = [
     }),
     zod: z.object({ limit: z.number().int().positive().optional() }).strict(),
     requiresAuth: true,
+    // No /api/v1 equivalent (not in nexus-exchange-api#41); legacy gateway.
     handler: (client, args) => {
       const a = args as { limit?: number };
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({ path: "/withdrawals", query, signed: true });
+      return client.request({
+        path: "/withdrawals",
+        query,
+        signed: true,
+        surface: "gateway",
+      });
     },
   },
   {
@@ -525,7 +546,7 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/account/rate-limit", signed: true }),
+      client.request({ path: "/api/v1/account/rate-limit", signed: true }),
   },
   {
     name: "get_adl_history",
@@ -552,6 +573,7 @@ export const tools: ToolDef[] = [
       })
       .strict(),
     requiresAuth: true,
+    // No /api/v1 equivalent (not in nexus-exchange-api#41); legacy gateway.
     handler: (client, args) => {
       const a = args as { address: string; limit?: number };
       const query =
@@ -560,6 +582,7 @@ export const tools: ToolDef[] = [
         path: `/account/${encodeURIComponent(a.address)}/adl-history`,
         query,
         signed: true,
+        surface: "gateway",
       });
     },
   },
@@ -578,7 +601,7 @@ export const tools: ToolDef[] = [
       const body = toWireOrder(args as FriendlyOrder);
       return client.request({
         method: "POST",
-        path: "/orders",
+        path: "/api/v1/orders",
         body,
         signed: true,
       });
@@ -615,7 +638,7 @@ export const tools: ToolDef[] = [
       const body = a.orders.map(toWireOrder);
       return client.request({
         method: "POST",
-        path: "/orders/batch",
+        path: "/api/v1/orders/batch",
         body,
         signed: true,
       });
@@ -624,10 +647,12 @@ export const tools: ToolDef[] = [
   {
     name: "cancel_order",
     description:
-      "Cancel a resting order. Pass `order_id` to cancel one order. To cancel " +
-      "ALL open orders you must explicitly pass `cancel_all: true` — an empty " +
-      "or argless call is rejected so a stray call can't mass-cancel by " +
-      "accident. Requires API credentials.",
+      "Cancel a resting order. Pass `order_id` AND `market_id` to cancel one " +
+      "order (both are required by /api/v1). To cancel ALL open orders you " +
+      "must explicitly pass `cancel_all: true` — an empty or argless call is " +
+      "rejected so a stray call can't mass-cancel by accident; optionally pass " +
+      "`market_id` alongside `cancel_all` to scope the mass-cancel to one " +
+      "market. Requires API credentials.",
     inputSchema: jsonSchema({
       order_id: {
         type: "string",
@@ -635,7 +660,9 @@ export const tools: ToolDef[] = [
       },
       market_id: {
         type: "string",
-        description: "Market id (recommended when cancelling a single order).",
+        description:
+          "Market id. REQUIRED when cancelling a single order (order_id); " +
+          "optional with cancel_all to scope the mass-cancel to one market.",
       },
       cancel_all: {
         type: "boolean",
@@ -663,22 +690,35 @@ export const tools: ToolDef[] = [
         // empty/argless call errors instead of silently cancelling everything.
         if (!a.cancel_all) {
           throw new Error(
-            "Refusing to cancel: pass `order_id` to cancel one order, or " +
-              "`cancel_all: true` to explicitly cancel ALL open orders.",
+            "Refusing to cancel: pass `order_id` (with `market_id`) to cancel " +
+              "one order, or `cancel_all: true` to explicitly cancel ALL open " +
+              "orders.",
           );
         }
+        // /api/v1 cancel-all accepts an optional market_id to scope the sweep.
+        const query = a.market_id
+          ? `market_id=${encodeURIComponent(a.market_id)}`
+          : "";
         return client.request({
           method: "DELETE",
-          path: "/orders",
+          path: "/api/v1/orders",
+          query,
           signed: true,
         });
       }
-      const query = a.market_id
-        ? `market_id=${encodeURIComponent(a.market_id)}`
-        : "";
+      // /api/v1 cancel-by-id REQUIRES market_id (path param order_id + required
+      // market_id query). Fail fast with a clear message rather than sending a
+      // request the gateway will reject.
+      if (!a.market_id) {
+        throw new Error(
+          "cancel_order requires `market_id` when cancelling a single order " +
+            "(order_id). Pass the market the order belongs to.",
+        );
+      }
+      const query = `market_id=${encodeURIComponent(a.market_id)}`;
       return client.request({
         method: "DELETE",
-        path: `/orders/${encodeURIComponent(a.order_id)}`,
+        path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
         query,
         signed: true,
       });
@@ -696,8 +736,14 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
+    // No /api/v1 equivalent (not in nexus-exchange-api#41); legacy gateway.
     handler: (client) =>
-      client.request({ method: "POST", path: "/ws-tokens", signed: true }),
+      client.request({
+        method: "POST",
+        path: "/ws-tokens",
+        signed: true,
+        surface: "gateway",
+      }),
   },
 
   // ── Capabilities pending sibling issues (honest, not faked) ───────────────

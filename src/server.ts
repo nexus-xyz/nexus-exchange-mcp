@@ -23,7 +23,7 @@ export function createServer(): Server {
   const client = new ExchangeClient(cfg);
 
   const server = new Server(
-    { name: "nexus-exchange-mcp", version: "0.1.0" },
+    { name: "nexus-exchange-mcp", version: "0.2.0" },
     { capabilities: { tools: {} } },
   );
 

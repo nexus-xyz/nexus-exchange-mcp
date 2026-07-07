@@ -1,12 +1,11 @@
 /**
- * Nexus Exchange MCP server (stdio transport).
+ * Nexus Exchange MCP server wiring, shared across transports.
  *
- * Exposes the exchange's market-data and trading surface as MCP tools so an
- * AI agent (Claude Desktop / Claude Code) can read markets and place trades.
- *
- * stdio is used because it is the simplest transport to demo locally. The
- * productionization path is a hosted Streamable HTTP server with OAuth, so
- * agents authenticate per-user instead of sharing one API key from env.
+ * The tool surface (`ToolDef[]` in ./tools) is registered once here and reused
+ * by every transport — stdio (src/index.ts) and the hosted Streamable HTTP
+ * server (src/http.ts) — so both expose exactly the same tools with identical
+ * argument validation and error handling. Only the transport and how the
+ * per-caller `ExchangeClient` is built differ between them.
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,21 +13,33 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { loadConfig } from "./config.js";
+import { loadConfig, type ExchangeConfig } from "./config.js";
 import { ExchangeClient } from "./client.js";
-import { findTool, tools } from "./tools/index.js";
+import { findTool, visibleTools } from "./tools/index.js";
 
-export function createServer(): Server {
-  const cfg = loadConfig();
-  const client = new ExchangeClient(cfg);
+/** Package version, surfaced in the MCP server handshake. */
+export const SERVER_VERSION = "0.1.0";
+
+/**
+ * Build an MCP `Server` whose tool handlers run against the given client.
+ *
+ * The transport (stdio or Streamable HTTP) is attached by the caller via
+ * `server.connect(transport)`. Both transports share this function, so the
+ * tool surface and behavior never drift between them.
+ */
+export function createServerForClient(client: ExchangeClient): Server {
+  // Tools advertised/callable for this client. Admin tools are hidden unless
+  // explicitly enabled, so they never reach a general trading agent.
+  const enabled = visibleTools({ enableAdminTools: client.enableAdminTools() });
+  const enabledNames = new Set(enabled.map((t) => t.name));
 
   const server = new Server(
-    { name: "nexus-exchange-mcp", version: "0.2.0" },
+    { name: "nexus-exchange-mcp", version: SERVER_VERSION },
     { capabilities: { tools: {} } },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: tools.map((t) => ({
+    tools: enabled.map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
@@ -36,7 +47,9 @@ export function createServer(): Server {
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = findTool(req.params.name);
+    const tool = enabledNames.has(req.params.name)
+      ? findTool(req.params.name)
+      : undefined;
     if (!tool) {
       return {
         isError: true,
@@ -74,4 +87,12 @@ export function createServer(): Server {
   });
 
   return server;
+}
+
+/**
+ * Build a server from environment config (the stdio entry point's path).
+ * Credentials, if any, come from the process environment.
+ */
+export function createServer(config: ExchangeConfig = loadConfig()): Server {
+  return createServerForClient(new ExchangeClient(config));
 }

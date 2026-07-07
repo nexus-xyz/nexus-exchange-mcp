@@ -12,7 +12,13 @@
  */
 
 import { createHash, createHmac } from "node:crypto";
-import { hasCredentials, type ExchangeConfig } from "./config.js";
+import {
+  DEFAULT_USER_AGENT,
+  hasAdminSecret,
+  hasCredentials,
+  hasSessionToken,
+  type ExchangeConfig,
+} from "./config.js";
 
 /**
  * Max upstream-body length forwarded into an agent-visible error. Kept tight:
@@ -75,8 +81,39 @@ export class MissingCredentialsError extends Error {
   }
 }
 
+export class MissingSessionTokenError extends Error {
+  constructor(tool: string) {
+    super(
+      `Tool "${tool}" requires a session token. Sign in with the \`login\` tool ` +
+        `(or POST /auth/login) and set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
+        `environment. See the package README.`,
+    );
+    this.name = "MissingSessionTokenError";
+  }
+}
+
+export class MissingAdminSecretError extends Error {
+  constructor(tool: string) {
+    super(
+      `Tool "${tool}" requires the admin secret. Set NEXUS_EXCHANGE_ADMIN_SECRET ` +
+        `in the environment. Admin tools are operator-only.`,
+    );
+    this.name = "MissingAdminSecretError";
+  }
+}
+
+/**
+ * How a request authenticates:
+ * - `"hmac"`   — per-account HMAC (x-api-key/x-timestamp/x-signature).
+ * - `"bearer"` — session token from /auth/login (Authorization: Bearer …),
+ *                used by the /keys management endpoints.
+ * - `"admin"`  — operator admin secret (Authorization: Bearer …), used by the
+ *                /admin endpoints.
+ */
+export type AuthMode = "hmac" | "bearer" | "admin";
+
 interface RequestOptions {
-  method?: "GET" | "POST" | "DELETE" | "PATCH";
+  method?: "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
   /**
    * Full path from the chosen base's origin, leading slash, no query.
    * For the direct v1 surface this INCLUDES the version prefix, e.g.
@@ -90,14 +127,20 @@ interface RequestOptions {
   query?: string;
   /** JSON-serializable body for writes. */
   body?: unknown;
-  /** Whether this request must be authenticated. */
+  /** Whether this request must be authenticated with per-account HMAC. */
   signed?: boolean;
   /**
+   * Non-HMAC authentication mode for endpoints that use a Bearer token instead
+   * of HMAC (`/keys` → `"bearer"`, `/admin` → `"admin"`). Mutually exclusive
+   * with `signed`. Omit for public requests.
+   */
+  auth?: AuthMode;
+  /**
    * Which base URL to hit. "v1" (default) is the direct-service host root that
-   * serves `/api/v1`; "gateway" is the legacy `/api/exchange` proxy, used only
-   * by routes without a v1 equivalent yet. Defaulting to "v1" fails safe: a
-   * route missing a v1 counterpart 404s loudly rather than silently resolving
-   * to the wrong account.
+   * serves `/api/v1`; "gateway" is the legacy `/api/exchange` proxy, used by
+   * the routes without a v1 equivalent. Defaulting to "v1" fails safe: a route
+   * missing a v1 counterpart 404s loudly rather than silently resolving to the
+   * wrong account through the public gateway proxy.
    */
   surface?: "v1" | "gateway";
 }
@@ -105,8 +148,25 @@ interface RequestOptions {
 export class ExchangeClient {
   constructor(private readonly cfg: ExchangeConfig) {}
 
+  /**
+   * Whether the admin tier-management tools should be registered for this
+   * client (mirrors `ExchangeConfig.enableAdminTools`). Off by default so a
+   * general trading agent never sees the operator-only tools.
+   */
+  enableAdminTools(): boolean {
+    return this.cfg.enableAdminTools;
+  }
+
   hasCredentials(): boolean {
     return hasCredentials(this.cfg);
+  }
+
+  hasSessionToken(): boolean {
+    return hasSessionToken(this.cfg);
+  }
+
+  hasAdminSecret(): boolean {
+    return hasAdminSecret(this.cfg);
   }
 
   private sign(
@@ -142,12 +202,20 @@ export class ExchangeClient {
         ? Buffer.alloc(0)
         : Buffer.from(JSON.stringify(opts.body), "utf8");
 
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      // Identifies the calling surface (stdio CLI vs. hosted MCP) so usage can
+      // be attributed in the exchange dashboard.
+      "user-agent": this.cfg.userAgent ?? DEFAULT_USER_AGENT,
+    };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 
-    if (opts.signed) {
+    // `signed: true` is shorthand for HMAC; `auth` selects a non-HMAC mode.
+    const authMode: AuthMode | undefined = opts.signed ? "hmac" : opts.auth;
+    const where = `${method} ${opts.path}`;
+
+    if (authMode === "hmac") {
       if (!this.hasCredentials()) {
-        throw new MissingCredentialsError(`${method} ${opts.path}`);
+        throw new MissingCredentialsError(where);
       }
       const { timestamp, signature, apiKey } = this.sign(
         method,
@@ -158,6 +226,16 @@ export class ExchangeClient {
       headers["x-api-key"] = apiKey;
       headers["x-timestamp"] = timestamp;
       headers["x-signature"] = signature;
+    } else if (authMode === "bearer") {
+      if (!this.hasSessionToken()) {
+        throw new MissingSessionTokenError(where);
+      }
+      headers["authorization"] = `Bearer ${this.cfg.sessionToken}`;
+    } else if (authMode === "admin") {
+      if (!this.hasAdminSecret()) {
+        throw new MissingAdminSecretError(where);
+      }
+      headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
     }
 
     const base =

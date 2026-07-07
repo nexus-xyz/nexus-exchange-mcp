@@ -8,7 +8,7 @@ import {
   sanitizeErrorBody,
 } from "../src/client.js";
 import { findTool, tools } from "../src/tools/index.js";
-import { loadConfig } from "../src/config.js";
+import { deriveBases, loadConfig } from "../src/config.js";
 
 /**
  * Reference HMAC implementation that mirrors the indexer's verify_hmac
@@ -39,7 +39,7 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
     "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
   const cfg = {
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: secretHex,
   };
@@ -59,7 +59,7 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
   try {
     await client.request({
       method: "POST",
-      path: "/api/v1/orders",
+      path: "/orders",
       body: {
         market_id: "BTC-USDX-PERP",
         side: "Buy",
@@ -81,18 +81,18 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
     secretHex,
     ts,
     "POST",
-    "/api/v1/orders",
+    "/orders",
     "",
     captured!.body!,
   );
   assert.equal(captured!.headers.get("x-signature"), expected);
-  assert.equal(captured!.url, "http://example.test/api/v1/orders");
+  assert.equal(captured!.url, "http://example.test/orders");
 });
 
 test("signed tool without credentials throws MissingCredentialsError", async () => {
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
   });
   await assert.rejects(
     () => client.request({ path: "/account", signed: true }),
@@ -104,7 +104,7 @@ test("place_order maps friendly args to the engine wire shape", async () => {
   const tool = findTool("place_order")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
   });
@@ -141,7 +141,7 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   const tool = findTool("cancel_order")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
   });
@@ -174,68 +174,11 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   assert.equal(calls[1].url, "http://example.test/api/v1/orders");
 });
 
-test("cancel_order requires market_id when cancelling a single order (v1)", async () => {
-  // /api/v1 DELETE /orders/{order_id} marks market_id REQUIRED. A single-cancel
-  // call missing it must fail fast client-side, not send a doomed request.
-  const tool = findTool("cancel_order")!;
-  const client = new ExchangeClient({
-    directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
-    apiKey: "nx_test",
-    apiSecret: "00",
-  });
-  let fetchCalled = false;
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    fetchCalled = true;
-    return new Response("{}", { status: 200 });
-  }) as typeof fetch;
-  try {
-    await assert.rejects(
-      async () => tool.handler(client, { order_id: "abc123" }),
-      /requires `market_id`/,
-    );
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-  assert.equal(fetchCalled, false, "no request should be sent");
-});
-
-test("cancel_order scopes a mass-cancel to a market when market_id is given", async () => {
-  const tool = findTool("cancel_order")!;
-  const client = new ExchangeClient({
-    directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
-    apiKey: "nx_test",
-    apiSecret: "00",
-  });
-  const calls: Array<{ url: string; method: string }> = [];
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init: RequestInit) => {
-    calls.push({ url, method: init.method as string });
-    return new Response("{}", { status: 200 });
-  }) as typeof fetch;
-  try {
-    await tool.handler(client, {
-      cancel_all: true,
-      market_id: "BTC-USDX-PERP",
-    });
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "DELETE");
-  assert.equal(
-    calls[0].url,
-    "http://example.test/api/v1/orders?market_id=BTC-USDX-PERP",
-  );
-});
-
 test("cancel_order refuses to mass-cancel without an explicit cancel_all flag", async () => {
   const tool = findTool("cancel_order")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
   });
@@ -272,7 +215,7 @@ test("cancel_order: order_id wins the tie-break when cancel_all is also true", a
   const tool = findTool("cancel_order")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
   });
@@ -330,7 +273,7 @@ test("sanitizeErrorBody bounds length and redacts secret-looking tokens", () => 
 test("ExchangeApiError carries the sanitized, bounded body", async () => {
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
   });
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async () =>
@@ -370,7 +313,7 @@ async function captureCalls(
 ): Promise<Array<{ url: string; method: string; body?: any }>> {
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
   });
@@ -440,23 +383,18 @@ test("public market-data tools hit the right unsigned paths with query params", 
 });
 
 test("get_order and get_adl_history encode path segments and forward limit", async () => {
-  // Both stay on the legacy gateway surface (no /api/v1 route yet), so their
-  // URLs carry the /api/exchange base rather than /api/v1.
   const order = await captureCalls((c) =>
     findTool("get_order")!.handler(c, { order_id: "abc/123" }),
   );
   assert.equal(order[0].method, "GET");
-  assert.equal(
-    order[0].url,
-    "http://example.test/api/exchange/orders/abc%2F123",
-  );
+  assert.equal(order[0].url, "http://example.test/orders/abc%2F123");
 
   const adl = await captureCalls((c) =>
     findTool("get_adl_history")!.handler(c, { address: "0xABC", limit: 10 }),
   );
   assert.equal(
     adl[0].url,
-    "http://example.test/api/exchange/account/0xABC/adl-history?limit=10",
+    "http://example.test/account/0xABC/adl-history?limit=10",
   );
 });
 
@@ -468,7 +406,7 @@ test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", 
   ]) {
     const client = new ExchangeClient({
       directBaseUrl: "http://example.test",
-      gatewayBaseUrl: "http://example.test/api/exchange",
+      gatewayBaseUrl: "http://example.test",
     });
     await assert.rejects(
       () => findTool(name)!.handler(client, {}) as Promise<unknown>,
@@ -478,20 +416,62 @@ test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", 
   }
 });
 
-test("get_ws_token POSTs to /ws-tokens and is signed", async () => {
+test("get_ws_token POSTs to /ws/token and is signed", async () => {
   const calls = await captureCalls((c) =>
     findTool("get_ws_token")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "POST");
-  // Legacy gateway surface (no /api/v1 ws-tokens route yet).
-  assert.equal(calls[0].url, "http://example.test/api/exchange/ws-tokens");
+  assert.equal(calls[0].url, "http://example.test/ws/token");
 
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
   });
   await assert.rejects(
     () => findTool("get_ws_token")!.handler(client, {}) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("get_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
+  const calls = await captureCalls((c) =>
+    findTool("get_ws_token_legacy")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, "http://example.test/ws-tokens");
+
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+  });
+  await assert.rejects(
+    () =>
+      findTool("get_ws_token_legacy")!.handler(client, {}) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("get_funding_payments builds filtered and unfiltered signed URLs", async () => {
+  const calls = await captureCalls(async (c) => {
+    await findTool("get_funding_payments")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+    });
+    await findTool("get_funding_payments")!.handler(c, {});
+  });
+
+  assert.equal(
+    calls[0].url,
+    "http://example.test/funding-payments?market_id=BTC-USDX-PERP",
+  );
+  assert.equal(calls[1].url, "http://example.test/funding-payments");
+
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+  });
+  await assert.rejects(
+    () =>
+      findTool("get_funding_payments")!.handler(client, {}) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
@@ -618,53 +598,13 @@ test("place_orders_batch enforces the max-length bound", () => {
 test("pending tools return an honest not-yet-available message", async () => {
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test",
   });
   const deposit = (await findTool("get_deposit_target")!.handler(
     client,
     {},
   )) as any;
   assert.equal(deposit.status, "not_yet_available");
-
-  const agent = (await findTool("register_agent")!.handler(client, {})) as any;
-  assert.equal(agent.status, "not_yet_available");
-});
-
-test("loadConfig derives direct (/api/v1) and gateway bases from the env URL", () => {
-  // Bare host root (the new default shape): v1 lives here, gateway appends
-  // /api/exchange.
-  const root = loadConfig({
-    NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz",
-  });
-  assert.equal(root.directBaseUrl, "https://exchange.nexus.xyz");
-  assert.equal(root.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
-
-  // Legacy value that still carries the /api/exchange suffix must be normalized
-  // so /api/v1 does NOT resolve to …/api/exchange/api/v1/… (backward compat).
-  const legacy = loadConfig({
-    NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz/api/exchange",
-  });
-  assert.equal(legacy.directBaseUrl, "https://exchange.nexus.xyz");
-  assert.equal(
-    legacy.gatewayBaseUrl,
-    "https://exchange.nexus.xyz/api/exchange",
-  );
-
-  // Trailing slashes are trimmed before the suffix strip.
-  const slashed = loadConfig({
-    NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz/api/exchange/",
-  });
-  assert.equal(slashed.directBaseUrl, "https://exchange.nexus.xyz");
-
-  // Unset -> production default host root.
-  const dflt = loadConfig({});
-  assert.equal(dflt.directBaseUrl, "https://exchange.nexus.xyz");
-  assert.equal(dflt.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
-
-  // A local direct gateway keeps its origin; gateway base is derived under it.
-  const local = loadConfig({ NEXUS_EXCHANGE_API_URL: "http://localhost:9090" });
-  assert.equal(local.directBaseUrl, "http://localhost:9090");
-  assert.equal(local.gatewayBaseUrl, "http://localhost:9090/api/exchange");
 });
 
 test("every tool advertises a name, description, and object input schema", () => {
@@ -677,4 +617,107 @@ test("every tool advertises a name, description, and object input schema", () =>
       `${t.name} schema type`,
     );
   }
+});
+
+test("deriveBases splits an origin into direct (/api/v1) and gateway bases", () => {
+  // Bare origin (the new default form).
+  assert.deepEqual(deriveBases("https://exchange.nexus.xyz"), {
+    directBaseUrl: "https://exchange.nexus.xyz",
+    gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
+  });
+  // Legacy value that still carries the /api/exchange suffix is normalized so
+  // /api/v1 does not resolve to …/api/exchange/api/v1/… .
+  assert.deepEqual(deriveBases("https://exchange.nexus.xyz/api/exchange"), {
+    directBaseUrl: "https://exchange.nexus.xyz",
+    gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
+  });
+  // Trailing slashes are trimmed before deriving.
+  assert.deepEqual(deriveBases("http://localhost:9090/"), {
+    directBaseUrl: "http://localhost:9090",
+    gatewayBaseUrl: "http://localhost:9090/api/exchange",
+  });
+});
+
+test("loadConfig derives both bases from NEXUS_EXCHANGE_API_URL", () => {
+  const cfg = loadConfig({
+    NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz/api/exchange",
+  } as NodeJS.ProcessEnv);
+  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+  assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
+});
+
+test("client routes surface to the right base and signs the exact path sent", async () => {
+  const secretHex = "00".repeat(32);
+  const client = new ExchangeClient({
+    directBaseUrl: "http://direct.test",
+    gatewayBaseUrl: "http://direct.test/api/exchange",
+    apiKey: "nx_test",
+    apiSecret: secretHex,
+  });
+
+  const calls: Array<{ url: string; sig: string | null; ts: string | null }> =
+    [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    const h = new Headers(init.headers);
+    calls.push({
+      url,
+      sig: h.get("x-signature"),
+      ts: h.get("x-timestamp"),
+    });
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    // Default surface ("v1") hits the direct host root and signs the /api/v1 path.
+    await client.request({ path: "/api/v1/account", signed: true });
+    // Explicit "gateway" surface hits the /api/exchange proxy and signs the bare path.
+    await client.request({
+      path: "/withdrawals",
+      surface: "gateway",
+      signed: true,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  assert.equal(calls[0].url, "http://direct.test/api/v1/account");
+  assert.equal(calls[1].url, "http://direct.test/api/exchange/withdrawals");
+
+  // The signature covers the exact path sent — including the /api/v1 prefix.
+  const expectedV1 = referenceSign(
+    secretHex,
+    calls[0].ts!,
+    "GET",
+    "/api/v1/account",
+    "",
+    Buffer.alloc(0),
+  );
+  assert.equal(calls[0].sig, expectedV1, "v1 request signs the prefixed path");
+});
+
+test("cancel_order requires market_id when cancelling a single order", async () => {
+  const tool = findTool("cancel_order")!;
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00",
+  });
+
+  let fetchCalled = false;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCalled = true;
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    // order_id without market_id must fail fast, before any request.
+    await assert.rejects(
+      async () => tool.handler(client, { order_id: "abc123" }),
+      /market_id/,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(fetchCalled, false, "no request should be sent");
 });

@@ -1,0 +1,88 @@
+name: API version sync
+
+# Opens a PR to advance the pinned spec version (`.api-version` + the bot-managed
+# README line) when nexus-exchange-api publishes a newer release. This is the
+# forward counterpart to the `drift` check: drift verifies the SDK against the
+# *pinned* spec; this surfaces a *newer* spec and proposes the bump for a human to
+# review. The bump is never applied automatically — it lands as a PR.
+#
+# Scheduled (daily) plus manual dispatch. No cross-repo secret is required: the
+# latest release is read from the public GitHub API and the PR is opened in this
+# same repo.
+#
+# CI on the opened PR: a PR created with the default GITHUB_TOKEN does NOT trigger
+# other workflows (drift/test), so set the optional `API_VERSION_SYNC_TOKEN`
+# secret (a fine-grained PAT with contents + PR write) to have those checks run on
+# the bump PR automatically. Without it, re-run the checks once on the PR.
+
+on:
+  schedule:
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: api-version-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.API_VERSION_SYNC_TOKEN || github.token }}
+
+      - name: Apply pin bump if a newer spec released
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # lifts the releases-API rate limit
+        run: python3 scripts/sync_api_version.py --write
+
+      - name: Open the bump PR
+        env:
+          GH_TOKEN: ${{ secrets.API_VERSION_SYNC_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No change — pin is already current. Nothing to open."
+            exit 0
+          fi
+
+          new="$(cat .api-version)"
+          branch="chore/sync-api-spec-${new}"
+
+          # Idempotent: if a branch for this exact version already exists upstream,
+          # leave it for the human rather than churning a duplicate every day.
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Branch $branch already exists upstream; nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add .api-version README.md
+          git commit -m "chore: sync pinned API spec to ${new}"
+          git push --set-upstream origin "$branch"
+
+          # Build the body with printf (no heredoc) to avoid YAML-indentation and
+          # shell-escaping pitfalls.
+          {
+            printf 'nexus-exchange-api released **%s**, newer than the pinned spec. Opened automatically by `api-version-sync`.\n\n' "$new"
+            printf '### Applied\n'
+            printf -- '- Bumped `.api-version` to `%s`.\n' "$new"
+            printf -- '- Updated the bot-managed "currently targets" line in the README.\n\n'
+            printf '### For the reviewer\n'
+            printf -- '- [ ] Review what `%s` changes (the api repo CHANGELOG / the `drift` check on this PR) and make any SDK code changes it implies.\n' "$new"
+            printf -- '- [ ] If `%s` is a **breaking** spec release, plan the SDK version bump and append a row to the README compatibility table (the bot intentionally does not edit that historical table).\n' "$new"
+            printf -- '- [ ] Confirm the `drift` check is green before merging.\n'
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore: sync pinned API spec to ${new}" \
+            --body-file "$RUNNER_TEMP/pr-body.md"

@@ -8,28 +8,12 @@ It talks to the real, public exchange. Market-data and demo tools work with
 zero configuration; account and trading tools use HMAC API credentials read
 from environment variables.
 
-> [!WARNING]
-> **Depends on an unmerged spec PR — do not deploy against production yet.**
-> This server now targets the direct-indexer `/api/v1` surface (parent
-> **ENG-4740**), defined by
-> [`nexus-xyz/nexus-exchange-api#41`](https://github.com/nexus-xyz/nexus-exchange-api/pull/41)
-> (**ENG-4943**), which is **NOT MERGED**. Its release-please tag (`v0.6.1`,
-> pinned in `.api-version`) does not exist yet, and the producer endpoints
-> (monorepo `nexus-xyz/nexus#2770` / `#2820`) are not deployed. Until then the
-> `/api/v1/*` routes will 404 in production.
->
-> **Prerequisite:** merge `nexus-exchange-api#41` and cut `v0.6.1` first.
-> **On merge, restore to `main`:** in `.github/workflows/ci.yml` drop the
-> `SPEC_PENDING_BRANCH` transitional block (the drift gate then points back at
-> the release / `main`), and confirm `.api-version` is `v0.6.1`. See the
-> "Migration to `/api/v1`" section below.
-
 ## What works today
 
 Most tools now hit the direct-indexer **`/api/v1`** surface (served at the host
-root). The routes that were **not** migrated in `nexus-exchange-api#41` stay on
-the **legacy `/api/exchange`** gateway, which remains live dual-stack
-(ENG-4751), so nothing breaks.
+root). The routes that were **not** migrated to `/api/v1` stay on the **legacy
+`/api/exchange`** gateway, which remains live dual-stack (ENG-4751), so nothing
+breaks.
 
 | Tool                    | Status                                            | Endpoint (surface)                         |
 | ----------------------- | ------------------------------------------------- | ------------------------------------------ |
@@ -83,12 +67,11 @@ surface directly under `/api/v1` at the host root. This server was updated
   mass-cancel to one market.
 - **Not migrated (stay legacy):** `list_market_specs`, `get_order` (v1 mounts
   only edit/cancel on `/orders/{id}`), `get_withdrawals`, `get_adl_history`,
-  `get_ws_token`, and the `demo/*` reads — these were excluded from
-  `nexus-exchange-api#41` and still hit the dual-stack gateway.
+  `get_ws_token`, and the `demo/*` reads — these have no `/api/v1` route and
+  still hit the dual-stack gateway.
 
-**Spec pin (`.api-version`) is transitional** at `v0.6.1` until the blocker PR
-merges and release-please cuts that tag — see the warning at the top for the
-exact revert steps.
+The spec pin (`.api-version`) tracks the Exchange API release the server targets
+(`v0.6.2`); CI enforces that it matches the latest published release.
 
 ## Quick start
 

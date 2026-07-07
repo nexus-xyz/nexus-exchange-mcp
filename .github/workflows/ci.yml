@@ -64,19 +64,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPEC_REPO: nexus-xyz/nexus-exchange-api
-          # ── TRANSITIONAL (ENG-4948) — REMOVE WHEN nexus-exchange-api#41 MERGES ──
-          # The /api/v1 surface this server now targets is defined by
-          # nexus-xyz/nexus-exchange-api#41 (ENG-4943), which is NOT MERGED yet.
-          # Its release-please tag (v0.6.1) does not exist, so the normal
-          # "pinned tag is the latest release" gate below cannot pass. Until #41
-          # merges and v0.6.1 is cut, we instead verify the pin against the PR's
-          # branch so we don't pin a bogus version.
-          #
-          # REVERT once v0.6.1 is released: delete SPEC_PENDING_BRANCH and the
-          # `if [ "$pinned_status" != "200" ]` transitional block below. The
-          # strict release-drift check then runs unchanged (points back at the
-          # release / default branch, i.e. "main"). See the PR description.
-          SPEC_PENDING_BRANCH: lucascampos/eng-4943-nexus-exchange-api-add-apiv1-routes-to-openapi-spec-cut
         run: |
           set -euo pipefail
           pinned="$(tr -d '[:space:]' < .api-version)"
@@ -86,19 +73,7 @@ jobs:
           pinned_status="$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
             "${api}/releases/tags/${pinned}")"
-          if [ "$pinned_status" != "200" ]; then
-            # ── TRANSITIONAL block (see SPEC_PENDING_BRANCH note above) ──
-            if [ -n "${SPEC_PENDING_BRANCH:-}" ]; then
-              branch_status="$(curl -sS -o /dev/null -w '%{http_code}' \
-                -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-                "${api}/branches/${SPEC_PENDING_BRANCH}")"
-              [ "$branch_status" = "200" ] || { echo "::error::Transitional spec branch ${SPEC_PENDING_BRANCH} not found in ${SPEC_REPO} (HTTP ${branch_status}). Has nexus-exchange-api#41 been renamed/closed?"; exit 1; }
-              echo "::warning file=.api-version::TRANSITIONAL: pinned spec ${pinned} is not a release yet; validated against unmerged branch ${SPEC_PENDING_BRANCH} (nexus-exchange-api#41). Once ${pinned} is cut, drop SPEC_PENDING_BRANCH so strict drift enforcement resumes."
-              exit 0
-            fi
-            echo "::error::Pinned spec ${pinned} not found as a release in ${SPEC_REPO} (HTTP ${pinned_status})."
-            exit 1
-          fi
+          [ "$pinned_status" = "200" ] || { echo "::error::Pinned spec ${pinned} not found as a release in ${SPEC_REPO} (HTTP ${pinned_status})."; exit 1; }
           latest="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
             "${api}/releases/latest" | jq -r '.tag_name // empty')"
           [ -n "$latest" ] || { echo "::error::Could not determine latest release of ${SPEC_REPO}."; exit 1; }

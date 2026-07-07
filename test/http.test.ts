@@ -23,7 +23,10 @@ async function withHttpServer(
   headers: Record<string, string>,
 ): Promise<{ client: Client; url: URL; close: () => Promise<void> }> {
   const server = createHttpMcpServer({
-    config: { baseUrl: "http://gateway.test" },
+    config: {
+      directBaseUrl: "http://gateway.test",
+      gatewayBaseUrl: "http://gateway.test",
+    },
   });
   await new Promise<void>((resolve) => server.listen(0, resolve));
   const { port } = server.address() as AddressInfo;
@@ -99,7 +102,7 @@ test("Streamable HTTP: a public tool call reaches the gateway and returns its re
     assert.deepEqual(parsed, [{ market_id: "BTC-USDX-PERP" }]);
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "http://gateway.test/markets/summary");
+    assert.equal(calls[0].url, "http://gateway.test/api/v1/markets/summary");
     // Hosted traffic is tagged so the dashboard can attribute it to MCP.
     assert.equal(calls[0].headers.get("user-agent"), HTTP_USER_AGENT);
   } finally {
@@ -139,14 +142,21 @@ test("Streamable HTTP: per-session credential headers sign the upstream request"
     await client.callTool({ name: "get_balance", arguments: {} });
 
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].url, "http://gateway.test/account");
+    assert.equal(calls[0].url, "http://gateway.test/api/v1/account");
     assert.equal(calls[0].headers.get("x-api-key"), "nx_session_key");
     const ts = calls[0].headers.get("x-timestamp")!;
     const sig = calls[0].headers.get("x-signature")!;
     assert.ok(ts, "timestamp header present");
 
-    // Recompute the canonical signature the indexer would verify.
-    const canonical = [ts, "GET", "/account", "", EMPTY_BODY_SHA256].join("\n");
+    // Recompute the canonical signature the indexer would verify. get_balance
+    // targets the /api/v1 surface, so the signed path carries the prefix.
+    const canonical = [
+      ts,
+      "GET",
+      "/api/v1/account",
+      "",
+      EMPTY_BODY_SHA256,
+    ].join("\n");
     const expected = createHmac("sha256", Buffer.from(secretHex, "hex"))
       .update(canonical)
       .digest("hex");
@@ -163,7 +173,8 @@ const EMPTY_BODY_SHA256 =
 
 test("configForRequest overlays header credentials and tags the User-Agent", () => {
   const base = {
-    baseUrl: "http://gateway.test",
+    directBaseUrl: "http://gateway.test",
+    gatewayBaseUrl: "http://gateway.test",
     apiKey: "env",
     apiSecret: "e",
   };

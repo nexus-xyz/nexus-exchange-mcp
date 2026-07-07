@@ -162,7 +162,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/markets/summary" }),
+    handler: (client) => client.request({ path: "/api/v1/markets/summary" }),
   },
   {
     name: "get_ticker",
@@ -183,7 +183,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/ticker`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/ticker`,
       });
     },
   },
@@ -206,7 +206,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/orderbook`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/orderbook`,
       });
     },
   },
@@ -221,7 +221,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/markets" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/markets" }),
   },
   {
     name: "get_tickers",
@@ -231,7 +232,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/tickers" }),
+    handler: (client) => client.request({ path: "/api/v1/tickers" }),
   },
   {
     name: "get_mark_price",
@@ -251,7 +252,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/mark-price`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/mark-price`,
       });
     },
   },
@@ -274,7 +275,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/markets/${encodeURIComponent(market_id)}/status`,
+        path: `/api/v1/markets/${encodeURIComponent(market_id)}/status`,
       });
     },
   },
@@ -308,7 +309,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/trades`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/trades`,
         query,
       });
     },
@@ -354,7 +355,7 @@ export const tools: ToolDef[] = [
       if (a.timeframe) params.set("timeframe", a.timeframe);
       if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/candles`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/candles`,
         query: params.toString(),
       });
     },
@@ -389,7 +390,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/markets/${encodeURIComponent(a.market_id)}/funding`,
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/funding`,
         query,
       });
     },
@@ -408,7 +409,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/account" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/demo/account" }),
   },
   {
     name: "get_demo_positions",
@@ -417,7 +419,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/positions" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/demo/positions" }),
   },
   {
     name: "get_demo_orders",
@@ -426,7 +429,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/demo/orders" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/demo/orders" }),
   },
 
   // ── Account reads (require credentials) ───────────────────────────────────
@@ -438,7 +442,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/account", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/account", signed: true }),
   },
   {
     name: "get_positions",
@@ -447,7 +452,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/positions", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/positions", signed: true }),
   },
   {
     name: "get_open_orders",
@@ -456,7 +462,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/orders", signed: true }),
+    handler: (client) =>
+      client.request({ path: "/api/v1/orders", signed: true }),
   },
   {
     name: "get_order",
@@ -477,6 +484,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { order_id } = args as { order_id: string };
       return client.request({
+        surface: "gateway",
         path: `/orders/${encodeURIComponent(order_id)}`,
         signed: true,
       });
@@ -499,7 +507,7 @@ export const tools: ToolDef[] = [
       const a = args as { limit?: number };
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({ path: "/fills", query, signed: true });
+      return client.request({ path: "/api/v1/fills", query, signed: true });
     },
   },
   {
@@ -520,7 +528,12 @@ export const tools: ToolDef[] = [
       const query = a.market_id
         ? `market_id=${encodeURIComponent(a.market_id)}`
         : "";
-      return client.request({ path: "/funding-payments", query, signed: true });
+      return client.request({
+        surface: "gateway",
+        path: "/funding-payments",
+        query,
+        signed: true,
+      });
     },
   },
   {
@@ -540,7 +553,12 @@ export const tools: ToolDef[] = [
       const a = args as { limit?: number };
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({ path: "/withdrawals", query, signed: true });
+      return client.request({
+        surface: "gateway",
+        path: "/withdrawals",
+        query,
+        signed: true,
+      });
     },
   },
   {
@@ -553,7 +571,7 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/account/rate-limit", signed: true }),
+      client.request({ path: "/api/v1/account/rate-limit", signed: true }),
   },
   {
     name: "get_adl_history",
@@ -585,6 +603,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
+        surface: "gateway",
         path: `/account/${encodeURIComponent(a.address)}/adl-history`,
         query,
         signed: true,
@@ -606,7 +625,7 @@ export const tools: ToolDef[] = [
       const body = toWireOrder(args as FriendlyOrder);
       return client.request({
         method: "POST",
-        path: "/orders",
+        path: "/api/v1/orders",
         body,
         signed: true,
       });
@@ -643,7 +662,7 @@ export const tools: ToolDef[] = [
       const body = a.orders.map(toWireOrder);
       return client.request({
         method: "POST",
-        path: "/orders/batch",
+        path: "/api/v1/orders/batch",
         body,
         signed: true,
       });
@@ -663,7 +682,9 @@ export const tools: ToolDef[] = [
       },
       market_id: {
         type: "string",
-        description: "Market id (recommended when cancelling a single order).",
+        description:
+          "Market id. REQUIRED when cancelling a single order (`order_id`); " +
+          "optional with `cancel_all` to scope the mass-cancel to one market.",
       },
       cancel_all: {
         type: "boolean",
@@ -691,23 +712,34 @@ export const tools: ToolDef[] = [
         // empty/argless call errors instead of silently cancelling everything.
         if (!a.cancel_all) {
           throw new Error(
-            "Refusing to cancel: pass `order_id` to cancel one order, or " +
-              "`cancel_all: true` to explicitly cancel ALL open orders.",
+            "Refusing to cancel: pass `order_id` (with `market_id`) to cancel " +
+              "one order, or `cancel_all: true` to cancel ALL open orders.",
           );
         }
+        // `market_id` is optional on mass-cancel: scopes the cancel to one
+        // market when given, otherwise cancels across all markets.
+        const query = a.market_id
+          ? `market_id=${encodeURIComponent(a.market_id)}`
+          : "";
         return client.request({
           method: "DELETE",
-          path: "/orders",
+          path: "/api/v1/orders",
+          query,
           signed: true,
         });
       }
-      const query = a.market_id
-        ? `market_id=${encodeURIComponent(a.market_id)}`
-        : "";
+      // Single cancel: /api/v1 marks `market_id` required (query). Fail fast
+      // client-side so a missing id surfaces as a clear error, not a 400.
+      if (!a.market_id) {
+        throw new Error(
+          "cancel_order requires `market_id` when cancelling a single order " +
+            "(order_id). Pass the market the order is on.",
+        );
+      }
       return client.request({
         method: "DELETE",
-        path: `/orders/${encodeURIComponent(a.order_id)}`,
-        query,
+        path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
+        query: `market_id=${encodeURIComponent(a.market_id)}`,
         signed: true,
       });
     },
@@ -745,6 +777,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
+        surface: "gateway",
         path: `/markets/${encodeURIComponent(a.market_id)}/adl-events`,
         query,
         signed: true,
@@ -775,6 +808,7 @@ export const tools: ToolDef[] = [
       const { amount } = args as { amount: string };
       return client.request({
         method: "POST",
+        surface: "gateway",
         path: "/account/deposit",
         body: { amount },
         signed: true,
@@ -806,7 +840,7 @@ export const tools: ToolDef[] = [
       const body = a.amount !== undefined ? { amount: a.amount } : {};
       return client.request({
         method: "POST",
-        path: "/account/credit",
+        path: "/api/v1/account/credit",
         body,
         signed: true,
       });
@@ -822,7 +856,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/agents", signed: true }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/agents", signed: true }),
   },
   {
     name: "register_agent",
@@ -899,6 +934,7 @@ export const tools: ToolDef[] = [
       if (a.label !== undefined) body.label = a.label;
       return client.request({
         method: "POST",
+        surface: "gateway",
         path: "/agents/register",
         body,
       });
@@ -939,6 +975,7 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
+        surface: "gateway",
         path: `/agents/${encodeURIComponent(a.address)}`,
         signed: true,
       });
@@ -980,6 +1017,7 @@ export const tools: ToolDef[] = [
       const a = args as { signature: string; message?: string };
       return client.request({
         method: "POST",
+        surface: "gateway",
         path: "/auth/login",
         body: {
           message: a.message ?? "Sign in to Nexus Exchange",
@@ -997,7 +1035,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) => client.request({ path: "/keys", auth: "bearer" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/keys", auth: "bearer" }),
   },
   {
     name: "create_api_key",
@@ -1010,7 +1049,12 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ method: "POST", path: "/keys", auth: "bearer" }),
+      client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/keys",
+        auth: "bearer",
+      }),
   },
   {
     name: "delete_api_key",
@@ -1047,6 +1091,7 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
+        surface: "gateway",
         path: `/keys/${encodeURIComponent(a.key_id)}`,
         auth: "bearer",
       });
@@ -1066,7 +1111,12 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ method: "POST", path: "/ws/token", signed: true }),
+      client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/ws/token",
+        signed: true,
+      }),
   },
   {
     name: "get_ws_token_legacy",
@@ -1079,7 +1129,12 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ method: "POST", path: "/ws-tokens", signed: true }),
+      client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/ws-tokens",
+        signed: true,
+      }),
   },
 
   // ── Service health (public) ───────────────────────────────────────────────
@@ -1091,7 +1146,8 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/health" }),
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/health" }),
   },
 
   // ── Admin tier management (operator-only; gated off by default) ────────────
@@ -1108,7 +1164,11 @@ export const tools: ToolDef[] = [
     requiresAuth: true,
     adminOnly: true,
     handler: (client) =>
-      client.request({ path: "/admin/tiers", auth: "admin" }),
+      client.request({
+        surface: "gateway",
+        path: "/admin/tiers",
+        auth: "admin",
+      }),
   },
   {
     name: "set_tier",
@@ -1138,6 +1198,7 @@ export const tools: ToolDef[] = [
       const a = args as { address: string; tier: string };
       return client.request({
         method: "PUT",
+        surface: "gateway",
         path: "/admin/tiers",
         body: { address: a.address, tier: a.tier },
         auth: "admin",
@@ -1179,6 +1240,7 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
+        surface: "gateway",
         path: `/admin/tiers/${encodeURIComponent(a.address)}`,
         auth: "admin",
       });

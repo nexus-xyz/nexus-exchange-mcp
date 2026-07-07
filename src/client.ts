@@ -114,7 +114,14 @@ export type AuthMode = "hmac" | "bearer" | "admin";
 
 interface RequestOptions {
   method?: "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
-  /** Path component only, leading slash, no query. e.g. "/orders" */
+  /**
+   * Full path from the chosen base's origin, leading slash, no query.
+   * For the direct v1 surface this INCLUDES the version prefix, e.g.
+   * "/api/v1/orders"; for the legacy gateway it is the bare route, e.g.
+   * "/orders". Whatever is passed here is exactly what gets HMAC-signed, so it
+   * must match what the server verifies over (nexus-exchange-api#41: "the
+   * caller signs the full request path, not the stripped path").
+   */
   path: string;
   /** Query string without the leading "?". e.g. "limit=50" */
   query?: string;
@@ -128,6 +135,14 @@ interface RequestOptions {
    * with `signed`. Omit for public requests.
    */
   auth?: AuthMode;
+  /**
+   * Which base URL to hit. "v1" (default) is the direct-service host root that
+   * serves `/api/v1`; "gateway" is the legacy `/api/exchange` proxy, used by
+   * the routes without a v1 equivalent. Defaulting to "v1" fails safe: a route
+   * missing a v1 counterpart 404s loudly rather than silently resolving to the
+   * wrong account through the public gateway proxy.
+   */
+  surface?: "v1" | "gateway";
 }
 
 export class ExchangeClient {
@@ -223,7 +238,11 @@ export class ExchangeClient {
       headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
     }
 
-    const url = `${this.cfg.baseUrl}${opts.path}${query ? `?${query}` : ""}`;
+    const base =
+      opts.surface === "gateway"
+        ? this.cfg.gatewayBaseUrl
+        : this.cfg.directBaseUrl;
+    const url = `${base}${opts.path}${query ? `?${query}` : ""}`;
     const res = await fetch(url, {
       method,
       headers,

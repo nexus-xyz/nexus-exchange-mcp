@@ -14,7 +14,8 @@ const BASE = "http://example.test";
 /** A client with full creds (HMAC + session + admin) for happy-path mapping. */
 function fullClient(overrides: Partial<ExchangeConfig> = {}): ExchangeClient {
   return new ExchangeClient({
-    baseUrl: BASE,
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
     apiKey: "nx_test",
     apiSecret: "00",
     sessionToken: "sess_token",
@@ -82,7 +83,10 @@ test("get_market_adl_events encodes market id and forwards limit, signed", async
   );
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 
-  const noCreds = new ExchangeClient({ baseUrl: BASE });
+  const noCreds = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
   await assert.rejects(
     () =>
       findTool("get_market_adl_events")!.handler(noCreds, {
@@ -114,7 +118,7 @@ test("claim_credit sends {amount} when given and {} when omitted", async () => {
   const withAmount = await capture(fullClient(), (c) =>
     findTool("claim_credit")!.handler(c, { amount: "250" }),
   );
-  assert.equal(withAmount[0].url, `${BASE}/account/credit`);
+  assert.equal(withAmount[0].url, `${BASE}/api/v1/account/credit`);
   assert.deepEqual(withAmount[0].body, { amount: "250" });
 
   const full = await capture(fullClient(), (c) =>
@@ -135,7 +139,10 @@ test("list_agents GETs /agents signed", async () => {
 
 test("register_agent POSTs the signature body and needs no credentials", async () => {
   // No HMAC creds: registration is authorized by the wallet signature.
-  const client = new ExchangeClient({ baseUrl: BASE });
+  const client = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
   const calls = await capture(client, (c) =>
     findTool("register_agent")!.handler(c, {
       wallet: "0xWALLET",
@@ -158,7 +165,10 @@ test("register_agent POSTs the signature body and needs no credentials", async (
 });
 
 test("register_agent omits optional fields when not provided", async () => {
-  const client = new ExchangeClient({ baseUrl: BASE });
+  const client = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
   const calls = await capture(client, (c) =>
     findTool("register_agent")!.handler(c, {
       wallet: "0xW",
@@ -199,7 +209,10 @@ test("revoke_agent refuses without confirm, then DELETEs with confirm", async ()
 });
 
 test("login POSTs default message + signature, unsigned", async () => {
-  const client = new ExchangeClient({ baseUrl: BASE });
+  const client = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
   const calls = await capture(client, (c) =>
     findTool("login")!.handler(c, { signature: "0xsig" }),
   );
@@ -231,7 +244,8 @@ test("list_api_keys / create_api_key use the Bearer session token", async () => 
 
 test("bearer tools without a session token throw MissingSessionTokenError", async () => {
   const noSession = new ExchangeClient({
-    baseUrl: BASE,
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
     apiKey: "k",
     apiSecret: "00",
   });
@@ -287,7 +301,8 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
   );
 
   const noAdmin = new ExchangeClient({
-    baseUrl: BASE,
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
     apiKey: "k",
     apiSecret: "00",
   });

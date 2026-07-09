@@ -10,6 +10,7 @@
   "homepage": "https://github.com/nexus-xyz/nexus-exchange-mcp#readme",
   "type": "module",
   "bin": {
+    "exchange-mcp": "dist/index.js",
     "nexus-exchange-mcp": "dist/index.js",
     "nexus-exchange-mcp-http": "dist/http-index.js"
   },

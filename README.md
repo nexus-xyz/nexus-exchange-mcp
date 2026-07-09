@@ -18,49 +18,66 @@ the gateway REST proxy). The routes that have no `/api/v1` equivalent stay on
 the **legacy `/api/exchange`** gateway, which remains live dual-stack
 (ENG-4751), so nothing breaks. See "Migration to `/api/v1`" below.
 
-| Tool                    | Status                                          | Endpoint (surface)                         |
-| ----------------------- | ----------------------------------------------- | ------------------------------------------ |
-| `list_markets`          | ✅ Live (public)                                | `GET /api/v1/markets/summary`              |
-| `list_market_specs`     | ✅ Live (public)                                | `GET /markets` (legacy)                    |
-| `get_ticker`            | ✅ Live (public)                                | `GET /api/v1/markets/{id}/ticker`          |
-| `get_tickers`           | ✅ Live (public)                                | `GET /api/v1/tickers`                      |
-| `get_orderbook`         | ✅ Live (public)                                | `GET /api/v1/markets/{id}/orderbook`       |
-| `get_mark_price`        | ✅ Live (public)                                | `GET /api/v1/markets/{id}/mark-price`      |
-| `get_market_status`     | ✅ Live (public)                                | `GET /api/v1/markets/{id}/status`          |
-| `get_trades`            | ✅ Live (public)                                | `GET /api/v1/markets/{id}/trades`          |
-| `get_candles`           | ✅ Live (public)                                | `GET /api/v1/markets/{id}/candles`         |
-| `get_funding_history`   | ✅ Live (public)                                | `GET /api/v1/markets/{id}/funding`         |
-| `get_demo_account`      | ✅ Live (public)                                | `GET /demo/account` (legacy)               |
-| `get_demo_positions`    | ✅ Live (public)                                | `GET /demo/positions` (legacy)             |
-| `get_demo_orders`       | ✅ Live (public)                                | `GET /demo/orders` (legacy)                |
-| `get_balance`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account`                      |
-| `get_positions`         | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions`                    |
-| `get_open_orders`       | ✅ Live (needs key + direct gateway)            | `GET /api/v1/orders`                       |
-| `get_order`             | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}` (legacy)                |
-| `get_fills`             | ✅ Live (needs key + direct gateway)            | `GET /api/v1/fills`                        |
-| `get_withdrawals`       | ✅ Live (needs key + direct gateway)            | `GET /withdrawals` (legacy)                |
-| `get_rate_limit_status` | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/rate-limit`           |
-| `get_adl_history`       | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history` (legacy) |
-| `get_market_adl_events` | ✅ Live (needs key + direct gateway)            | `GET /markets/{id}/adl-events` (legacy)    |
-| `place_order`           | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders`                      |
-| `place_orders_batch`    | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders/batch`                |
-| `cancel_order`          | ✅ Live (needs key + direct gateway)            | `DELETE /api/v1/orders[/{id}]`             |
-| `deposit_collateral`    | ✅ Live (needs key + direct gateway)            | `POST /account/deposit` (legacy)           |
-| `claim_credit`          | ✅ Live (needs key + direct gateway)            | `POST /api/v1/account/credit`              |
-| `list_agents`           | ✅ Live (needs key + direct gateway)            | `GET /agents` (legacy)                     |
-| `register_agent`        | ✅ Live (needs caller EIP-712 signature)        | `POST /agents/register` (legacy)           |
-| `revoke_agent`          | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}` (legacy)           |
-| `login`                 | ✅ Live (needs caller EIP-191 signature)        | `POST /auth/login` (legacy)                |
-| `list_api_keys`         | ✅ Live (needs session token)                   | `GET /keys` (legacy)                       |
-| `create_api_key`        | ✅ Live (needs session token)                   | `POST /keys` (legacy)                      |
-| `delete_api_key`        | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}` (legacy)           |
-| `get_ws_token`          | ✅ Live (needs key + direct gateway)            | `POST /ws/token` (legacy)                  |
-| `get_ws_token_legacy`   | ✅ Live (needs key + direct gateway)            | `POST /ws-tokens` (legacy)                 |
-| `get_health`            | ✅ Live (public)                                | `GET /health` (legacy)                     |
-| `list_tiers`            | 🔒 Admin (opt-in, see below)                    | `GET /admin/tiers` (legacy)                |
-| `set_tier`              | 🔒 Admin (opt-in, see below)                    | `PUT /admin/tiers` (legacy)                |
-| `delete_tier`           | 🔒 Admin (opt-in, see below)                    | `DELETE /admin/tiers/{addr}` (legacy)      |
-| `get_deposit_target`    | 🚧 Pending — server-side endpoint not built yet | none yet                                   |
+| Tool                     | Status                                          | Endpoint (surface)                         |
+| ------------------------ | ----------------------------------------------- | ------------------------------------------ |
+| `list_markets`           | ✅ Live (public)                                | `GET /api/v1/markets/summary`              |
+| `list_market_specs`      | ✅ Live (public)                                | `GET /markets` (legacy)                    |
+| `get_ticker`             | ✅ Live (public)                                | `GET /api/v1/markets/{id}/ticker`          |
+| `get_tickers`            | ✅ Live (public)                                | `GET /api/v1/tickers`                      |
+| `get_orderbook`          | ✅ Live (public)                                | `GET /api/v1/markets/{id}/orderbook`       |
+| `get_mark_price`         | ✅ Live (public)                                | `GET /api/v1/markets/{id}/mark-price`      |
+| `get_market_status`      | ✅ Live (public)                                | `GET /api/v1/markets/{id}/status`          |
+| `get_trades`             | ✅ Live (public)                                | `GET /api/v1/markets/{id}/trades`          |
+| `get_candles`            | ✅ Live (public)                                | `GET /api/v1/markets/{id}/candles`         |
+| `get_funding_history`    | ✅ Live (public)                                | `GET /api/v1/markets/{id}/funding`         |
+| `get_funding_samples`    | ✅ Live (public)                                | `GET /api/v1/markets/{id}/funding-samples` |
+| `get_market_risk_params` | ✅ Live (public)                                | `GET /markets/{id}/risk-params` (legacy)   |
+| `get_stats`              | ✅ Live (public)                                | `GET /api/v1/stats`                        |
+| `get_stats_history`      | ✅ Live (public)                                | `GET /api/v1/stats/history`                |
+| `get_demo_account`       | ✅ Live (public)                                | `GET /demo/account` (legacy)               |
+| `get_demo_positions`     | ✅ Live (public)                                | `GET /demo/positions` (legacy)             |
+| `get_demo_orders`        | ✅ Live (public)                                | `GET /demo/orders` (legacy)                |
+| `get_balance`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account`                      |
+| `get_account_summary`    | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/summary`              |
+| `get_equity_history`     | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/equity-history`       |
+| `get_positions`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions`                    |
+| `get_closed_positions`   | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions/closed`             |
+| `get_open_orders`        | ✅ Live (needs key + direct gateway)            | `GET /api/v1/orders`                       |
+| `get_order`              | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}` (legacy)                |
+| `get_order_history`      | ✅ Live (needs key + direct gateway)            | `GET /api/v1/orders/history`               |
+| `get_fills`              | ✅ Live (needs key + direct gateway)            | `GET /api/v1/fills`                        |
+| `get_funding_payments`   | ✅ Live (needs key + direct gateway)            | `GET /funding` (legacy)                    |
+| `get_withdrawals`        | ✅ Live (needs key + direct gateway)            | `GET /withdrawals` (legacy)                |
+| `list_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /deposits` (legacy)                   |
+| `get_rate_limit_status`  | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/rate-limit`           |
+| `get_adl_history`        | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history` (legacy) |
+| `get_market_adl_events`  | ✅ Live (needs key + direct gateway)            | `GET /markets/{id}/adl-events` (legacy)    |
+| `place_order`            | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders`                      |
+| `place_orders_batch`     | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders/batch`                |
+| `amend_order`            | ✅ Live (needs key + direct gateway)            | `PATCH /api/v1/orders/{id}`                |
+| `preview_order`          | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders/preview`              |
+| `cancel_order`           | ✅ Live (needs key + direct gateway)            | `DELETE /api/v1/orders[/{id}]`             |
+| `deposit_collateral`     | ✅ Live (needs key + direct gateway)            | `POST /account/deposit` (legacy)           |
+| `submit_deposit`         | ✅ Live (needs key + direct gateway)            | `POST /deposits` (legacy)                  |
+| `claim_credit`           | ✅ Live (needs key + direct gateway)            | `POST /api/v1/account/credit`              |
+| `claim_faucet`           | ✅ Live (needs key + direct gateway)            | `POST /faucet` (legacy)                    |
+| `adjust_isolated_margin` | ✅ Live (needs key + direct gateway)            | `POST /account/margin` (legacy)            |
+| `list_agents`            | ✅ Live (needs key + direct gateway)            | `GET /agents` (legacy)                     |
+| `register_agent`         | ✅ Live (needs caller EIP-712 signature)        | `POST /agents/register` (legacy)           |
+| `revoke_agent`           | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}` (legacy)           |
+| `login`                  | ✅ Live (needs caller EIP-191 signature)        | `POST /auth/login` (legacy)                |
+| `list_api_keys`          | ✅ Live (needs session token)                   | `GET /keys` (legacy)                       |
+| `create_api_key`         | ✅ Live (needs session token)                   | `POST /keys` (legacy)                      |
+| `delete_api_key`         | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}` (legacy)           |
+| `get_ws_token`           | ✅ Live (needs key + direct gateway)            | `POST /ws/token` (legacy)                  |
+| `get_ws_token_legacy`    | ✅ Live (needs key + direct gateway)            | `POST /ws-tokens` (legacy)                 |
+| `get_health`             | ✅ Live (public)                                | `GET /health` (legacy)                     |
+| `get_readiness`          | ✅ Live (public)                                | `GET /ready` (legacy)                      |
+| `get_service_status`     | ✅ Live (public)                                | `GET /status` (legacy)                     |
+| `list_tiers`             | 🔒 Admin (opt-in, see below)                    | `GET /admin/tiers` (legacy)                |
+| `set_tier`               | 🔒 Admin (opt-in, see below)                    | `PUT /admin/tiers` (legacy)                |
+| `delete_tier`            | 🔒 Admin (opt-in, see below)                    | `DELETE /admin/tiers/{addr}` (legacy)      |
+| `get_deposit_target`     | 🚧 Pending — server-side endpoint not built yet | none yet                                   |
 
 `get_deposit_target` is wired into the agent flow but returns a clear
 `not_yet_available` message rather than faking a result; it lights up when the
@@ -83,17 +100,24 @@ every operation the v0.6.2 spec exposes under `/api/v1`.
   v1 route marks it required); `market_id` is optional with `cancel_all` to
   scope a mass-cancel to one market.
 - **Stay on the legacy gateway** (no `/api/v1` route): `list_market_specs`,
-  `get_order` (v1 mounts only PATCH + DELETE on `/orders/{id}`),
-  `get_withdrawals`, `get_adl_history`, `get_market_adl_events`,
-  `deposit_collateral`, the agent / api-key / admin-tier tools, `get_ws_token*`,
-  `get_health`, and the `demo/*` reads.
+  `get_market_risk_params`, `get_order` (v1 mounts only PATCH + DELETE on
+  `/orders/{id}`), `get_withdrawals`, `list_deposits`, `get_funding_payments`,
+  `get_adl_history`, `get_market_adl_events`, `deposit_collateral`,
+  `submit_deposit`, `claim_faucet`, `adjust_isolated_margin`, the agent /
+  api-key / admin-tier tools, `get_ws_token*`, `get_health`, `get_readiness`,
+  `get_service_status`, and the `demo/*` reads.
 
 ### API-surface coverage
 
-The WebSocket **upgrade** endpoints `GET /ws` and `GET /stream` are
-intentionally unmapped — a request/response MCP tool cannot hold a streaming
-socket open, so the server instead mints the auth token (`get_ws_token` /
-`get_ws_token_legacy`) the caller uses to connect to them directly.
+The tool surface covers **55 of the 57** distinct operations in Exchange API
+spec **v0.6.2** (85 spec operations counting the `/api/v1` aliases of the
+legacy routes; each aliased pair is one tool).
+
+The two unmapped operations are the WebSocket **upgrade** endpoints `GET /ws`
+and `GET /stream` — intentionally so: a request/response MCP tool cannot hold a
+streaming socket open, so the server instead mints the auth token
+(`get_ws_token` / `get_ws_token_legacy`) the caller uses to connect to them
+directly.
 
 ### Authorization tiers
 

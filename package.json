@@ -1,8 +1,7 @@
 {
-  "name": "@nexus/exchange-mcp",
+  "name": "@nexus-xyz/exchange-mcp",
   "version": "0.1.0",
-  "private": true,
-  "description": "MCP server for the Nexus Exchange API — lets an AI agent read market data and place trades.",
+  "description": "MCP server for the Nexus Exchange API \u2014 lets an AI agent read market data and place trades.",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
     "type": "git",
@@ -26,7 +25,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx test/*.test.ts",
     "test:coverage": "c8 --reporter=text-summary --reporter=text --reporter=lcov --reporter=json-summary --src src node --test --import tsx test/*.test.ts",
-    "smoke": "node --import tsx scripts/smoke.ts"
+    "smoke": "node --import tsx scripts/smoke.ts",
+    "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
@@ -45,5 +45,23 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "nexus",
+    "exchange",
+    "trading",
+    "agent"
+  ],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

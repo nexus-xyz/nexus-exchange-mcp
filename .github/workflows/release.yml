@@ -19,6 +19,15 @@ name: Release
 #     consumers can verify it was built from this repo at this commit.
 #   - npm ci installs exactly the lockfile; the registry rejects re-publishing an
 #     existing version, so a re-run can't clobber a release.
+#
+# First-release bootstrap (remove after v0.1.0 ships):
+#   The repo has no tags or releases yet, so .release-please-manifest.json is
+#   seeded empty ({}) — it records *published* versions only, and nothing is
+#   published. release-please-config.json pins `initial-version: 0.1.0` so the
+#   very first release PR proposes exactly 0.1.0 (matching package.json) instead
+#   of computing a bump past it. After the 0.1.0 release lands, delete the
+#   `initial-version` key — release-please writes the released version into the
+#   manifest and takes over normal conventional-commit versioning from there.
 
 on:
   push:

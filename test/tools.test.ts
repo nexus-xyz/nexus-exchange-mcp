@@ -323,6 +323,298 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
   assert.equal(calls[0].headers.get("authorization"), "Bearer admin_secret");
 });
 
+// ── v0.6.2 parity tools ──────────────────────────────────────────────────────
+
+test("public stats / readiness / status tools hit the right unsigned paths", async () => {
+  const cases: Array<[string, string]> = [
+    ["get_stats", `${BASE}/api/v1/stats`],
+    ["get_stats_history", `${BASE}/api/v1/stats/history`],
+    ["get_readiness", `${BASE}/ready`],
+    ["get_service_status", `${BASE}/status`],
+  ];
+  for (const [name, url] of cases) {
+    const calls = await capture(fullClient(), (c) =>
+      findTool(name)!.handler(c, {}),
+    );
+    assert.equal(calls[0].method, "GET", name);
+    assert.equal(calls[0].url, url, name);
+    // Public — no auth headers.
+    assert.equal(calls[0].headers.get("x-api-key"), null, name);
+    assert.equal(calls[0].headers.get("authorization"), null, name);
+  }
+});
+
+test("get_funding_samples encodes the market id and caps limit at 480", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_funding_samples")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      limit: 120,
+    }),
+  );
+  assert.equal(
+    calls[0].url,
+    `${BASE}/api/v1/markets/BTC-USDX-PERP/funding-samples?limit=120`,
+  );
+  assert.equal(calls[0].headers.get("x-api-key"), null, "public");
+
+  const tool = findTool("get_funding_samples")!;
+  assert.equal(
+    tool.zod.safeParse({ market_id: "X", limit: 481 }).success,
+    false,
+  );
+  assert.equal(
+    tool.zod.safeParse({ market_id: "X", limit: 480 }).success,
+    true,
+  );
+});
+
+test("get_market_risk_params GETs the legacy risk-params route unsigned", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_market_risk_params")!.handler(c, {
+      market_id: "ETH-USDX-PERP",
+    }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/markets/ETH-USDX-PERP/risk-params`);
+  assert.equal(calls[0].headers.get("x-api-key"), null, "public");
+});
+
+test("account summary / equity / closed positions / order history sign v1 GETs", async () => {
+  const cases: Array<[string, Record<string, unknown>, string]> = [
+    ["get_account_summary", {}, `${BASE}/api/v1/account/summary`],
+    [
+      "get_equity_history",
+      { limit: 60 },
+      `${BASE}/api/v1/account/equity-history?limit=60`,
+    ],
+    [
+      "get_closed_positions",
+      { limit: 10 },
+      `${BASE}/api/v1/positions/closed?limit=10`,
+    ],
+    [
+      "get_order_history",
+      { limit: 200 },
+      `${BASE}/api/v1/orders/history?limit=200`,
+    ],
+  ];
+  for (const [name, args, url] of cases) {
+    const calls = await capture(fullClient(), (c) =>
+      findTool(name)!.handler(c, args),
+    );
+    assert.equal(calls[0].method, "GET", name);
+    assert.equal(calls[0].url, url, name);
+    assert.ok(calls[0].headers.get("x-signature"), `${name} is HMAC-signed`);
+
+    const noCreds = new ExchangeClient({
+      directBaseUrl: BASE,
+      gatewayBaseUrl: BASE,
+    });
+    await assert.rejects(
+      () => findTool(name)!.handler(noCreds, {}) as Promise<unknown>,
+      MissingCredentialsError,
+      `${name} requires credentials`,
+    );
+  }
+});
+
+test("history tools enforce the spec limit caps in their schemas", () => {
+  const caps: Array<[string, number]> = [
+    ["get_equity_history", 720],
+    ["get_closed_positions", 200],
+    ["get_order_history", 500],
+    ["list_deposits", 100],
+    ["get_funding_payments", 1000],
+  ];
+  for (const [name, cap] of caps) {
+    const tool = findTool(name)!;
+    assert.equal(tool.zod.safeParse({ limit: cap }).success, true, name);
+    assert.equal(tool.zod.safeParse({ limit: cap + 1 }).success, false, name);
+    assert.equal(tool.zod.safeParse({ limit: 0 }).success, false, name);
+  }
+});
+
+test("amend_order PATCHes the v1 order route with market_id and a partial body", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("amend_order")!.handler(c, {
+      order_id: "abc/123",
+      market_id: "BTC-USDX-PERP",
+      price: "61000",
+    }),
+  );
+  assert.equal(calls[0].method, "PATCH");
+  assert.equal(
+    calls[0].url,
+    `${BASE}/api/v1/orders/abc%2F123?market_id=BTC-USDX-PERP`,
+  );
+  assert.deepEqual(calls[0].body, { price: "61000" });
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const both = await capture(fullClient(), (c) =>
+    findTool("amend_order")!.handler(c, {
+      order_id: "o1",
+      market_id: "BTC-USDX-PERP",
+      price: "61000",
+      size: "0.25",
+    }),
+  );
+  assert.deepEqual(both[0].body, { price: "61000", size: "0.25" });
+});
+
+test("amend_order schema requires at least one of price/size and market_id", () => {
+  const tool = findTool("amend_order")!;
+  assert.equal(
+    tool.zod.safeParse({ order_id: "o1", market_id: "BTC-USDX-PERP" }).success,
+    false,
+    "price or size required",
+  );
+  assert.equal(
+    tool.zod.safeParse({ order_id: "o1", size: "1" }).success,
+    false,
+    "market_id required",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      order_id: "o1",
+      market_id: "BTC-USDX-PERP",
+      size: "0",
+    }).success,
+    false,
+    "non-positive size rejected",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      order_id: "o1",
+      market_id: "BTC-USDX-PERP",
+      size: "1",
+    }).success,
+    true,
+  );
+});
+
+test("preview_order maps friendly args to the wire shape at /orders/preview", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("preview_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "limit",
+      size: "0.5",
+      price: "60000",
+      time_in_force: "PostOnly",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/orders/preview`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "Limit",
+    quantity: "0.5",
+    time_in_force: "PostOnly",
+    price: "60000",
+  });
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("place_order accepts the PostOnly time in force", () => {
+  const tool = findTool("place_order")!;
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "limit",
+      size: "1",
+      price: "60000",
+      time_in_force: "PostOnly",
+    }).success,
+    true,
+  );
+});
+
+test("submit_deposit POSTs {amount, asset?} to /deposits, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("submit_deposit")!.handler(c, { amount: "500", asset: "USDX" }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/deposits`);
+  assert.deepEqual(calls[0].body, { amount: "500", asset: "USDX" });
+  assert.ok(calls[0].headers.get("x-signature"));
+
+  // asset omitted -> not sent (server defaults to USDX).
+  const bare = await capture(fullClient(), (c) =>
+    findTool("submit_deposit")!.handler(c, { amount: "500" }),
+  );
+  assert.deepEqual(bare[0].body, { amount: "500" });
+
+  const tool = findTool("submit_deposit")!;
+  for (const amount of ["0", "-1", "abc", ""]) {
+    assert.equal(tool.zod.safeParse({ amount }).success, false, amount);
+  }
+});
+
+test("list_deposits GETs /deposits with limit, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_deposits")!.handler(c, { limit: 20 }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/deposits?limit=20`);
+  assert.ok(calls[0].headers.get("x-signature"));
+});
+
+test("claim_faucet POSTs to /faucet with no body, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("claim_faucet")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/faucet`);
+  assert.equal(calls[0].body, undefined, "no request body");
+  assert.ok(calls[0].headers.get("x-signature"));
+});
+
+test("adjust_isolated_margin POSTs the margin adjustment, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("adjust_isolated_margin")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      amount: "100",
+      direction: "add",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/account/margin`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    amount: "100",
+    direction: "add",
+  });
+  assert.ok(calls[0].headers.get("x-signature"));
+
+  const tool = findTool("adjust_isolated_margin")!;
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      amount: "100",
+      direction: "withdraw",
+    }).success,
+    false,
+    "direction is add|remove",
+  );
+});
+
+test("get_order forwards the optional market_id as a query param", async () => {
+  const withMarket = await capture(fullClient(), (c) =>
+    findTool("get_order")!.handler(c, {
+      order_id: "o1",
+      market_id: "BTC-USDX-PERP",
+    }),
+  );
+  assert.equal(withMarket[0].url, `${BASE}/orders/o1?market_id=BTC-USDX-PERP`);
+
+  const bare = await capture(fullClient(), (c) =>
+    findTool("get_order")!.handler(c, { order_id: "o1" }),
+  );
+  assert.equal(bare[0].url, `${BASE}/orders/o1`, "omitted -> no query");
+});
+
 test("tool names are unique and admin tools carry the adminOnly flag", () => {
   const names = tools.map((t) => t.name);
   assert.equal(new Set(names).size, names.length, "no duplicate tool names");

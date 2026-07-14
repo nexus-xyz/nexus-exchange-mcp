@@ -452,18 +452,21 @@ test("get_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
 });
 
 test("get_funding_payments builds filtered and unfiltered signed URLs", async () => {
+  // Spec route is GET /funding (fetchAccountFunding) — the old
+  // /funding-payments path never existed server-side.
   const calls = await captureCalls(async (c) => {
     await findTool("get_funding_payments")!.handler(c, {
       market_id: "BTC-USDX-PERP",
+      limit: 25,
     });
     await findTool("get_funding_payments")!.handler(c, {});
   });
 
   assert.equal(
     calls[0].url,
-    "http://example.test/funding-payments?market_id=BTC-USDX-PERP",
+    "http://example.test/funding?market_id=BTC-USDX-PERP&limit=25",
   );
-  assert.equal(calls[1].url, "http://example.test/funding-payments");
+  assert.equal(calls[1].url, "http://example.test/funding");
 
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",

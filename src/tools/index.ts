@@ -64,14 +64,17 @@ const positiveDecimal = (field: string) =>
       message: `${field} must be greater than 0`,
     });
 
-/** Friendly order args accepted by `place_order` / `place_orders_batch`. */
+/**
+ * Friendly order args accepted by `place_order` / `place_orders_batch` /
+ * `preview_order`.
+ */
 interface FriendlyOrder {
   market_id: string;
   side: "buy" | "sell";
   type: "limit" | "market";
   size: string;
   price?: string;
-  time_in_force?: "GTC" | "IOC" | "FOK";
+  time_in_force?: "GTC" | "IOC" | "FOK" | "PostOnly";
   reduce_only?: boolean;
 }
 
@@ -83,7 +86,7 @@ const friendlyOrderSchema = z
     type: z.enum(["limit", "market"]),
     size: positiveDecimal("size"),
     price: positiveDecimal("price").optional(),
-    time_in_force: z.enum(["GTC", "IOC", "FOK"]).optional(),
+    time_in_force: z.enum(["GTC", "IOC", "FOK", "PostOnly"]).optional(),
     reduce_only: z.boolean().optional(),
   })
   .strict()
@@ -117,8 +120,11 @@ const orderProps: Record<string, unknown> = {
   },
   time_in_force: {
     type: "string",
-    enum: ["GTC", "IOC", "FOK"],
-    description: "Time in force. Defaults to GTC for limit, IOC for market.",
+    enum: ["GTC", "IOC", "FOK", "PostOnly"],
+    description:
+      "Time in force. Defaults to GTC for limit, IOC for market. `PostOnly` " +
+      "rejects the order if it would take liquidity on entry, guaranteeing " +
+      "it rests as a maker.",
   },
   reduce_only: {
     type: "boolean",
@@ -396,6 +402,91 @@ export const tools: ToolDef[] = [
     },
   },
 
+  {
+    name: "get_funding_samples",
+    description:
+      "Get the dense per-tick funding premium-index samples for one perpetual " +
+      "market (60s cadence, up to 480 points = 8h). Finer-grained than " +
+      "`get_funding_history`, which returns the settled hourly rates. Public — " +
+      "no credentials needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+        limit: {
+          type: "integer",
+          description: "Maximum number of samples to return (max 480).",
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        limit: z.number().int().positive().max(480).optional(),
+      })
+      .strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const a = args as { market_id: string; limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/funding-samples`,
+        query,
+      });
+    },
+  },
+  {
+    name: "get_market_risk_params",
+    description:
+      "Get one market's risk parameters: margin requirements and maximum " +
+      "leverage, from the engine's market registry. Public — no credentials " +
+      "needed.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market id, e.g. "BTC-USDX-PERP".',
+        },
+      },
+      ["market_id"],
+    ),
+    zod: z.object({ market_id: z.string().min(1) }).strict(),
+    requiresAuth: false,
+    handler: (client, args) => {
+      const { market_id } = args as { market_id: string };
+      return client.request({
+        surface: "gateway",
+        path: `/markets/${encodeURIComponent(market_id)}/risk-params`,
+      });
+    },
+  },
+
+  // ── Public venue statistics (no credentials) ──────────────────────────────
+  {
+    name: "get_stats",
+    description:
+      "Get aggregate venue statistics (volume, trades, throughput) plus " +
+      "rolling unique-trader counts. Public — no credentials needed.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ path: "/api/v1/stats" }),
+  },
+  {
+    name: "get_stats_history",
+    description:
+      "Get the venue's per-second throughput history (ring buffer, up to 3600 " +
+      "points). Public — no credentials needed.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ path: "/api/v1/stats/history" }),
+  },
+
   // ── Public demo account (no credentials) ──────────────────────────────────
   // The indexer exposes a read-only demo namespace bound to a live bot
   // account (api.ts: indexer.demoAccount/demoPositions/demoOrders). Lets the
@@ -446,6 +537,44 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account", signed: true }),
   },
   {
+    name: "get_account_summary",
+    description:
+      "Get the authenticated account's portfolio summary (equity, margin " +
+      "usage, PnL rollup) — a richer view than `get_balance`. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/api/v1/account/summary", signed: true }),
+  },
+  {
+    name: "get_equity_history",
+    description:
+      "Get the authenticated account's equity time-series (5s cadence, ~1h " +
+      "window), oldest first. Requires API credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of points to return (max 720).",
+      },
+    }),
+    zod: z
+      .object({ limit: z.number().int().positive().max(720).optional() })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: "/api/v1/account/equity-history",
+        query,
+        signed: true,
+      });
+    },
+  },
+  {
     name: "get_positions",
     description:
       "Get the authenticated account's open positions. Requires API credentials.",
@@ -454,6 +583,32 @@ export const tools: ToolDef[] = [
     requiresAuth: true,
     handler: (client) =>
       client.request({ path: "/api/v1/positions", signed: true }),
+  },
+  {
+    name: "get_closed_positions",
+    description:
+      "Get the authenticated account's closed positions (realized PnL per " +
+      "position). Requires API credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return (max 200).",
+      },
+    }),
+    zod: z
+      .object({ limit: z.number().int().positive().max(200).optional() })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: "/api/v1/positions/closed",
+        query,
+        signed: true,
+      });
+    },
   },
   {
     name: "get_open_orders",
@@ -468,24 +623,67 @@ export const tools: ToolDef[] = [
   {
     name: "get_order",
     description:
-      "Get a single order by its id (status, fills, remaining size). Requires " +
-      "API credentials.",
+      "Get a single order by its id (status, fills, remaining size). Pass " +
+      "`market_id` when known — the spec marks it required for routing, though " +
+      "the gateway currently resolves the order without it. Requires API " +
+      "credentials.",
     inputSchema: jsonSchema(
       {
         order_id: {
           type: "string",
           description: "Order id to look up.",
         },
+        market_id: {
+          type: "string",
+          description:
+            "Market the order rests on (used for routing). Optional but " +
+            "recommended.",
+        },
       },
       ["order_id"],
     ),
-    zod: z.object({ order_id: z.string().min(1) }).strict(),
+    zod: z
+      .object({
+        order_id: z.string().min(1),
+        market_id: z.string().min(1).optional(),
+      })
+      .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const { order_id } = args as { order_id: string };
+      const a = args as { order_id: string; market_id?: string };
+      const query = a.market_id
+        ? `market_id=${encodeURIComponent(a.market_id)}`
+        : "";
       return client.request({
         surface: "gateway",
-        path: `/orders/${encodeURIComponent(order_id)}`,
+        path: `/orders/${encodeURIComponent(a.order_id)}`,
+        query,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "get_order_history",
+    description:
+      "Get the authenticated account's terminal-status order history (filled / " +
+      "cancelled / rejected / expired), newest first. Requires API credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return (max 500).",
+      },
+    }),
+    zod: z
+      .object({ limit: z.number().int().positive().max(500).optional() })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        path: "/api/v1/orders/history",
+        query,
         signed: true,
       });
     },
@@ -513,25 +711,36 @@ export const tools: ToolDef[] = [
   {
     name: "get_funding_payments",
     description:
-      "Get the authenticated account's funding-payment history, optionally " +
-      "filtered to a single market. Requires API credentials.",
+      "Get the authenticated account's funding-payment history, newest first, " +
+      "optionally filtered to a single market. Requires API credentials.",
     inputSchema: jsonSchema({
       market_id: {
         type: "string",
         description: 'Market id to filter to, e.g. "BTC-USDX-PERP". Optional.',
       },
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return (max 1000).",
+      },
     }),
-    zod: z.object({ market_id: z.string().min(1).optional() }).strict(),
+    zod: z
+      .object({
+        market_id: z.string().min(1).optional(),
+        limit: z.number().int().positive().max(1000).optional(),
+      })
+      .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { market_id?: string };
-      const query = a.market_id
-        ? `market_id=${encodeURIComponent(a.market_id)}`
-        : "";
+      const a = args as { market_id?: string; limit?: number };
+      // Spec route is GET /funding (fetchAccountFunding); the previously used
+      // /funding-payments path does not exist on any live surface.
+      const params = new URLSearchParams();
+      if (a.market_id) params.set("market_id", a.market_id);
+      if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
         surface: "gateway",
-        path: "/funding-payments",
-        query,
+        path: "/funding",
+        query: params.toString(),
         signed: true,
       });
     },
@@ -556,6 +765,33 @@ export const tools: ToolDef[] = [
       return client.request({
         surface: "gateway",
         path: "/withdrawals",
+        query,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "list_deposits",
+    description:
+      "List the authenticated account's deposit history. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return (max 100).",
+      },
+    }),
+    zod: z
+      .object({ limit: z.number().int().positive().max(100).optional() })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { limit?: number };
+      const query =
+        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
+      return client.request({
+        surface: "gateway",
+        path: "/deposits",
         query,
         signed: true,
       });
@@ -744,6 +980,90 @@ export const tools: ToolDef[] = [
       });
     },
   },
+  {
+    name: "amend_order",
+    description:
+      "Amend a resting order's price and/or size in one atomic cancel-replace " +
+      "operation. At least one of `price` or `size` is required; a pre-trade " +
+      "margin check is applied to the replacement before it is accepted. " +
+      "Liquidation orders cannot be amended. Requires API credentials. This " +
+      "modifies a REAL order on the matching engine.",
+    inputSchema: jsonSchema(
+      {
+        order_id: {
+          type: "string",
+          description: "Id of the resting order to amend.",
+        },
+        market_id: {
+          type: "string",
+          description: "Market the order rests on (required for routing).",
+        },
+        price: {
+          type: "string",
+          description:
+            "New limit price as a positive decimal string (> 0). Optional if " +
+            "`size` is given.",
+        },
+        size: {
+          type: "string",
+          description:
+            "New order size in base units as a positive decimal string (> 0). " +
+            "Optional if `price` is given.",
+        },
+      },
+      ["order_id", "market_id"],
+    ),
+    zod: z
+      .object({
+        order_id: z.string().min(1),
+        market_id: z.string().min(1),
+        price: positiveDecimal("price").optional(),
+        size: positiveDecimal("size").optional(),
+      })
+      .strict()
+      .refine((v) => v.price !== undefined || v.size !== undefined, {
+        message: "at least one of price or size is required",
+        path: ["price"],
+      }),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as {
+        order_id: string;
+        market_id: string;
+        price?: string;
+        size?: string;
+      };
+      const body: Record<string, unknown> = {};
+      if (a.price !== undefined) body.price = a.price;
+      if (a.size !== undefined) body.size = a.size;
+      return client.request({
+        method: "PATCH",
+        path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
+        query: `market_id=${encodeURIComponent(a.market_id)}`,
+        body,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "preview_order",
+    description:
+      "Preview an order without submitting it: projects the margin, equity, " +
+      "and fee impact of the order. Takes the same arguments as `place_order`. " +
+      "Nothing reaches the matching engine. Requires API credentials.",
+    inputSchema: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
+    zod: friendlyOrderSchema,
+    requiresAuth: true,
+    handler: (client, args) => {
+      const body = toWireOrder(args as FriendlyOrder);
+      return client.request({
+        method: "POST",
+        path: "/api/v1/orders/preview",
+        body,
+        signed: true,
+      });
+    },
+  },
 
   // ── Auto-deleveraging (per-market, requires credentials) ──────────────────
   {
@@ -842,6 +1162,121 @@ export const tools: ToolDef[] = [
         method: "POST",
         path: "/api/v1/account/credit",
         body,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "submit_deposit",
+    description:
+      "Submit a (testnet/synthetic) deposit for the authenticated account via " +
+      "the deposits ledger (`POST /deposits` — unlike `deposit_collateral`, " +
+      "the deposit is recorded and listable with `list_deposits`). `amount` is " +
+      "a positive decimal string; `asset` defaults to USDX. Requires API " +
+      "credentials. This moves REAL collateral on the account.",
+    inputSchema: jsonSchema(
+      {
+        amount: {
+          type: "string",
+          description: "Amount to deposit, as a positive decimal string (> 0).",
+        },
+        asset: {
+          type: "string",
+          description: 'Asset symbol. Optional; defaults to "USDX".',
+        },
+      },
+      ["amount"],
+    ),
+    zod: z
+      .object({
+        amount: positiveDecimal("amount"),
+        asset: z.string().min(1).optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { amount: string; asset?: string };
+      const body: Record<string, unknown> = { amount: a.amount };
+      if (a.asset !== undefined) body.asset = a.asset;
+      return client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/deposits",
+        body,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "claim_faucet",
+    description:
+      "Claim the fixed testnet faucet amount of synthetic USDX for the " +
+      "authenticated account, subject to a per-wallet cooldown and cumulative " +
+      "cap. Unlike `claim_credit` the amount is fixed server-side — no " +
+      "arguments. Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/faucet",
+        signed: true,
+      }),
+  },
+  {
+    name: "adjust_isolated_margin",
+    description:
+      "Add or remove isolated margin on an open position. Fails if the " +
+      "position is not in isolated margin mode (MarginModeNotIsolated), if " +
+      "there is no open position in the market (NoOpenPosition), or if a " +
+      "removal breaches the margin floor. `amount` is a positive decimal " +
+      "string. Requires API credentials. This moves REAL margin on the " +
+      "position.",
+    inputSchema: jsonSchema(
+      {
+        market_id: {
+          type: "string",
+          description: 'Market of the open position, e.g. "BTC-USDX-PERP".',
+        },
+        amount: {
+          type: "string",
+          description:
+            "USDX amount to add or remove, as a positive decimal string (> 0).",
+        },
+        direction: {
+          type: "string",
+          enum: ["add", "remove"],
+          description:
+            "Whether to add margin to or remove it from the position.",
+        },
+      },
+      ["market_id", "amount", "direction"],
+    ),
+    zod: z
+      .object({
+        market_id: z.string().min(1),
+        amount: positiveDecimal("amount"),
+        direction: z.enum(["add", "remove"]),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as {
+        market_id: string;
+        amount: string;
+        direction: "add" | "remove";
+      };
+      return client.request({
+        method: "POST",
+        surface: "gateway",
+        path: "/account/margin",
+        body: {
+          market_id: a.market_id,
+          amount: a.amount,
+          direction: a.direction,
+        },
         signed: true,
       });
     },
@@ -1148,6 +1583,29 @@ export const tools: ToolDef[] = [
     requiresAuth: false,
     handler: (client) =>
       client.request({ surface: "gateway", path: "/health" }),
+  },
+  {
+    name: "get_readiness",
+    description:
+      "Engine readiness probe: 200 once every configured market has received " +
+      "its first oracle price this run, 503 while any market is still in the " +
+      "oracle warm-up window. Distinct from `get_health` (liveness). Public — " +
+      "no credentials needed.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ surface: "gateway", path: "/ready" }),
+  },
+  {
+    name: "get_service_status",
+    description:
+      "Aggregate service health of the exchange stack (indexer / engine / " +
+      "oracle / bots), as used by status pages. Public — no credentials needed.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) =>
+      client.request({ surface: "gateway", path: "/status" }),
   },
 
   // ── Admin tier management (operator-only; gated off by default) ────────────

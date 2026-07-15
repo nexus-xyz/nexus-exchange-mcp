@@ -13,12 +13,21 @@
 
 import { createHash, createHmac } from "node:crypto";
 import {
+  API_SPEC_VERSION,
   DEFAULT_USER_AGENT,
   hasAdminSecret,
   hasCredentials,
   hasSessionToken,
   type ExchangeConfig,
 } from "./config.js";
+
+/**
+ * Header carrying the compiled-against Exchange API spec tag (see
+ * {@link API_SPEC_VERSION}) on every upstream request — documented as a
+ * contract convention in nexus-exchange-api (ENG-5953). Lower-cased to match
+ * the other header keys; Node normalizes header names to lower case anyway.
+ */
+export const API_VERSION_HEADER = "x-nexus-api-version";
 
 /**
  * Max upstream-body length forwarded into an agent-visible error. Kept tight:
@@ -206,6 +215,12 @@ export class ExchangeClient {
       // Identifies the calling surface (stdio CLI vs. hosted MCP) so usage can
       // be attributed in the exchange dashboard.
       "user-agent": this.cfg.userAgent ?? DEFAULT_USER_AGENT,
+      // The Exchange API spec tag this server is compiled against. Emitted on
+      // EVERY upstream request — public reads and signed writes alike — so the
+      // edge can attribute/segment by contract version (ENG-5957). It is a
+      // fixed compiled-in constant (no caller/env input), so there is no
+      // header-injection surface here.
+      [API_VERSION_HEADER]: API_SPEC_VERSION,
     };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
 

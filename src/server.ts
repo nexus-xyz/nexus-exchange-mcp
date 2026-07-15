@@ -13,12 +13,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { loadConfig, type ExchangeConfig } from "./config.js";
+import { loadConfig, PACKAGE_VERSION, type ExchangeConfig } from "./config.js";
 import { ExchangeClient } from "./client.js";
 import { findTool, visibleTools } from "./tools/index.js";
 
-/** Package version, surfaced in the MCP server handshake. */
-export const SERVER_VERSION = "0.1.0";
+/** Package version, surfaced in the MCP server handshake. Single-sourced from
+ * {@link PACKAGE_VERSION} so it stays in step with the wire User-Agent. */
+export const SERVER_VERSION = PACKAGE_VERSION;
 
 /**
  * Build an MCP `Server` whose tool handlers run against the given client.

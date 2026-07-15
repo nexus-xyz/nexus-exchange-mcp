@@ -12,6 +12,8 @@ import {
   createHttpMcpServer,
 } from "../src/http.js";
 import { visibleTools } from "../src/tools/index.js";
+import { API_SPEC_VERSION } from "../src/config.js";
+import { API_VERSION_HEADER } from "../src/client.js";
 
 /**
  * Boot the hosted HTTP MCP server on an ephemeral port and connect a real MCP
@@ -105,6 +107,8 @@ test("Streamable HTTP: a public tool call reaches the gateway and returns its re
     assert.equal(calls[0].url, "http://gateway.test/api/v1/markets/summary");
     // Hosted traffic is tagged so the dashboard can attribute it to MCP.
     assert.equal(calls[0].headers.get("user-agent"), HTTP_USER_AGENT);
+    // ...and carries the compiled-against spec tag like every other request.
+    assert.equal(calls[0].headers.get(API_VERSION_HEADER), API_SPEC_VERSION);
   } finally {
     globalThis.fetch = realFetch;
     await close();

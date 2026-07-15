@@ -73,11 +73,39 @@ export interface ExchangeConfig {
 const DEFAULT_BASE_URL = "https://exchange.nexus.xyz";
 
 /**
- * Default `User-Agent` for gateway requests. The hosted Streamable HTTP server
- * overrides this with an `-http` suffix (see src/http.ts) so the dashboard can
- * tell stdio traffic apart from the hosted MCP front door.
+ * The package version, and the single source of truth for the version we
+ * advertise on the wire (`User-Agent`) and in the MCP handshake
+ * (`SERVER_VERSION`). release-please keeps this line in step with
+ * package.json on every release via the `x-release-please-version` annotation
+ * (wired through `extra-files` in release-please-config.json), so the metered
+ * client version can never silently drift from the published package version.
  */
-export const DEFAULT_USER_AGENT = "nexus-exchange-mcp/0.1.0";
+export const PACKAGE_VERSION = "0.1.0"; // x-release-please-version
+
+/**
+ * Exchange API spec tag this server is compiled against, sent as
+ * `X-Nexus-Api-Version` on every upstream request so the edge can attribute and
+ * segment usage by the contract version we target (ENG-5957, parent ENG-5350).
+ *
+ * This is the hosted MCP's OWN pin — it advances independently of the SDKs. It
+ * MUST equal the `.api-version` file (the pin the drift check and the
+ * api-version-sync bot own); a unit test enforces that, so a spec bump is
+ * always a reviewed code change rather than a silently altered wire header. We
+ * keep it as a compiled-in constant rather than reading `.api-version` at
+ * runtime: the published npm package and container images ship only `dist/`
+ * (see package.json `files`), so a runtime file read would break there — the
+ * constant is baked into `dist/config.js` and always emits the right tag.
+ */
+export const API_SPEC_VERSION = "v0.6.2";
+
+/**
+ * Default `User-Agent` for upstream requests, normalized to the
+ * `nexus-exchange-mcp/<version>` product token (ENG-5957). The hosted
+ * Streamable HTTP server appends a ` (http)` comment (see src/http.ts) so the
+ * dashboard can tell local stdio traffic apart from the hosted MCP front door
+ * while both still segment under the same product name + version.
+ */
+export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
 
 /**
  * Split a configured base URL into the direct-service origin (serves

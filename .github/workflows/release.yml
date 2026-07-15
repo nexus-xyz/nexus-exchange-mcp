@@ -1,0 +1,96 @@
+name: Release
+
+# Release automation for the npm package, in two stages (mirrors
+# nexus-exchange-ts's release.yml, adapted npm-for-pnpm):
+#
+#   1. release-please watches main. Conventional-commit history is accumulated
+#      into a "release PR" that bumps the version + CHANGELOG. Nothing publishes
+#      while that PR sits open. Merging it is the human gate: release-please then
+#      tags the commit and cuts a GitHub release, setting release_created=true.
+#
+#   2. Only on that release commit, the publish job re-runs the full CI gate and
+#      publishes to npm with provenance.
+#
+# Security posture:
+#   - Default-deny permissions at the top; each job is granted only what it needs.
+#   - The NPM_TOKEN is referenced exclusively by the publish job, which runs only
+#     on a release commit on main — never on PRs.
+#   - Provenance (--provenance + id-token: write) signs the published tarball so
+#     consumers can verify it was built from this repo at this commit.
+#   - npm ci installs exactly the lockfile; the registry rejects re-publishing an
+#     existing version, so a re-run can't clobber a release.
+#
+# First-release bootstrap (remove after v0.1.0 ships):
+#   The repo has no tags or releases yet, so .release-please-manifest.json is
+#   seeded empty ({}) — it records *published* versions only, and nothing is
+#   published. release-please-config.json pins `initial-version: 0.1.0` so the
+#   very first release PR proposes exactly 0.1.0 (matching package.json) instead
+#   of computing a bump past it. After the 0.1.0 release lands, delete the
+#   `initial-version` key — release-please writes the released version into the
+#   manifest and takes over normal conventional-commit versioning from there.
+
+on:
+  push:
+    branches: [main]
+
+# Default-deny; jobs opt into the minimum they need.
+permissions: {}
+
+# Serialize releases and never cancel a publish mid-flight.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release tag + GitHub release
+      pull-requests: write # open/update the release PR
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mint the OIDC token npm uses to attest provenance
+    environment: npm-publish # optional manual-approval / secret-scoping gate
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - run: npm ci
+
+      # Re-run the full gate on the exact commit being published — the bytes we
+      # publish are the bytes we verified.
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+
+      # Sanity-check the tarball contents (dist + bin entries present).
+      - run: npm pack --dry-run
+
+      # --provenance: signed build-provenance attestation.
+      # --access public: scoped (@nexus-xyz/…) packages are private by default.
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

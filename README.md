@@ -176,7 +176,7 @@ credentials — never commit real secrets.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.6.2`**.
+Currently targets Exchange API spec **`v0.7.0`**.
 
 <!-- api-version-sync:end -->
 

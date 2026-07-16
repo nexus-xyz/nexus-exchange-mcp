@@ -88,7 +88,8 @@ server-side capability ships.
 Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
 service exposes its own REST API and the indexer serves the exchange surface
 directly under `/api/v1` at the host root. This server calls those routes for
-every operation the v0.6.2 spec exposes under `/api/v1`.
+the v0.7.1 operations it exposes as tools (see
+[API-surface coverage](#api-surface-coverage) below).
 
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
   `…/api/exchange` gateway path. `/api/v1/*` resolves at the root; the
@@ -109,15 +110,28 @@ every operation the v0.6.2 spec exposes under `/api/v1`.
 
 ### API-surface coverage
 
-The tool surface covers **55 of the 57** distinct operations in Exchange API
-spec **v0.6.2** (85 spec operations counting the `/api/v1` aliases of the
+The tool surface covers **53 of the 62** distinct operations in Exchange API
+spec **v0.7.1** (92 spec operations counting the `/api/v1` aliases of the
 legacy routes; each aliased pair is one tool).
 
-The two unmapped operations are the WebSocket **upgrade** endpoints `GET /ws`
-and `GET /stream` — intentionally so: a request/response MCP tool cannot hold a
+The pin advanced from v0.6.2 to v0.7.1 as a pin-only bump (ENG-6038); no new
+tools were added, so the v0.7.1 additions are **not yet exposed** — tracked in
+ENG-6136:
+
+- **Account cancel-on-disconnect** — `GET` / `PUT /account/cancel-on-disconnect`.
+- **`/api/v1/bridge` Phase A** — bridge assets, deposit addresses, and deposit
+  tracking (five operations).
+- **`TrailingLimit` order type** — a new place-order request variant (a schema
+  addition on the already-mapped order endpoint, so it changes no route count).
+
+Of the remaining gap, the WebSocket **upgrade** endpoints `GET /ws` and
+`GET /stream` are unmapped by design: a request/response MCP tool cannot hold a
 streaming socket open, so the server instead mints the auth token
 (`get_ws_token` / `get_ws_token_legacy`) the caller uses to connect to them
-directly.
+directly. Separately, v0.7.1 drops the standalone `/health` and `/ready`
+liveness routes (only `/status` remains), so `get_health` / `get_readiness` now
+call routes the pinned spec no longer documents — reconciliation is folded into
+ENG-6136.
 
 ### Authorization tiers
 
@@ -176,7 +190,7 @@ credentials — never commit real secrets.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.6.2`**.
+Currently targets Exchange API spec **`v0.7.1`**.
 
 <!-- api-version-sync:end -->
 

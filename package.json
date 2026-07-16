@@ -1,7 +1,7 @@
 {
   "name": "@nexus-xyz/exchange-mcp",
   "version": "0.1.0",
-  "description": "MCP server for the Nexus Exchange API \u2014 lets an AI agent read market data and place trades.",
+  "description": "MCP server for the Nexus Exchange API — lets an AI agent read market data and place trades.",
   "license": "(MIT OR Apache-2.0)",
   "repository": {
     "type": "git",

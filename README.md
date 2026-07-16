@@ -156,21 +156,28 @@ Destructive tools (`revoke_agent`, `delete_api_key`, `delete_tier`, and
 
 ## Quick start
 
-```bash
-npm install
-npm run build
-npm start          # runs the stdio MCP server
-```
-
-`npm start` waits on stdio for an MCP client; it is meant to be launched by
-Claude rather than run by hand. To verify it works end-to-end against the live
-API without a client, use the smoke check:
+The server is published to npm as
+[`@nexus-xyz/exchange-mcp`](https://www.npmjs.com/package/@nexus-xyz/exchange-mcp),
+so it runs with no clone and no build step. Register it with Claude Code in one
+line:
 
 ```bash
-npm run smoke      # lists tools, calls list_markets against production
+claude mcp add nexus -- npx -y @nexus-xyz/exchange-mcp
 ```
 
-Expected output ends with `list_markets OK -> N markets`.
+Or launch the stdio server directly (`npx` fetches the package on first run):
+
+```bash
+npx -y @nexus-xyz/exchange-mcp
+```
+
+It waits on stdio for an MCP client and is meant to be launched by that client
+(see [Claude Desktop config](#claude-desktop-config) below) rather than run by
+hand. Market-data and demo tools work with zero configuration; see
+[Environment variables](#environment-variables) to enable account/trading tools.
+
+Prefer to run from a checkout — for development, or to use the smoke check? See
+[Development](#development).
 
 ## Environment variables
 
@@ -237,15 +244,14 @@ public `get_demo_*` tools to demo the account flow with no secrets.
 ## Claude Desktop config
 
 Add this to your Claude Desktop config
-(`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS),
-adjusting the absolute path to this package's `dist/index.js`:
+(`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
 
 ```json
 {
   "mcpServers": {
     "nexus-exchange": {
-      "command": "node",
-      "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@nexus-xyz/exchange-mcp"],
       "env": {
         "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz"
       }
@@ -253,6 +259,10 @@ adjusting the absolute path to this package's `dist/index.js`:
   }
 }
 ```
+
+Running from a local checkout instead? Use `"command": "node"` with
+`"args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"]` (after
+`npm run build`).
 
 To enable trading, add `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`
 to the `env` block and set `NEXUS_EXCHANGE_API_URL` to a direct gateway.
@@ -274,6 +284,10 @@ add Nexus as a remote MCP server without running any key-holding software
 locally.
 
 ```bash
+# from the published package (no clone):
+npx -p @nexus-xyz/exchange-mcp nexus-exchange-mcp-http
+
+# or from a checkout:
 npm run build
 npm run start:http   # listens on :8080, MCP endpoint at /mcp, probe at /healthz
 ```
@@ -318,6 +332,18 @@ version.
 
 ## Development
 
+Clone and build from source:
+
+```bash
+git clone https://github.com/nexus-xyz/nexus-exchange-mcp.git
+cd nexus-exchange-mcp
+npm install
+npm run build
+npm start            # runs the stdio MCP server from the local build
+```
+
+Then the usual checks:
+
 ```bash
 npm run format     # prettier --write
 npm run lint       # eslint
@@ -326,6 +352,8 @@ npm test           # unit tests (HMAC scheme, arg mapping, schemas)
 npm run test:coverage # unit tests + coverage (text/lcov/json-summary); CI emits the %
 npm run smoke      # live end-to-end check against the gateway
 ```
+
+`npm run smoke` output ends with `list_markets OK -> N markets`.
 
 ## License
 

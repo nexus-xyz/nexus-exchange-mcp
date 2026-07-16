@@ -150,7 +150,7 @@ test("API_SPEC_VERSION equals the .api-version pin and is a valid tag", () => {
     "utf8",
   ).trim();
   assert.equal(API_SPEC_VERSION, pinned);
-  assert.match(API_SPEC_VERSION, /^v[0-9]+(\.[0-9]+){0,2}$/);
+  assert.match(API_SPEC_VERSION, /^v\d+\.\d+\.\d+$/);
 });
 
 test("DEFAULT_USER_AGENT is the normalized nexus-exchange-mcp/<version> token", () => {

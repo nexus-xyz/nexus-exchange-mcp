@@ -203,7 +203,7 @@ a newer spec releases. The line above is bot-managed; everything around it is
 human-owned.
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
-header (e.g. `X-Nexus-Api-Version: v0.6.2`), alongside a normalized
+header (e.g. `X-Nexus-Api-Version: v0.7.1`), alongside a normalized
 `User-Agent: nexus-exchange-mcp/<version>`, so the exchange edge can attribute
 and segment usage by client and by the contract version this server targets.
 The header value is the server's own compiled-against tag — it is baked in at

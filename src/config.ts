@@ -96,7 +96,7 @@ export const PACKAGE_VERSION = "0.1.0"; // x-release-please-version
  * (see package.json `files`), so a runtime file read would break there — the
  * constant is baked into `dist/config.js` and always emits the right tag.
  */
-export const API_SPEC_VERSION = "v0.6.2";
+export const API_SPEC_VERSION = "v0.7.1";
 
 /**
  * Default `User-Agent` for upstream requests, normalized to the

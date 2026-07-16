@@ -202,6 +202,14 @@ to check for drift, and the scheduled `api-version-sync` workflow opens a PR whe
 a newer spec releases. The line above is bot-managed; everything around it is
 human-owned.
 
+Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
+header (e.g. `X-Nexus-Api-Version: v0.7.1`), alongside a normalized
+`User-Agent: nexus-exchange-mcp/<version>`, so the exchange edge can attribute
+and segment usage by client and by the contract version this server targets.
+The header value is the server's own compiled-against tag — it is baked in at
+build time (a test keeps it equal to [`.api-version`](./.api-version)), so it is
+never taken from caller input.
+
 ## Authentication
 
 Signed requests use the same canonical HMAC-SHA256 scheme the indexer verifies
@@ -282,9 +290,11 @@ register the identical `ToolDef[]` from `src/tools/` via
 `createServerForClient` in `src/server.ts`, so the tools never drift. The
 transport is the SDK's `StreamableHTTPServerTransport` in stateful mode (one
 MCP session per `mcp-session-id`), which also serves the SSE fallback stream
-for server→client messages. Hosted traffic is tagged with a distinct
-`User-Agent` (`nexus-exchange-mcp-http/...`) so usage attributes to "MCP" in
-the dashboard.
+for server→client messages. Hosted traffic keeps the same
+`nexus-exchange-mcp/<version>` `User-Agent` as the stdio CLI but appends a
+` (http)` comment (`nexus-exchange-mcp/<version> (http)`) so usage attributes
+to the hosted MCP in the dashboard while still segmenting under one product and
+version.
 
 ### Authentication (MVP — no OAuth yet)
 

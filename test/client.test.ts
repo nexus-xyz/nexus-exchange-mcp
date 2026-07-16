@@ -1,14 +1,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
+  API_VERSION_HEADER,
   ExchangeApiError,
   ExchangeClient,
   MissingCredentialsError,
   sanitizeErrorBody,
 } from "../src/client.js";
 import { findTool, tools } from "../src/tools/index.js";
-import { deriveBases, loadConfig } from "../src/config.js";
+import {
+  API_SPEC_VERSION,
+  DEFAULT_USER_AGENT,
+  PACKAGE_VERSION,
+  deriveBases,
+  loadConfig,
+} from "../src/config.js";
 
 /**
  * Reference HMAC implementation that mirrors the indexer's verify_hmac
@@ -87,6 +95,77 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
   );
   assert.equal(captured!.headers.get("x-signature"), expected);
   assert.equal(captured!.url, "http://example.test/orders");
+});
+
+test("every upstream request carries X-Nexus-Api-Version + a normalized User-Agent", async () => {
+  // The "done when" of ENG-5957: both headers are emitted by default on every
+  // upstream request — public reads and signed writes alike.
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00".repeat(32),
+  });
+
+  const seen: Headers[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    seen.push(new Headers(init.headers));
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    // (a) public, unsigned GET
+    await client.request({ path: "/api/v1/markets/summary" });
+    // (b) signed POST with a body
+    await client.request({
+      path: "/api/v1/orders",
+      method: "POST",
+      body: { market_id: "BTC-USDX-PERP" },
+      signed: true,
+    });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  assert.equal(seen.length, 2);
+  for (const headers of seen) {
+    assert.equal(
+      headers.get(API_VERSION_HEADER),
+      API_SPEC_VERSION,
+      "compiled-against spec tag is sent",
+    );
+    assert.equal(
+      headers.get("user-agent"),
+      DEFAULT_USER_AGENT,
+      "User-Agent is the normalized product token",
+    );
+  }
+});
+
+test("API_SPEC_VERSION equals the .api-version pin and is a valid tag", () => {
+  // The wire header must never drift from the pin the drift check owns; keeping
+  // it a compiled constant means a spec bump is a reviewed code change.
+  const pinned = readFileSync(
+    new URL("../.api-version", import.meta.url),
+    "utf8",
+  ).trim();
+  assert.equal(API_SPEC_VERSION, pinned);
+  assert.match(API_SPEC_VERSION, /^v\d+\.\d+\.\d+$/);
+});
+
+test("DEFAULT_USER_AGENT is the normalized nexus-exchange-mcp/<version> token", () => {
+  assert.equal(DEFAULT_USER_AGENT, `nexus-exchange-mcp/${PACKAGE_VERSION}`);
+  assert.match(DEFAULT_USER_AGENT, /^nexus-exchange-mcp\/\d+\.\d+\.\d+$/);
+});
+
+test("PACKAGE_VERSION stays in step with package.json", () => {
+  // release-please bumps both package.json and the PACKAGE_VERSION line (via
+  // extra-files) in the same release commit; this guards that they match, so a
+  // broken annotation can't let the metered version silently fall behind.
+  const pkg = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  assert.equal(PACKAGE_VERSION, pkg.version);
 });
 
 test("signed tool without credentials throws MissingCredentialsError", async () => {

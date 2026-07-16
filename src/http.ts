@@ -41,7 +41,7 @@ import {
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { ExchangeClient } from "./client.js";
-import { loadConfig, type ExchangeConfig } from "./config.js";
+import { loadConfig, PACKAGE_VERSION, type ExchangeConfig } from "./config.js";
 import { createServerForClient } from "./server.js";
 
 /** Header names the caller uses to pass their Exchange HMAC credential. */
@@ -49,11 +49,13 @@ export const API_KEY_HEADER = "x-nexus-api-key";
 export const API_SECRET_HEADER = "x-nexus-api-secret";
 
 /**
- * `User-Agent` the hosted server sends to the gateway. The `-http` suffix lets
- * the dashboard distinguish hosted-MCP traffic from the local stdio CLI
- * (DEFAULT_USER_AGENT in config.ts).
+ * `User-Agent` the hosted server sends upstream. Same normalized
+ * `nexus-exchange-mcp/<version>` product token as the stdio CLI
+ * (DEFAULT_USER_AGENT in config.ts), with a trailing ` (http)` comment so the
+ * dashboard can tell hosted-MCP traffic apart from local stdio while both
+ * still segment under one product name + version (ENG-5957).
  */
-export const HTTP_USER_AGENT = "nexus-exchange-mcp-http/0.1.0";
+export const HTTP_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION} (http)`;
 
 /** Read a single request header as a string (Node lower-cases header keys). */
 function header(req: IncomingMessage, name: string): string | undefined {

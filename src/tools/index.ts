@@ -71,11 +71,13 @@ const positiveDecimal = (field: string) =>
 interface FriendlyOrder {
   market_id: string;
   side: "buy" | "sell";
-  type: "limit" | "market";
+  type: "limit" | "market" | "trailing_limit";
   size: string;
   price?: string;
   time_in_force?: "GTC" | "IOC" | "FOK" | "PostOnly";
   reduce_only?: boolean;
+  trailing_offset_bps?: number;
+  limit_offset_bps?: number;
 }
 
 /** Zod schema for one friendly order (shared by single + batch tools). */
@@ -83,17 +85,32 @@ const friendlyOrderSchema = z
   .object({
     market_id: z.string().min(1),
     side: z.enum(["buy", "sell"]),
-    type: z.enum(["limit", "market"]),
+    type: z.enum(["limit", "market", "trailing_limit"]),
     size: positiveDecimal("size"),
     price: positiveDecimal("price").optional(),
     time_in_force: z.enum(["GTC", "IOC", "FOK", "PostOnly"]).optional(),
     reduce_only: z.boolean().optional(),
+    // Trailing-order offsets, in basis points (integers). The spec bounds
+    // limit_offset_bps to [0, 9999]; trailing_offset_bps only to >= 0.
+    trailing_offset_bps: z.number().int().nonnegative().optional(),
+    limit_offset_bps: z.number().int().min(0).max(9999).optional(),
   })
   .strict()
   .refine((v) => v.type !== "limit" || v.price !== undefined, {
     message: "price is required for limit orders",
     path: ["price"],
-  });
+  })
+  .refine(
+    (v) =>
+      v.type !== "trailing_limit" ||
+      (v.trailing_offset_bps !== undefined && v.limit_offset_bps !== undefined),
+    {
+      message:
+        "trailing_offset_bps and limit_offset_bps are both required for " +
+        "trailing_limit orders",
+      path: ["trailing_offset_bps"],
+    },
+  );
 
 /** JSON Schema properties for one friendly order (shared by single + batch). */
 const orderProps: Record<string, unknown> = {
@@ -104,8 +121,11 @@ const orderProps: Record<string, unknown> = {
   side: { type: "string", enum: ["buy", "sell"], description: "Order side." },
   type: {
     type: "string",
-    enum: ["limit", "market"],
-    description: "Order type.",
+    enum: ["limit", "market", "trailing_limit"],
+    description:
+      "Order type. `trailing_limit` trails the mark price and, when it " +
+      "retraces by `trailing_offset_bps`, rests a limit order priced off the " +
+      "fire price by `limit_offset_bps`.",
   },
   size: {
     type: "string",
@@ -116,7 +136,8 @@ const orderProps: Record<string, unknown> = {
     type: "string",
     description:
       "Limit price as a positive decimal string (> 0). Required for limit " +
-      "orders, ignored for market.",
+      "orders, ignored for market and trailing_limit (the trailing limit " +
+      "price is computed at fire time).",
   },
   time_in_force: {
     type: "string",
@@ -130,6 +151,25 @@ const orderProps: Record<string, unknown> = {
     type: "boolean",
     description: "If true, only reduces an existing position.",
   },
+  trailing_offset_bps: {
+    type: "integer",
+    minimum: 0,
+    description:
+      "Trailing trigger offset in basis points (1 bp = 0.01%). Required for " +
+      "`trailing_limit` orders, ignored otherwise. Fires once the mark price " +
+      "retraces from its best-seen extreme by this many bps (0 fires at the " +
+      "first evaluation).",
+  },
+  limit_offset_bps: {
+    type: "integer",
+    minimum: 0,
+    maximum: 9999,
+    description:
+      "Fire-time limit-price offset in basis points (`trailing_limit` only; " +
+      "required together with `trailing_offset_bps`). The rested limit sits " +
+      "at fire_price * (1 + offset) for buys / * (1 - offset) for sells; 0 " +
+      "rests exactly at the fire price.",
+  },
 };
 
 /**
@@ -138,14 +178,26 @@ const orderProps: Record<string, unknown> = {
  * time_in_force.
  */
 function toWireOrder(a: FriendlyOrder): Record<string, unknown> {
+  const orderType =
+    a.type === "limit"
+      ? "Limit"
+      : a.type === "market"
+        ? "Market"
+        : "TrailingLimit";
   const body: Record<string, unknown> = {
     market_id: a.market_id,
     side: a.side === "buy" ? "Buy" : "Sell",
-    order_type: a.type === "limit" ? "Limit" : "Market",
+    order_type: orderType,
     quantity: a.size,
-    time_in_force: a.time_in_force ?? (a.type === "limit" ? "GTC" : "IOC"),
+    // Resting-order types (limit, trailing_limit) default GTC; market is IOC.
+    time_in_force: a.time_in_force ?? (a.type === "market" ? "IOC" : "GTC"),
   };
   if (a.type === "limit") body.price = a.price;
+  if (a.type === "trailing_limit") {
+    // Zod guarantees both are present for trailing_limit.
+    body.trailing_offset_bps = a.trailing_offset_bps;
+    body.limit_offset_bps = a.limit_offset_bps;
+  }
   if (a.reduce_only) body.reduce_only = true;
   return body;
 }
@@ -847,13 +899,69 @@ export const tools: ToolDef[] = [
     },
   },
 
+  // ── Cancel-on-disconnect (dead man's switch; requires credentials) ────────
+  {
+    name: "get_cancel_on_disconnect",
+    description:
+      "Get the authenticated account's cancel-on-disconnect (COD) status. COD " +
+      "is an opt-in dead man's switch: when the account's last authenticated " +
+      "WebSocket connection drops and does not reconnect within the grace " +
+      "window, the exchange cancels all of the account's resting orders. " +
+      "Returns `enabled` (the account's own opt-in), `active` (whether it will " +
+      "actually fire — the opt-in AND the exchange-side feature switch), and " +
+      "`grace_secs` (the reconnect window in seconds, null when the feature is " +
+      "unavailable). Clients that trade purely over REST and never open a " +
+      "WebSocket are not covered. Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({
+        path: "/api/v1/account/cancel-on-disconnect",
+        signed: true,
+      }),
+  },
+  {
+    name: "set_cancel_on_disconnect",
+    description:
+      "Enable or disable cancel-on-disconnect (COD) for the authenticated " +
+      "account. Pass `enabled: true` to arm the dead man's switch (the " +
+      "exchange cancels all resting orders when your authenticated WebSocket " +
+      "drops and does not reconnect within the grace window) or " +
+      "`enabled: false` to disable it. Off by default. `enabled` is required " +
+      "and explicit — there is no default — so every call states the intended " +
+      "state and an argless call is rejected rather than silently toggling. " +
+      "Returns the resulting COD status. Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        enabled: {
+          type: "boolean",
+          description: "True to enable COD for the account, false to disable.",
+        },
+      },
+      ["enabled"],
+    ),
+    zod: z.object({ enabled: z.boolean() }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { enabled } = args as { enabled: boolean };
+      return client.request({
+        method: "PUT",
+        path: "/api/v1/account/cancel-on-disconnect",
+        body: { enabled },
+        signed: true,
+      });
+    },
+  },
+
   // ── Trade actions (require credentials) ───────────────────────────────────
   {
     name: "place_order",
     description:
-      "Place an order on a market. Supports limit and market orders, buy/sell. " +
-      "For limit orders a `price` is required. Requires API credentials. This " +
-      "submits a REAL order to the matching engine.",
+      "Place an order on a market. Supports limit, market, and trailing_limit " +
+      "orders, buy/sell. For limit orders a `price` is required; trailing_limit " +
+      "orders require `trailing_offset_bps` and `limit_offset_bps`. Requires " +
+      "API credentials. This submits a REAL order to the matching engine.",
     inputSchema: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
     zod: friendlyOrderSchema,
     requiresAuth: true,
@@ -871,9 +979,9 @@ export const tools: ToolDef[] = [
     name: "place_orders_batch",
     description:
       "Submit multiple orders in one request. Each order has the same shape as " +
-      "`place_order` (market_id, side, type, size, optional price/" +
-      "time_in_force/reduce_only). Requires API credentials. This submits REAL " +
-      "orders to the matching engine.",
+      "`place_order` (market_id, side, type, size, and the type-dependent " +
+      "price / trailing offsets / time_in_force / reduce_only). Requires API " +
+      "credentials. This submits REAL orders to the matching engine.",
     inputSchema: jsonSchema(
       {
         orders: {
@@ -1282,6 +1390,147 @@ export const tools: ToolDef[] = [
     },
   },
 
+  // ── Bridge: cross-chain deposits (Phase A) ────────────────────────────────
+  {
+    name: "get_bridge_assets",
+    description:
+      "List the bridgeable chains and, per chain, the depositable assets " +
+      "(USDC, USDX) and withdrawable assets (USDX) with their decimals, " +
+      "minimum amounts, required confirmations, and fees. Public catalog — no " +
+      "credentials needed. Use it to discover valid `chain` values for the " +
+      "other bridge tools.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: false,
+    handler: (client) => client.request({ path: "/api/v1/bridge/assets" }),
+  },
+  {
+    name: "create_bridge_deposit_address",
+    description:
+      "Get or create the authenticated account's cross-chain deposit address " +
+      "on a chain. Sending a supported asset to the returned address credits " +
+      "the account. Idempotent per (account, chain): repeated calls return the " +
+      "same address rather than allocating a new one. Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        chain: {
+          type: "string",
+          description:
+            'Chain to get-or-create a deposit address on, e.g. "ethereum". ' +
+            "Use `get_bridge_assets` to discover supported chains.",
+        },
+      },
+      ["chain"],
+    ),
+    zod: z.object({ chain: z.string().min(1) }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { chain } = args as { chain: string };
+      return client.request({
+        method: "POST",
+        path: "/api/v1/bridge/deposit-addresses",
+        body: { chain },
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "list_bridge_deposit_addresses",
+    description:
+      "List the authenticated account's cross-chain deposit addresses across " +
+      "chains. Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({
+        path: "/api/v1/bridge/deposit-addresses",
+        signed: true,
+      }),
+  },
+  {
+    name: "list_bridge_deposits",
+    description:
+      "List the authenticated account's cross-chain (bridge) deposits, newest " +
+      "first. Optionally filter by source `chain`, `asset` (USDC|USDX), or " +
+      "`status` (detected|confirming|credited|failed). Distinct from " +
+      "`list_deposits`, which lists the account's ledger deposits. Requires " +
+      "API credentials.",
+    inputSchema: jsonSchema({
+      limit: {
+        type: "integer",
+        description: "Maximum number of records to return (max 100).",
+      },
+      chain: {
+        type: "string",
+        description: "Filter by source chain. Optional.",
+      },
+      asset: {
+        type: "string",
+        enum: ["USDC", "USDX"],
+        description: "Filter by deposited asset. Optional.",
+      },
+      status: {
+        type: "string",
+        enum: ["detected", "confirming", "credited", "failed"],
+        description: "Filter by deposit status. Optional.",
+      },
+    }),
+    zod: z
+      .object({
+        limit: z.number().int().positive().max(100).optional(),
+        chain: z.string().min(1).optional(),
+        asset: z.enum(["USDC", "USDX"]).optional(),
+        status: z
+          .enum(["detected", "confirming", "credited", "failed"])
+          .optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as {
+        limit?: number;
+        chain?: string;
+        asset?: string;
+        status?: string;
+      };
+      const params = new URLSearchParams();
+      if (a.limit !== undefined) params.set("limit", String(a.limit));
+      if (a.chain) params.set("chain", a.chain);
+      if (a.asset) params.set("asset", a.asset);
+      if (a.status) params.set("status", a.status);
+      return client.request({
+        path: "/api/v1/bridge/deposits",
+        query: params.toString(),
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "get_bridge_deposit",
+    description:
+      "Fetch a single cross-chain (bridge) deposit by id. Only deposits owned " +
+      "by the authenticated account are returned. Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        id: {
+          type: "string",
+          description: "Deposit identifier.",
+        },
+      },
+      ["id"],
+    ),
+    zod: z.object({ id: z.string().min(1) }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { id } = args as { id: string };
+      return client.request({
+        path: `/api/v1/bridge/deposits/${encodeURIComponent(id)}`,
+        signed: true,
+      });
+    },
+  },
+
   // ── Agent-key management (requires credentials) ───────────────────────────
   {
     name: "list_agents",
@@ -1573,29 +1822,11 @@ export const tools: ToolDef[] = [
   },
 
   // ── Service health (public) ───────────────────────────────────────────────
-  {
-    name: "get_health",
-    description:
-      "Health check for the exchange gateway (liveness/readiness). Public — no " +
-      "credentials needed.",
-    inputSchema: jsonSchema({}),
-    zod: z.object({}).strict(),
-    requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/health" }),
-  },
-  {
-    name: "get_readiness",
-    description:
-      "Engine readiness probe: 200 once every configured market has received " +
-      "its first oracle price this run, 503 while any market is still in the " +
-      "oracle warm-up window. Distinct from `get_health` (liveness). Public — " +
-      "no credentials needed.",
-    inputSchema: jsonSchema({}),
-    zod: z.object({}).strict(),
-    requiresAuth: false,
-    handler: (client) => client.request({ surface: "gateway", path: "/ready" }),
-  },
+  // v0.7.0 removed the standalone `/health` and `/ready` liveness routes from
+  // the public contract (they are operational probes, not a public API);
+  // `/status` is the surviving, contract-documented health surface, so the
+  // former `get_health` / `get_readiness` tools were dropped in favour of the
+  // single `get_service_status` below (ENG-6136).
   {
     name: "get_service_status",
     description:
@@ -1710,8 +1941,10 @@ export const tools: ToolDef[] = [
     name: "get_deposit_target",
     description:
       "Get the on-chain deposit target (address/memo) to fund the account. " +
-      "Not yet available — the gateway exposes deposit submission but no " +
-      "deposit-address endpoint yet.",
+      "Superseded on the direct surface by the bridge deposit-address tools " +
+      "(`create_bridge_deposit_address` / `list_bridge_deposit_addresses`), " +
+      "which return per-chain on-chain deposit addresses — prefer those. This " +
+      "legacy single-target lookup remains unbuilt server-side.",
     inputSchema: jsonSchema({
       asset: {
         type: "string",

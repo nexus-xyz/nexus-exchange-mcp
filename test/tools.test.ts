@@ -59,17 +59,6 @@ async function capture(
   return calls;
 }
 
-test("get_health hits /health unsigned", async () => {
-  const calls = await capture(fullClient(), (c) =>
-    findTool("get_health")!.handler(c, {}),
-  );
-  assert.equal(calls[0].method, "GET");
-  assert.equal(calls[0].url, `${BASE}/health`);
-  // Public — no auth headers.
-  assert.equal(calls[0].headers.get("x-api-key"), null);
-  assert.equal(calls[0].headers.get("authorization"), null);
-});
-
 test("get_market_adl_events encodes market id and forwards limit, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
     findTool("get_market_adl_events")!.handler(c, {
@@ -325,11 +314,10 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
 
 // ── v0.6.2 parity tools ──────────────────────────────────────────────────────
 
-test("public stats / readiness / status tools hit the right unsigned paths", async () => {
+test("public stats / status tools hit the right unsigned paths", async () => {
   const cases: Array<[string, string]> = [
     ["get_stats", `${BASE}/api/v1/stats`],
     ["get_stats_history", `${BASE}/api/v1/stats/history`],
-    ["get_readiness", `${BASE}/ready`],
     ["get_service_status", `${BASE}/status`],
   ];
   for (const [name, url] of cases) {
@@ -613,6 +601,217 @@ test("get_order forwards the optional market_id as a query param", async () => {
     findTool("get_order")!.handler(c, { order_id: "o1" }),
   );
   assert.equal(bare[0].url, `${BASE}/orders/o1`, "omitted -> no query");
+});
+
+// ── v0.7.1 tool surface (ENG-6136) ───────────────────────────────────────────
+
+test("get_cancel_on_disconnect GETs the signed v1 COD route", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_cancel_on_disconnect")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const noCreds = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
+  await assert.rejects(
+    () =>
+      findTool("get_cancel_on_disconnect")!.handler(
+        noCreds,
+        {},
+      ) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("set_cancel_on_disconnect PUTs {enabled} and requires an explicit boolean", async () => {
+  for (const enabled of [true, false]) {
+    const calls = await capture(fullClient(), (c) =>
+      findTool("set_cancel_on_disconnect")!.handler(c, { enabled }),
+    );
+    assert.equal(calls[0].method, "PUT");
+    assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+    assert.deepEqual(calls[0].body, { enabled });
+    assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+  }
+
+  const tool = findTool("set_cancel_on_disconnect")!;
+  // `enabled` is required and explicit — an argless call is rejected.
+  assert.equal(tool.zod.safeParse({}).success, false, "enabled required");
+  assert.equal(
+    tool.zod.safeParse({ enabled: "true" }).success,
+    false,
+    "enabled must be a boolean",
+  );
+});
+
+test("get_bridge_assets GETs the public v1 bridge catalog unsigned", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_bridge_assets")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/assets`);
+  // Public — no auth headers.
+  assert.equal(calls[0].headers.get("x-api-key"), null);
+  assert.equal(calls[0].headers.get("authorization"), null);
+});
+
+test("create_bridge_deposit_address POSTs {chain}, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("create_bridge_deposit_address")!.handler(c, {
+      chain: "ethereum",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposit-addresses`);
+  assert.deepEqual(calls[0].body, { chain: "ethereum" });
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("create_bridge_deposit_address")!;
+  assert.equal(tool.zod.safeParse({}).success, false, "chain required");
+  assert.equal(tool.zod.safeParse({ chain: "" }).success, false);
+});
+
+test("list_bridge_deposit_addresses GETs the signed v1 route", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposit_addresses")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposit-addresses`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("list_bridge_deposits forwards filters + limit, signed, caps at 100", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposits")!.handler(c, {
+      limit: 25,
+      chain: "ethereum",
+      asset: "USDC",
+      status: "credited",
+    }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(
+    calls[0].url,
+    `${BASE}/api/v1/bridge/deposits?limit=25&chain=ethereum&asset=USDC&status=credited`,
+  );
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  // No args -> no query string.
+  const bare = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposits")!.handler(c, {}),
+  );
+  assert.equal(bare[0].url, `${BASE}/api/v1/bridge/deposits`);
+
+  const tool = findTool("list_bridge_deposits")!;
+  assert.equal(tool.zod.safeParse({ limit: 100 }).success, true);
+  assert.equal(tool.zod.safeParse({ limit: 101 }).success, false);
+  assert.equal(
+    tool.zod.safeParse({ asset: "ETH" }).success,
+    false,
+    "asset enum",
+  );
+  assert.equal(
+    tool.zod.safeParse({ status: "pending" }).success,
+    false,
+    "status enum",
+  );
+});
+
+test("get_bridge_deposit encodes the id in the path, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_bridge_deposit")!.handler(c, { id: "dep/1" }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposits/dep%2F1`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("get_bridge_deposit")!;
+  assert.equal(tool.zod.safeParse({}).success, false, "id required");
+});
+
+test("place_order maps a trailing_limit order to the wire shape", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_limit",
+      size: "0.5",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "TrailingLimit",
+    quantity: "0.5",
+    time_in_force: "GTC",
+    trailing_offset_bps: 50,
+    limit_offset_bps: 10,
+  });
+  // No limit price is sent for a trailing_limit order.
+  assert.equal("price" in calls[0].body, false);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("trailing_limit requires both offsets and bounds limit_offset_bps to 9999", () => {
+  const tool = findTool("place_order")!;
+  const base = {
+    market_id: "BTC-USDX-PERP",
+    side: "buy" as const,
+    type: "trailing_limit" as const,
+    size: "1",
+  };
+  assert.equal(
+    tool.zod.safeParse({ ...base, trailing_offset_bps: 50 }).success,
+    false,
+    "limit_offset_bps required",
+  );
+  assert.equal(
+    tool.zod.safeParse({ ...base, limit_offset_bps: 10 }).success,
+    false,
+    "trailing_offset_bps required",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10000,
+    }).success,
+    false,
+    "limit_offset_bps capped at 9999",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 0,
+      limit_offset_bps: 0,
+    }).success,
+    true,
+    "zero offsets accepted",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 1.5,
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "offsets must be integers",
+  );
+});
+
+test("dropped liveness tools are no longer registered", () => {
+  // v0.7.0 removed /health and /ready from the public contract (ENG-6136).
+  assert.equal(findTool("get_health"), undefined);
+  assert.equal(findTool("get_readiness"), undefined);
+  assert.ok(findTool("get_service_status"), "the surviving /status tool stays");
 });
 
 test("tool names are unique and admin tools carry the adminOnly flag", () => {

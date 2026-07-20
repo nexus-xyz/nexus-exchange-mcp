@@ -100,6 +100,15 @@ const friendlyOrderSchema = z
     message: "price is required for limit orders",
     path: ["price"],
   })
+  // Reject a stray price on non-limit orders rather than silently dropping it,
+  // so a fat-fingered price on a market/trailing_limit order surfaces as an
+  // error instead of a no-op.
+  .refine((v) => v.type === "limit" || v.price === undefined, {
+    message:
+      "price is only valid for limit orders (market and trailing_limit " +
+      "prices are set by the engine at fire time)",
+    path: ["price"],
+  })
   .refine(
     (v) =>
       v.type !== "trailing_limit" ||
@@ -107,6 +116,19 @@ const friendlyOrderSchema = z
     {
       message:
         "trailing_offset_bps and limit_offset_bps are both required for " +
+        "trailing_limit orders",
+      path: ["trailing_offset_bps"],
+    },
+  )
+  // Symmetrically, reject offsets on non-trailing_limit orders so they aren't
+  // silently ignored.
+  .refine(
+    (v) =>
+      v.type === "trailing_limit" ||
+      (v.trailing_offset_bps === undefined && v.limit_offset_bps === undefined),
+    {
+      message:
+        "trailing_offset_bps and limit_offset_bps are only valid for " +
         "trailing_limit orders",
       path: ["trailing_offset_bps"],
     },
@@ -136,8 +158,8 @@ const orderProps: Record<string, unknown> = {
     type: "string",
     description:
       "Limit price as a positive decimal string (> 0). Required for limit " +
-      "orders, ignored for market and trailing_limit (the trailing limit " +
-      "price is computed at fire time).",
+      "orders; must be omitted for market and trailing_limit orders (the " +
+      "trailing limit price is computed at fire time).",
   },
   time_in_force: {
     type: "string",
@@ -156,9 +178,9 @@ const orderProps: Record<string, unknown> = {
     minimum: 0,
     description:
       "Trailing trigger offset in basis points (1 bp = 0.01%). Required for " +
-      "`trailing_limit` orders, ignored otherwise. Fires once the mark price " +
-      "retraces from its best-seen extreme by this many bps (0 fires at the " +
-      "first evaluation).",
+      "`trailing_limit` orders; must be omitted otherwise. Fires once the " +
+      "mark price retraces from its best-seen extreme by this many bps (0 " +
+      "fires at the first evaluation).",
   },
   limit_offset_bps: {
     type: "integer",

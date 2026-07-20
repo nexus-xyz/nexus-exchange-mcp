@@ -807,6 +807,61 @@ test("trailing_limit requires both offsets and bounds limit_offset_bps to 9999",
   );
 });
 
+test("stray fields are rejected for the wrong order type", () => {
+  const tool = findTool("place_order")!;
+  // A price on a market order is rejected, not silently dropped.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      price: "100",
+    }).success,
+    false,
+    "price rejected on market orders",
+  );
+  // A price on a trailing_limit order (which sets its price at fire time) is
+  // rejected too.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "trailing_limit",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+      price: "100",
+    }).success,
+    false,
+    "price rejected on trailing_limit orders",
+  );
+  // Trailing offsets on a limit order are rejected, not silently ignored.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "limit",
+      size: "1",
+      price: "100",
+      trailing_offset_bps: 50,
+    }).success,
+    false,
+    "trailing_offset_bps rejected on limit orders",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "limit_offset_bps rejected on market orders",
+  );
+});
+
 test("dropped liveness tools are no longer registered", () => {
   // v0.7.0 removed /health and /ready from the public contract (ENG-6136).
   assert.equal(findTool("get_health"), undefined);

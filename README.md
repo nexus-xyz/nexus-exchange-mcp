@@ -122,17 +122,23 @@ The tool surface covers **60 of the 62** distinct operations in Exchange API
 spec **v0.7.1** (92 spec operations counting the `/api/v1` aliases of the
 legacy routes; each aliased pair is one tool).
 
-The v0.7.1 pin bump (ENG-6038) was pin-only; ENG-6136 then exposed the v0.7.1
-additions as tools:
+The pin bump (ENG-6038) was pin-only — it advanced `.api-version` v0.6.2 →
+v0.7.1 without mapping the surface those releases had added. ENG-6136 then
+exposed those additions as tools (the spec version each shipped in is noted):
 
-- **Account cancel-on-disconnect** — `get_cancel_on_disconnect` /
+- **Account cancel-on-disconnect** (v0.7.1) — `get_cancel_on_disconnect` /
   `set_cancel_on_disconnect` (`GET` / `PUT /api/v1/account/cancel-on-disconnect`).
-- **`/api/v1/bridge` Phase A** — `get_bridge_assets` (public catalog),
+- **`/api/v1/bridge` Phase A** (v0.7.1) — `get_bridge_assets` (public catalog),
   `create_bridge_deposit_address`, `list_bridge_deposit_addresses`,
   `list_bridge_deposits`, and `get_bridge_deposit` (five operations).
-- **`trailing_limit` order type** — a new `place_order` / `place_orders_batch` /
-  `preview_order` variant (`trailing_offset_bps` + `limit_offset_bps`; a schema
-  addition on the already-mapped order endpoint, so it changes no route count).
+- **Conditional order types** (v0.7.0) — `place_order` / `place_orders_batch` /
+  `preview_order` now map all six conditional `order_type`s in addition to
+  `limit` / `market`: stop-loss (`stop_limit` / `stop_market`), take-profit
+  (`take_profit_limit` / `take_profit_market`), and trailing (`trailing_stop` /
+  `trailing_limit`), via the `trigger_price`, `trailing_offset_bps`, and
+  `limit_offset_bps` fields. These are a schema addition on the already-mapped
+  order endpoint, so they change no route count — which is why the pin bump's
+  operation-count metric never surfaced the gap.
 
 The remaining 2-operation gap is the WebSocket **upgrade** endpoints `GET /ws`
 and `GET /stream`, unmapped by design: a request/response MCP tool cannot hold a

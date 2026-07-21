@@ -862,6 +862,254 @@ test("stray fields are rejected for the wrong order type", () => {
   );
 });
 
+test("place_order maps a stop_market (stop-loss) order to the wire shape", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "stop_market",
+      size: "0.5",
+      trigger_price: "58000",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "StopMarket",
+    quantity: "0.5",
+    // A market-fired type defaults to IOC.
+    time_in_force: "IOC",
+    trigger_price: "58000",
+  });
+  // A market-fired stop carries neither a limit price nor offsets.
+  assert.equal("price" in calls[0].body, false);
+  assert.equal("trailing_offset_bps" in calls[0].body, false);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("place_order maps a stop_limit order with price + trigger_price", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_limit",
+      size: "1",
+      price: "60500",
+      trigger_price: "60000",
+    }),
+  );
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Buy",
+    order_type: "StopLimit",
+    quantity: "1",
+    // A resting limit-family type defaults to GTC.
+    time_in_force: "GTC",
+    price: "60500",
+    trigger_price: "60000",
+  });
+});
+
+test("place_order maps take-profit orders (limit + market)", async () => {
+  const tpLimit = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "ETH-USDX-PERP",
+      side: "sell",
+      type: "take_profit_limit",
+      size: "2",
+      price: "3100",
+      trigger_price: "3150",
+    }),
+  );
+  assert.equal(tpLimit[0].body.order_type, "TakeProfitLimit");
+  assert.equal(tpLimit[0].body.price, "3100");
+  assert.equal(tpLimit[0].body.trigger_price, "3150");
+  assert.equal(tpLimit[0].body.time_in_force, "GTC");
+
+  const tpMarket = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "ETH-USDX-PERP",
+      side: "sell",
+      type: "take_profit_market",
+      size: "2",
+      trigger_price: "3150",
+    }),
+  );
+  assert.equal(tpMarket[0].body.order_type, "TakeProfitMarket");
+  assert.equal("price" in tpMarket[0].body, false);
+  assert.equal(tpMarket[0].body.trigger_price, "3150");
+  assert.equal(tpMarket[0].body.time_in_force, "IOC");
+});
+
+test("place_order maps a trailing_stop order (offset only, no limit offset)", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "0.5",
+      trailing_offset_bps: 75,
+    }),
+  );
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "TrailingStop",
+    quantity: "0.5",
+    // Fires as a market order → IOC.
+    time_in_force: "IOC",
+    trailing_offset_bps: 75,
+  });
+  assert.equal("price" in calls[0].body, false);
+  assert.equal("trigger_price" in calls[0].body, false);
+  assert.equal("limit_offset_bps" in calls[0].body, false);
+});
+
+test("stop / take-profit orders require trigger_price", () => {
+  const tool = findTool("place_order")!;
+  for (const type of [
+    "stop_limit",
+    "stop_market",
+    "take_profit_limit",
+    "take_profit_market",
+  ] as const) {
+    const base: Record<string, unknown> = {
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type,
+      size: "1",
+    };
+    // Limit-family variants also need a price; supply it so trigger_price is the
+    // only thing missing under test.
+    if (type === "stop_limit" || type === "take_profit_limit")
+      base.price = "100";
+    assert.equal(
+      tool.zod.safeParse(base).success,
+      false,
+      `${type} requires trigger_price`,
+    );
+    assert.equal(
+      tool.zod.safeParse({ ...base, trigger_price: "100" }).success,
+      true,
+      `${type} accepted with trigger_price`,
+    );
+  }
+});
+
+test("trigger_price is rejected on non-triggerable order types", () => {
+  const tool = findTool("place_order")!;
+  // limit
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "limit",
+      size: "1",
+      price: "100",
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on limit orders",
+  );
+  // market
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on market orders",
+  );
+  // trailing_limit
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "trailing_limit",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on trailing_limit orders",
+  );
+});
+
+test("stop_limit requires a price; stop_market rejects one", () => {
+  const tool = findTool("place_order")!;
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_limit",
+      size: "1",
+      trigger_price: "100",
+    }).success,
+    false,
+    "stop_limit requires price",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_market",
+      size: "1",
+      trigger_price: "100",
+      price: "101",
+    }).success,
+    false,
+    "stop_market rejects a price",
+  );
+});
+
+test("trailing offsets are rejected on stop orders; limit_offset only on trailing_limit", () => {
+  const tool = findTool("place_order")!;
+  // trailing_offset_bps is not valid on a (non-trailing) stop_market.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "stop_market",
+      size: "1",
+      trigger_price: "100",
+      trailing_offset_bps: 50,
+    }).success,
+    false,
+    "trailing_offset_bps rejected on stop_market",
+  );
+  // trailing_stop must not carry a limit_offset_bps (that's trailing_limit only).
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "limit_offset_bps rejected on trailing_stop",
+  );
+  // trailing_stop is valid with just trailing_offset_bps.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "1",
+      trailing_offset_bps: 50,
+    }).success,
+    true,
+    "trailing_stop accepted with only trailing_offset_bps",
+  );
+});
+
 test("dropped liveness tools are no longer registered", () => {
   // v0.7.0 removed /health and /ready from the public contract (ENG-6136).
   assert.equal(findTool("get_health"), undefined);

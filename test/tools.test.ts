@@ -59,17 +59,6 @@ async function capture(
   return calls;
 }
 
-test("get_health hits /health unsigned", async () => {
-  const calls = await capture(fullClient(), (c) =>
-    findTool("get_health")!.handler(c, {}),
-  );
-  assert.equal(calls[0].method, "GET");
-  assert.equal(calls[0].url, `${BASE}/health`);
-  // Public — no auth headers.
-  assert.equal(calls[0].headers.get("x-api-key"), null);
-  assert.equal(calls[0].headers.get("authorization"), null);
-});
-
 test("get_market_adl_events encodes market id and forwards limit, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
     findTool("get_market_adl_events")!.handler(c, {
@@ -325,11 +314,10 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
 
 // ── v0.6.2 parity tools ──────────────────────────────────────────────────────
 
-test("public stats / readiness / status tools hit the right unsigned paths", async () => {
+test("public stats / status tools hit the right unsigned paths", async () => {
   const cases: Array<[string, string]> = [
     ["get_stats", `${BASE}/api/v1/stats`],
     ["get_stats_history", `${BASE}/api/v1/stats/history`],
-    ["get_readiness", `${BASE}/ready`],
     ["get_service_status", `${BASE}/status`],
   ];
   for (const [name, url] of cases) {
@@ -613,6 +601,520 @@ test("get_order forwards the optional market_id as a query param", async () => {
     findTool("get_order")!.handler(c, { order_id: "o1" }),
   );
   assert.equal(bare[0].url, `${BASE}/orders/o1`, "omitted -> no query");
+});
+
+// ── v0.7.1 tool surface (ENG-6136) ───────────────────────────────────────────
+
+test("get_cancel_on_disconnect GETs the signed v1 COD route", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_cancel_on_disconnect")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const noCreds = new ExchangeClient({
+    directBaseUrl: BASE,
+    gatewayBaseUrl: BASE,
+  });
+  await assert.rejects(
+    () =>
+      findTool("get_cancel_on_disconnect")!.handler(
+        noCreds,
+        {},
+      ) as Promise<unknown>,
+    MissingCredentialsError,
+  );
+});
+
+test("set_cancel_on_disconnect PUTs {enabled} and requires an explicit boolean", async () => {
+  for (const enabled of [true, false]) {
+    const calls = await capture(fullClient(), (c) =>
+      findTool("set_cancel_on_disconnect")!.handler(c, { enabled }),
+    );
+    assert.equal(calls[0].method, "PUT");
+    assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+    assert.deepEqual(calls[0].body, { enabled });
+    assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+  }
+
+  const tool = findTool("set_cancel_on_disconnect")!;
+  // `enabled` is required and explicit — an argless call is rejected.
+  assert.equal(tool.zod.safeParse({}).success, false, "enabled required");
+  assert.equal(
+    tool.zod.safeParse({ enabled: "true" }).success,
+    false,
+    "enabled must be a boolean",
+  );
+});
+
+test("get_bridge_assets GETs the public v1 bridge catalog unsigned", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_bridge_assets")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/assets`);
+  // Public — no auth headers.
+  assert.equal(calls[0].headers.get("x-api-key"), null);
+  assert.equal(calls[0].headers.get("authorization"), null);
+});
+
+test("create_bridge_deposit_address POSTs {chain}, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("create_bridge_deposit_address")!.handler(c, {
+      chain: "ethereum",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposit-addresses`);
+  assert.deepEqual(calls[0].body, { chain: "ethereum" });
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("create_bridge_deposit_address")!;
+  assert.equal(tool.zod.safeParse({}).success, false, "chain required");
+  assert.equal(tool.zod.safeParse({ chain: "" }).success, false);
+});
+
+test("list_bridge_deposit_addresses GETs the signed v1 route", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposit_addresses")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposit-addresses`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("list_bridge_deposits forwards filters + limit, signed, caps at 100", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposits")!.handler(c, {
+      limit: 25,
+      chain: "ethereum",
+      asset: "USDC",
+      status: "credited",
+    }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(
+    calls[0].url,
+    `${BASE}/api/v1/bridge/deposits?limit=25&chain=ethereum&asset=USDC&status=credited`,
+  );
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  // No args -> no query string.
+  const bare = await capture(fullClient(), (c) =>
+    findTool("list_bridge_deposits")!.handler(c, {}),
+  );
+  assert.equal(bare[0].url, `${BASE}/api/v1/bridge/deposits`);
+
+  const tool = findTool("list_bridge_deposits")!;
+  assert.equal(tool.zod.safeParse({ limit: 100 }).success, true);
+  assert.equal(tool.zod.safeParse({ limit: 101 }).success, false);
+  assert.equal(
+    tool.zod.safeParse({ asset: "ETH" }).success,
+    false,
+    "asset enum",
+  );
+  assert.equal(
+    tool.zod.safeParse({ status: "pending" }).success,
+    false,
+    "status enum",
+  );
+});
+
+test("get_bridge_deposit encodes the id in the path, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("get_bridge_deposit")!.handler(c, { id: "dep/1" }),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposits/dep%2F1`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("get_bridge_deposit")!;
+  assert.equal(tool.zod.safeParse({}).success, false, "id required");
+});
+
+test("place_order maps a trailing_limit order to the wire shape", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_limit",
+      size: "0.5",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "TrailingLimit",
+    quantity: "0.5",
+    time_in_force: "GTC",
+    trailing_offset_bps: 50,
+    limit_offset_bps: 10,
+  });
+  // No limit price is sent for a trailing_limit order.
+  assert.equal("price" in calls[0].body, false);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("trailing_limit requires both offsets and bounds limit_offset_bps to 9999", () => {
+  const tool = findTool("place_order")!;
+  const base = {
+    market_id: "BTC-USDX-PERP",
+    side: "buy" as const,
+    type: "trailing_limit" as const,
+    size: "1",
+  };
+  assert.equal(
+    tool.zod.safeParse({ ...base, trailing_offset_bps: 50 }).success,
+    false,
+    "limit_offset_bps required",
+  );
+  assert.equal(
+    tool.zod.safeParse({ ...base, limit_offset_bps: 10 }).success,
+    false,
+    "trailing_offset_bps required",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10000,
+    }).success,
+    false,
+    "limit_offset_bps capped at 9999",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 0,
+      limit_offset_bps: 0,
+    }).success,
+    true,
+    "zero offsets accepted",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      ...base,
+      trailing_offset_bps: 1.5,
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "offsets must be integers",
+  );
+});
+
+test("stray fields are rejected for the wrong order type", () => {
+  const tool = findTool("place_order")!;
+  // A price on a market order is rejected, not silently dropped.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      price: "100",
+    }).success,
+    false,
+    "price rejected on market orders",
+  );
+  // A price on a trailing_limit order (which sets its price at fire time) is
+  // rejected too.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "trailing_limit",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+      price: "100",
+    }).success,
+    false,
+    "price rejected on trailing_limit orders",
+  );
+  // Trailing offsets on a limit order are rejected, not silently ignored.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "limit",
+      size: "1",
+      price: "100",
+      trailing_offset_bps: 50,
+    }).success,
+    false,
+    "trailing_offset_bps rejected on limit orders",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "limit_offset_bps rejected on market orders",
+  );
+});
+
+test("place_order maps a stop_market (stop-loss) order to the wire shape", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "stop_market",
+      size: "0.5",
+      trigger_price: "58000",
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "StopMarket",
+    quantity: "0.5",
+    // A market-fired type defaults to IOC.
+    time_in_force: "IOC",
+    trigger_price: "58000",
+  });
+  // A market-fired stop carries neither a limit price nor offsets.
+  assert.equal("price" in calls[0].body, false);
+  assert.equal("trailing_offset_bps" in calls[0].body, false);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+});
+
+test("place_order maps a stop_limit order with price + trigger_price", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_limit",
+      size: "1",
+      price: "60500",
+      trigger_price: "60000",
+    }),
+  );
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Buy",
+    order_type: "StopLimit",
+    quantity: "1",
+    // A resting limit-family type defaults to GTC.
+    time_in_force: "GTC",
+    price: "60500",
+    trigger_price: "60000",
+  });
+});
+
+test("place_order maps take-profit orders (limit + market)", async () => {
+  const tpLimit = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "ETH-USDX-PERP",
+      side: "sell",
+      type: "take_profit_limit",
+      size: "2",
+      price: "3100",
+      trigger_price: "3150",
+    }),
+  );
+  assert.equal(tpLimit[0].body.order_type, "TakeProfitLimit");
+  assert.equal(tpLimit[0].body.price, "3100");
+  assert.equal(tpLimit[0].body.trigger_price, "3150");
+  assert.equal(tpLimit[0].body.time_in_force, "GTC");
+
+  const tpMarket = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "ETH-USDX-PERP",
+      side: "sell",
+      type: "take_profit_market",
+      size: "2",
+      trigger_price: "3150",
+    }),
+  );
+  assert.equal(tpMarket[0].body.order_type, "TakeProfitMarket");
+  assert.equal("price" in tpMarket[0].body, false);
+  assert.equal(tpMarket[0].body.trigger_price, "3150");
+  assert.equal(tpMarket[0].body.time_in_force, "IOC");
+});
+
+test("place_order maps a trailing_stop order (offset only, no limit offset)", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("place_order")!.handler(c, {
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "0.5",
+      trailing_offset_bps: 75,
+    }),
+  );
+  assert.deepEqual(calls[0].body, {
+    market_id: "BTC-USDX-PERP",
+    side: "Sell",
+    order_type: "TrailingStop",
+    quantity: "0.5",
+    // Fires as a market order → IOC.
+    time_in_force: "IOC",
+    trailing_offset_bps: 75,
+  });
+  assert.equal("price" in calls[0].body, false);
+  assert.equal("trigger_price" in calls[0].body, false);
+  assert.equal("limit_offset_bps" in calls[0].body, false);
+});
+
+test("stop / take-profit orders require trigger_price", () => {
+  const tool = findTool("place_order")!;
+  for (const type of [
+    "stop_limit",
+    "stop_market",
+    "take_profit_limit",
+    "take_profit_market",
+  ] as const) {
+    const base: Record<string, unknown> = {
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type,
+      size: "1",
+    };
+    // Limit-family variants also need a price; supply it so trigger_price is the
+    // only thing missing under test.
+    if (type === "stop_limit" || type === "take_profit_limit")
+      base.price = "100";
+    assert.equal(
+      tool.zod.safeParse(base).success,
+      false,
+      `${type} requires trigger_price`,
+    );
+    assert.equal(
+      tool.zod.safeParse({ ...base, trigger_price: "100" }).success,
+      true,
+      `${type} accepted with trigger_price`,
+    );
+  }
+});
+
+test("trigger_price is rejected on non-triggerable order types", () => {
+  const tool = findTool("place_order")!;
+  // limit
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "limit",
+      size: "1",
+      price: "100",
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on limit orders",
+  );
+  // market
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "market",
+      size: "1",
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on market orders",
+  );
+  // trailing_limit
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "trailing_limit",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+      trigger_price: "99",
+    }).success,
+    false,
+    "trigger_price rejected on trailing_limit orders",
+  );
+});
+
+test("stop_limit requires a price; stop_market rejects one", () => {
+  const tool = findTool("place_order")!;
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_limit",
+      size: "1",
+      trigger_price: "100",
+    }).success,
+    false,
+    "stop_limit requires price",
+  );
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "buy",
+      type: "stop_market",
+      size: "1",
+      trigger_price: "100",
+      price: "101",
+    }).success,
+    false,
+    "stop_market rejects a price",
+  );
+});
+
+test("trailing offsets are rejected on stop orders; limit_offset only on trailing_limit", () => {
+  const tool = findTool("place_order")!;
+  // trailing_offset_bps is not valid on a (non-trailing) stop_market.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "stop_market",
+      size: "1",
+      trigger_price: "100",
+      trailing_offset_bps: 50,
+    }).success,
+    false,
+    "trailing_offset_bps rejected on stop_market",
+  );
+  // trailing_stop must not carry a limit_offset_bps (that's trailing_limit only).
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "1",
+      trailing_offset_bps: 50,
+      limit_offset_bps: 10,
+    }).success,
+    false,
+    "limit_offset_bps rejected on trailing_stop",
+  );
+  // trailing_stop is valid with just trailing_offset_bps.
+  assert.equal(
+    tool.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      side: "sell",
+      type: "trailing_stop",
+      size: "1",
+      trailing_offset_bps: 50,
+    }).success,
+    true,
+    "trailing_stop accepted with only trailing_offset_bps",
+  );
+});
+
+test("dropped liveness tools are no longer registered", () => {
+  // v0.7.0 removed /health and /ready from the public contract (ENG-6136).
+  assert.equal(findTool("get_health"), undefined);
+  assert.equal(findTool("get_readiness"), undefined);
+  assert.ok(findTool("get_service_status"), "the surviving /status tool stays");
 });
 
 test("tool names are unique and admin tools carry the adminOnly flag", () => {

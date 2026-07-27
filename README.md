@@ -39,6 +39,9 @@ the **legacy `/api/exchange`** gateway, which remains live dual-stack
 | `get_demo_orders`               | ✅ Live (public)                                | `GET /demo/orders` (legacy)                |
 | `get_balance`                   | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account`                      |
 | `get_account_summary`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/summary`              |
+| `get_account_state`             | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/state`                |
+| `get_account_fees`              | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/fees`                 |
+| `get_portfolio_history`         | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/portfolio-history`    |
 | `get_equity_history`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/equity-history`       |
 | `get_positions`                 | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions`                    |
 | `get_closed_positions`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions/closed`             |
@@ -96,7 +99,7 @@ single-target lookup is still unbuilt server-side.
 Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
 service exposes its own REST API and the indexer serves the exchange surface
 directly under `/api/v1` at the host root. This server calls those routes for
-the v0.7.1 operations it exposes as tools (see
+the v0.7.2 operations it exposes as tools (see
 [API-surface coverage](#api-surface-coverage) below).
 
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
@@ -118,14 +121,28 @@ the v0.7.1 operations it exposes as tools (see
 
 ### API-surface coverage
 
-The tool surface covers **60 of the 62** distinct operations in Exchange API
-spec **v0.7.1** (92 spec operations counting the `/api/v1` aliases of the
+The tool surface covers **63 of the 65** distinct operations in Exchange API
+spec **v0.7.2** (98 spec operations counting the `/api/v1` aliases of the
 legacy routes; each aliased pair is one tool).
 
 The pin bump (ENG-6038) was pin-only — it advanced `.api-version` v0.6.2 →
 v0.7.1 without mapping the surface those releases had added. ENG-6136 then
-exposed those additions as tools (the spec version each shipped in is noted):
+exposed those additions as tools, and ENG-6461 advanced the pin to v0.7.2
+together with the portfolio-parity surface it added (the spec version each
+addition shipped in is noted):
 
+- **Portfolio parity** (v0.7.2) — `get_portfolio_history`
+  (`GET /api/v1/account/portfolio-history`: equity + PnL + volume series over a
+  `day`/`week`/`month`/`all` window), `get_account_state`
+  (`GET /api/v1/account/state`: summary + open positions from one coherent
+  read), and `get_account_fees` (`GET /api/v1/account/fees`: effective
+  maker/taker bps, tier, rolling 30d volume, discounts). The same release
+  enriched the `Position` schema (`notional_value`, `margin_used`, `roe`,
+  `max_leverage`, `funding_paid`, plus `<field>_error` companions) and added
+  `withdrawable` to the portfolio summary; those are response-shape additions
+  on already-mapped routes, so they change no route count — the tools that
+  return them (`get_balance`, `get_positions`, `get_account_state`,
+  `get_account_summary`) call them out in their descriptions instead.
 - **Account cancel-on-disconnect** (v0.7.1) — `get_cancel_on_disconnect` /
   `set_cancel_on_disconnect` (`GET` / `PUT /api/v1/account/cancel-on-disconnect`).
 - **`/api/v1/bridge` Phase A** (v0.7.1) — `get_bridge_assets` (public catalog),
@@ -145,6 +162,14 @@ and `GET /stream`, unmapped by design: a request/response MCP tool cannot hold a
 streaming socket open, so the server instead mints the auth token
 (`get_ws_token` / `get_ws_token_legacy`) the caller uses to connect to them
 directly.
+
+One v0.7.2 addition is deliberately **not** exposed yet: the opaque `cursor`
+query parameter (ENG-5506) that `get_trades`, `get_fills`, `get_order_history`,
+`get_closed_positions`, and `get_equity_history` now accept for keyset
+pagination. It adds no route, so the operation count above is unaffected; using
+it also means surfacing the response's `X-Next-Cursor` header, which the tool
+result (a JSON body) does not carry today. Left as a follow-up rather than
+folded into the portfolio-parity change.
 
 Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and
 `/ready` routes from the public contract (only `/status` remains), so the former
@@ -209,7 +234,7 @@ credentials — never commit real secrets.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.1`**.
+Currently targets Exchange API spec **`v0.7.2`**.
 
 <!-- api-version-sync:end -->
 
@@ -222,7 +247,7 @@ a newer spec releases. The line above is bot-managed; everything around it is
 human-owned.
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
-header (e.g. `X-Nexus-Api-Version: v0.7.1`), alongside a normalized
+header (e.g. `X-Nexus-Api-Version: v0.7.2`), alongside a normalized
 `User-Agent: nexus-exchange-mcp/<version>`, so the exchange edge can attribute
 and segment usage by client and by the contract version this server targets.
 The header value is the server's own compiled-against tag — it is baked in at

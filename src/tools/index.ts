@@ -51,6 +51,46 @@ function jsonSchema(
 const MAX_BATCH_ORDERS = 100;
 
 /**
+ * Windows accepted by `get_portfolio_history` (spec `PortfolioWindow`). Each
+ * selects a server-side downsample cadence and point capacity: day 5m/288,
+ * week 1h/168, month 6h/120, all 1d/366. A value outside this set is rejected
+ * upstream with `400 invalid_window`, so we validate it as a closed enum here
+ * and never forward free-form text into the query string.
+ */
+const PORTFOLIO_WINDOWS = ["day", "week", "month", "all"] as const;
+
+type PortfolioWindow = (typeof PORTFOLIO_WINDOWS)[number];
+
+/**
+ * Upper bound the spec puts on `limit` for the portfolio time-series — the
+ * largest window's capacity (`all` = 366 daily points). The server clamps a
+ * larger value to the selected window's own capacity rather than erroring, so
+ * this is only a sanity bound to keep an obviously bogus argument (a runaway
+ * agent asking for a million points) from reaching the API at all.
+ */
+const MAX_PORTFOLIO_POINTS = 366;
+
+/**
+ * Shared wording for every tool that returns `Position` objects (`get_balance`,
+ * `get_positions`, `get_account_state`), describing the enriched per-position
+ * risk fields added in spec v0.7.2 (ENG-6445).
+ *
+ * The enrichment is derived strictly from indexer-mirrored state, so a field is
+ * legitimately `null` with a machine-readable `<field>_error` beside it when an
+ * input is missing. Spelling that out in the tool description matters: an agent
+ * that silently reads `null` as `0` would compute a nonsense risk figure, so
+ * the contract says "unknown", not "zero".
+ */
+const ENRICHED_POSITION_NOTE =
+  "Positions carry per-position risk detail: `notional_value`, `margin_used`, " +
+  "`roe`, `max_leverage`, and `funding_paid` (paid-positive — negative means " +
+  "funding was received). Those fields are derived from mirrored state, so any " +
+  "of them can be `null` with a companion `<field>_error` naming the reason " +
+  "(e.g. `mark_price_unavailable`); treat `null` as UNKNOWN, never as zero. " +
+  "`leverage` is currently always `null` (`margin_state_not_mirrored`) — do " +
+  "not infer it from `margin_used`.";
+
+/**
  * Positive-decimal string: one or more digits, optional fractional part, and
  * strictly greater than zero. Rejects `"0"`, `"0.0"`, negatives, and anything
  * non-numeric. Used for order `size`/`price`, which are carried as strings to
@@ -714,7 +754,7 @@ export const tools: ToolDef[] = [
     name: "get_balance",
     description:
       "Get the authenticated account snapshot: collateral balance, equity, and " +
-      "positions. Requires API credentials.",
+      `positions. ${ENRICHED_POSITION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
@@ -725,7 +765,9 @@ export const tools: ToolDef[] = [
     name: "get_account_summary",
     description:
       "Get the authenticated account's portfolio summary (equity, margin " +
-      "usage, PnL rollup) — a richer view than `get_balance`. Requires API " +
+      "usage, PnL rollup) — a richer view than `get_balance`. Includes " +
+      "`withdrawable`: the engine-authoritative free margin floored at zero, " +
+      "i.e. exactly what can leave the account (never negative). Requires API " +
       "credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
@@ -734,10 +776,98 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account/summary", signed: true }),
   },
   {
+    name: "get_account_state",
+    description:
+      "Get the authenticated account's full state in ONE call: the portfolio " +
+      "summary aggregates plus every open position (`{ summary, positions }`). " +
+      "Prefer this over pairing `get_account_summary` with `get_positions` — " +
+      "both parts come from one coherent read, so `summary." +
+      "open_positions_count` always matches the `positions` length. If the " +
+      "engine-authoritative margin view is unavailable this fails closed with " +
+      "a 502 (`authoritative_margin_unavailable`) rather than returning an " +
+      "estimate: retry after a short delay, do NOT read the error as a flat or " +
+      `empty account. ${ENRICHED_POSITION_NOTE} Requires API credentials.`,
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/api/v1/account/state", signed: true }),
+  },
+  {
+    name: "get_account_fees",
+    description:
+      "Get the authenticated account's effective fee schedule: maker/taker " +
+      "rate in basis points (a NEGATIVE maker rate is a rebate paid TO the " +
+      "maker), fee tier, rolling 30-day traded volume, and any active " +
+      "discounts. This is the forward-looking schedule rate for the scope " +
+      "named by `schedule` (per-market rates differ), not a realized per-fill " +
+      "average; `volume_30d_estimated: true` means the 30-day volume may " +
+      "undercount. Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/api/v1/account/fees", signed: true }),
+  },
+  {
+    name: "get_portfolio_history",
+    description:
+      "Get the authenticated account's portfolio time-series — equity, " +
+      "cumulative trading PnL, and cumulative traded volume — over a " +
+      "selectable window, oldest first. Richer than `get_equity_history` " +
+      "(equity only, 5s cadence, ~1h); both derive equity from the same " +
+      "source, so the two never disagree. Each window sets its own downsample " +
+      "cadence and point capacity: day 5m/288, week 1h/168, month 6h/120, all " +
+      "1d/366. `pnl` is deposit-neutral (trading performance only) and " +
+      "`volume` is monotonically non-decreasing. This is a HEAVY read — it " +
+      "costs more rate-limit budget than an ordinary GET, so poll it sparingly " +
+      "(see `get_rate_limit_status`). Requires API credentials.",
+    inputSchema: jsonSchema({
+      window: {
+        type: "string",
+        // Copy, not the shared const: the advertised schema is handed out over
+        // `tools/list`, and the validation enum must not be reachable through it.
+        enum: [...PORTFOLIO_WINDOWS],
+        description:
+          "Time window to return, which also selects the cadence and point " +
+          "capacity. Defaults to `day` server-side when omitted.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: MAX_PORTFOLIO_POINTS,
+        description:
+          "Maximum number of points to return (1–" +
+          `${MAX_PORTFOLIO_POINTS}). Clamped server-side to the selected ` +
+          "window's capacity. Omit for the full window.",
+      },
+    }),
+    zod: z
+      .object({
+        window: z.enum(PORTFOLIO_WINDOWS).optional(),
+        limit: z.number().int().positive().max(MAX_PORTFOLIO_POINTS).optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { window?: PortfolioWindow; limit?: number };
+      const params = new URLSearchParams();
+      if (a.window) params.set("window", a.window);
+      if (a.limit !== undefined) params.set("limit", String(a.limit));
+      return client.request({
+        path: "/api/v1/account/portfolio-history",
+        query: params.toString(),
+        signed: true,
+      });
+    },
+  },
+  {
     name: "get_equity_history",
     description:
       "Get the authenticated account's equity time-series (5s cadence, ~1h " +
-      "window), oldest first. Requires API credentials.",
+      "window), oldest first. For a longer window, or for PnL and volume " +
+      "series alongside equity, use `get_portfolio_history`. Requires API " +
+      "credentials.",
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
@@ -762,7 +892,8 @@ export const tools: ToolDef[] = [
   {
     name: "get_positions",
     description:
-      "Get the authenticated account's open positions. Requires API credentials.",
+      "Get the authenticated account's open positions. " +
+      `${ENRICHED_POSITION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,

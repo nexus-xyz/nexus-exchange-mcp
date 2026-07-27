@@ -168,7 +168,7 @@ query parameter (ENG-5506) that `get_trades`, `get_fills`, `get_order_history`,
 `get_closed_positions`, and `get_equity_history` now accept for keyset
 pagination. It adds no route, so the operation count above is unaffected; using
 it also means surfacing the response's `X-Next-Cursor` header, which the tool
-result (a JSON body) does not carry today. Left as a follow-up rather than
+result (a JSON body) does not carry today. Tracked as ENG-7424 rather than
 folded into the portfolio-parity change.
 
 Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and

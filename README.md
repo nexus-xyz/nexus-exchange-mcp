@@ -163,13 +163,14 @@ streaming socket open, so the server instead mints the auth token
 (`get_ws_token` / `get_ws_token_legacy`) the caller uses to connect to them
 directly.
 
-One v0.7.2 addition is deliberately **not** exposed yet: the opaque `cursor`
-query parameter (ENG-5506) that `get_trades`, `get_fills`, `get_order_history`,
-`get_closed_positions`, and `get_equity_history` now accept for keyset
-pagination. It adds no route, so the operation count above is unaffected; using
-it also means surfacing the response's `X-Next-Cursor` header, which the tool
-result (a JSON body) does not carry today. Tracked as ENG-7424 rather than
-folded into the portfolio-parity change.
+One v0.7.2 addition is **not** exposed: the opaque `cursor` query parameter
+(ENG-5506) documented on `get_trades`, `get_fills`, `get_order_history`,
+`get_closed_positions`, and `get_equity_history` for keyset pagination. It adds
+no route, so the operation count above is unaffected. Two reasons it is not
+wired up: the spec is ahead of the indexer, which does not serve the
+`X-Next-Cursor` header yet, and consuming that header would mean wrapping those
+five tools' results in an envelope — an output-shape change to already-shipped
+tools. Tracked as ENG-7424, blocked on ENG-5506.
 
 Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and
 `/ready` routes from the public contract (only `/status` remains), so the former

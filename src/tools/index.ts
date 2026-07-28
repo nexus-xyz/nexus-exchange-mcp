@@ -75,20 +75,33 @@ const MAX_PORTFOLIO_POINTS = 366;
  * `get_positions`, `get_account_state`), describing the enriched per-position
  * risk fields added in spec v0.7.2 (ENG-6445).
  *
- * The enrichment is derived strictly from indexer-mirrored state, so a field is
- * legitimately `null` with a machine-readable `<field>_error` beside it when an
- * input is missing. Spelling that out in the tool description matters: an agent
- * that silently reads `null` as `0` would compute a nonsense risk figure, so
- * the contract says "unknown", not "zero".
+ * The nullable enrichment is derived strictly from indexer-mirrored state, so a
+ * field is legitimately `null` with a machine-readable `<field>_error` beside it
+ * when an input is missing. Spelling that out in the tool description matters:
+ * an agent that silently reads `null` as `0` would compute a nonsense risk
+ * figure, so the contract says "unknown", not "zero".
+ *
+ * `funding_paid` is deliberately kept OUT of that list. Its schema is
+ * `allOf: [Decimal]` with no null branch and it is documented always-present
+ * (`"0"` when nothing has accrued), and `Position` carries exactly five
+ * `<field>_error` companions — `leverage_error`, `notional_value_error`,
+ * `roe_error`, `margin_used_error`, `max_leverage_error`. There is no
+ * `funding_paid_error` anywhere in the spec. Describing it as nullable would
+ * invert the very confusion this note exists to prevent: it would push an agent
+ * to report an authoritative zero as "unknown", and to hunt for a companion key
+ * that is missing by design rather than because anything broke.
  */
 const ENRICHED_POSITION_NOTE =
-  "Positions carry per-position risk detail: `notional_value`, `margin_used`, " +
-  "`roe`, `max_leverage`, and `funding_paid` (paid-positive — negative means " +
-  "funding was received). Those fields are derived from mirrored state, so any " +
-  "of them can be `null` with a companion `<field>_error` naming the reason " +
-  "(e.g. `mark_price_unavailable`); treat `null` as UNKNOWN, never as zero. " +
-  "`leverage` is currently always `null` (`margin_state_not_mirrored`) — do " +
-  "not infer it from `margin_used`.";
+  "Positions carry per-position risk detail. `notional_value`, `margin_used`, " +
+  "`roe`, `max_leverage`, and `leverage` are derived from mirrored state, so " +
+  "any of them can be `null` with a companion `<field>_error` naming the " +
+  "reason (e.g. `mark_price_unavailable`); treat `null` as UNKNOWN, never as " +
+  "zero. `leverage` is currently always `null` " +
+  "(`leverage_error: margin_state_not_mirrored`) — do not infer it from " +
+  "`margin_used`. `funding_paid` is NOT one of those: it is always present " +
+  'and has no `_error` companion, so its `"0"` is a real zero (no funding ' +
+  "accrued), not unknown. It is paid-positive — a negative value means " +
+  "funding was received.";
 
 /**
  * Positive-decimal string: one or more digits, optional fractional part, and
@@ -767,8 +780,12 @@ export const tools: ToolDef[] = [
       "Get the authenticated account's portfolio summary (equity, margin " +
       "usage, PnL rollup) — a richer view than `get_balance`. Includes " +
       "`withdrawable`: the engine-authoritative free margin floored at zero, " +
-      "i.e. exactly what can leave the account (never negative). Requires API " +
-      "credentials.",
+      "i.e. exactly what can leave the account (never negative). Because " +
+      "`withdrawable` comes from that authoritative margin view, this call " +
+      "fails closed with a 502 (`authoritative_margin_unavailable`) when the " +
+      "view is unavailable rather than returning a local estimate: retry " +
+      "after a short delay, do NOT read the error as a flat or empty " +
+      "account. Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
@@ -809,6 +826,19 @@ export const tools: ToolDef[] = [
     handler: (client) =>
       client.request({ path: "/api/v1/account/fees", signed: true }),
   },
+  // The HEAVY-read weighting below is edge-internal and deliberately absent
+  // from the OpenAPI contract, so it can't be cited from the spec: the gateway
+  // charges `/account/portfolio-history` `WEIGHT_HEAVY_READ` (= 5) in the
+  // indexer's `endpoint_weight` map, alongside `/account/summary`, `/fills`,
+  // and `/orders/history` (ENG-6440, extended to this route by ENG-6670 in
+  // nexus#4243).
+  //
+  // Note the unit carefully: the bucket is charged 5 unit-tokens, but
+  // `remaining` — in the `/account/rate-limit` DTO and `x-ratelimit-remaining`
+  // — is deliberately computed against the weight-1 cost, so it stays
+  // denominated in ORDINARY requests rather than weighted units. Hence "drops
+  // by ~5" rather than "costs 5 units". Re-check `rate_limit.rs` before
+  // changing the number an agent is told to budget against.
   {
     name: "get_portfolio_history",
     description:
@@ -819,9 +849,11 @@ export const tools: ToolDef[] = [
       "source, so the two never disagree. Each window sets its own downsample " +
       "cadence and point capacity: day 5m/288, week 1h/168, month 6h/120, all " +
       "1d/366. `pnl` is deposit-neutral (trading performance only) and " +
-      "`volume` is monotonically non-decreasing. This is a HEAVY read — it " +
-      "costs more rate-limit budget than an ordinary GET, so poll it sparingly " +
-      "(see `get_rate_limit_status`). Requires API credentials.",
+      "`volume` is monotonically non-decreasing. This is a HEAVY read — the " +
+      "gateway charges it 5x an ordinary GET, so a single call draws about " +
+      "five requests' worth of budget and the `remaining` reported by " +
+      "`get_rate_limit_status` (counted in ordinary requests) drops by ~5. " +
+      "Poll it sparingly. Requires API credentials.",
     inputSchema: jsonSchema({
       window: {
         type: "string",

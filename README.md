@@ -137,8 +137,10 @@ addition shipped in is noted):
   (`GET /api/v1/account/state`: summary + open positions from one coherent
   read), and `get_account_fees` (`GET /api/v1/account/fees`: effective
   maker/taker bps, tier, rolling 30d volume, discounts). The same release
-  enriched the `Position` schema (`notional_value`, `margin_used`, `roe`,
-  `max_leverage`, `funding_paid`, plus `<field>_error` companions) and added
+  enriched the `Position` schema — `notional_value`, `margin_used`, `roe`,
+  `max_leverage`, and `leverage`, each nullable with a `<field>_error`
+  companion, plus the always-present `funding_paid` (no `_error` companion:
+  its `"0"` is a real zero, not unknown) — and added
   `withdrawable` to the portfolio summary; those are response-shape additions
   on already-mapped routes, so they change no route count — the tools that
   return them (`get_balance`, `get_positions`, `get_account_state`,

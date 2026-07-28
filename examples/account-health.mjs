@@ -81,10 +81,14 @@ async function main() {
     console.log(JSON.stringify(summary, null, 2).slice(0, 600));
 
     const fees = await callJson(client, "get_account_fees");
+    // The spec marks `volume_30d_estimated` required, but don't let an absent
+    // field read as "full 30-day coverage" just because `undefined` is falsy —
+    // claiming coverage the server never asserted is the unsafe direction.
+    const estimated = fees.volume_30d_estimated !== false;
     console.log(
       `\nFee schedule: maker=${fees.maker_fee_bps}bps taker=${fees.taker_fee_bps}bps ` +
         `tier=${fees.tier} 30d volume=${fees.volume_30d}` +
-        (fees.volume_30d_estimated ? " (estimated)" : ""),
+        (estimated ? " (estimated)" : ""),
     );
 
     const balance = await callJson(client, "get_balance");

@@ -1204,15 +1204,56 @@ test("argless portfolio-parity tools take no arguments", () => {
   }
 });
 
+const POSITION_TOOLS = ["get_balance", "get_positions", "get_account_state"];
+
 test("tools returning positions document the enriched risk fields", () => {
   // The enrichment is null-able with a companion <field>_error; an agent that
   // read null as zero would compute nonsense risk, so the descriptions must
   // say so on every tool that returns a Position.
-  for (const name of ["get_balance", "get_positions", "get_account_state"]) {
+  for (const name of POSITION_TOOLS) {
     const { description } = findTool(name)!;
     assert.match(description, /notional_value/, name);
     assert.match(description, /_error/, name);
     assert.match(description, /never as zero/, name);
+    // All five genuinely-nullable fields, `leverage` included — the list is
+    // what a model pattern-matches against, so a partial one misleads.
+    for (const field of [
+      "notional_value",
+      "margin_used",
+      "roe",
+      "max_leverage",
+      "leverage",
+    ]) {
+      assert.match(description, new RegExp(`\`${field}\``), `${name}/${field}`);
+    }
+  }
+});
+
+test("position descriptions do not claim funding_paid is nullable", () => {
+  // Spec v0.7.2: `funding_paid` is `allOf: [Decimal]` with no null branch,
+  // documented always-present ("0" when nothing accrued), and there is no
+  // `funding_paid_error` property in the document at all — Position has
+  // exactly five `_error` companions. Telling a model otherwise inverts the
+  // null-vs-zero rule the rest of the note exists to enforce: it would report
+  // an authoritative zero as unknown and look for a key that never appears.
+  for (const name of POSITION_TOOLS) {
+    const { description } = findTool(name)!;
+    assert.doesNotMatch(description, /funding_paid_error/, name);
+    assert.match(description, /`funding_paid` is NOT one of those/, name);
+    assert.match(description, /always present/, name);
+  }
+});
+
+test("account tools warn that the authoritative-margin 502 is not an empty account", () => {
+  // v0.7.2 added `502 authoritative_margin_unavailable` to BOTH /account/state
+  // and /account/summary. The summary is the tool that advertises
+  // `withdrawable`, the field whose authoritative-margin dependency causes the
+  // fail-closed, so it needs the retry guidance just as much.
+  for (const name of ["get_account_state", "get_account_summary"]) {
+    const { description } = findTool(name)!;
+    assert.match(description, /authoritative_margin_unavailable/, name);
+    assert.match(description, /retry/i, name);
+    assert.match(description, /do NOT read the error as a flat or empty/, name);
   }
   assert.match(findTool("get_account_summary")!.description, /withdrawable/);
 });

@@ -154,6 +154,22 @@ interface RequestOptions {
   surface?: "v1" | "gateway";
 }
 
+/**
+ * Response header carrying the cursor for the next page of a list endpoint
+ * (spec v0.7.2). Present **only** when more results exist; its absence is the
+ * documented signal that this was the last page, not an error.
+ */
+export const NEXT_CURSOR_HEADER = "x-next-cursor";
+
+/**
+ * One page of a cursor-paginated list endpoint: the decoded body plus the next
+ * cursor, or `null` for that cursor on the last page.
+ */
+export interface Page<T> {
+  items: T;
+  nextCursor: string | null;
+}
+
 export class ExchangeClient {
   constructor(private readonly cfg: ExchangeConfig) {}
 
@@ -204,6 +220,21 @@ export class ExchangeClient {
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
+    return (await this.send<T>(opts)).items;
+  }
+
+  /**
+   * Issue a `GET` against a cursor-paginated list endpoint and return the
+   * decoded body alongside its `X-Next-Cursor` header.
+   *
+   * A present-but-empty header is normalized to `null`: an empty cursor cannot
+   * be sent back, and forwarding it would re-request the first page forever.
+   */
+  async requestPage<T = unknown>(opts: RequestOptions): Promise<Page<T>> {
+    return this.send<T>(opts);
+  }
+
+  private async send<T>(opts: RequestOptions): Promise<Page<T>> {
     const method = opts.method ?? "GET";
     const query = opts.query ?? "";
     const bodyBytes =
@@ -268,11 +299,13 @@ export class ExchangeClient {
     if (!res.ok) {
       throw new ExchangeApiError(res.status, sanitizeErrorBody(text));
     }
-    if (!text) return undefined as T;
+    const nextCursor =
+      (res.headers.get(NEXT_CURSOR_HEADER) ?? "").trim() || null;
+    if (!text) return { items: undefined as T, nextCursor };
     try {
-      return JSON.parse(text) as T;
+      return { items: JSON.parse(text) as T, nextCursor };
     } catch {
-      return text as unknown as T;
+      return { items: text as unknown as T, nextCursor };
     }
   }
 }

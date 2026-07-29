@@ -42,7 +42,7 @@ Check the box that applies.
 - [ ] `npm run lint` passes (`lint`).
 - [ ] `npm run typecheck` passes (`typecheck`).
 - [ ] `npm test` passes (`test`).
-- [ ] `npm run smoke` passes, if the change touches the tool surface or client.
+- [ ] `NEXUS_EXCHANGE_API_URL=… npm run smoke` passes, if the change touches the tool surface or client (the check has no default target).
 
 ## Notes for reviewers
 

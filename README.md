@@ -210,14 +210,22 @@ npm start          # runs the stdio MCP server
 ```
 
 `npm start` waits on stdio for an MCP client; it is meant to be launched by
-Claude rather than run by hand. To verify it works end-to-end against the live
+Claude rather than run by hand. To verify it works end-to-end against a live
 API without a client, use the smoke check:
 
 ```bash
-npm run smoke      # lists tools, calls list_markets against production
+NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
 ```
 
 Expected output ends with `list_markets OK -> N markets`.
+
+The smoke check **requires an explicit `NEXUS_EXCHANGE_API_URL`** and has no
+default (ENG-8092). It must be a host that serves the `/api/v1` surface — the
+public site root (`https://exchange.nexus.xyz`) serves the marketing app there
+and answers `/api/v1/markets/summary` with a 404 page of HTML, so a run against
+it can only fail. If the target answers with HTML rather than JSON, on a 404 or
+on a 200, the check says so by name and exits non-zero; it never reports a
+passing run for a body it could not read as market-summary JSON.
 
 ## Environment variables
 

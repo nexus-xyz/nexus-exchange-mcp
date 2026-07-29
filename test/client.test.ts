@@ -7,6 +7,7 @@ import {
   ExchangeApiError,
   ExchangeClient,
   MissingCredentialsError,
+  NonJsonResponseError,
   sanitizeErrorBody,
 } from "../src/client.js";
 import { findTool, tools } from "../src/tools/index.js";
@@ -802,4 +803,152 @@ test("cancel_order requires market_id when cancelling a single order", async () 
     globalThis.fetch = realFetch;
   }
   assert.equal(fetchCalled, false, "no request should be sent");
+});
+
+/**
+ * A 2xx body that is not JSON must never be returned as if it were the
+ * endpoint's data (ENG-8170). Every documented 2xx in spec v0.7.2 is
+ * `application/json`, so a non-JSON success body means the request never
+ * reached the Exchange API.
+ */
+function clientWithResponse(response: Response): ExchangeClient {
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+  });
+  globalThis.fetch = (async () => response.clone()) as typeof fetch;
+  return client;
+}
+
+const MARKETING_PAGE =
+  '<!DOCTYPE html><html lang="en"><head><link rel="preload" as="script" ' +
+  'href="/_next/static/chunks/15xrurgzs99gv.js"/></head><body>Nexus</body></html>';
+
+test("a 2xx HTML body throws instead of becoming the tool's result", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const client = clientWithResponse(
+      new Response(MARKETING_PAGE, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    await assert.rejects(
+      () => client.request({ path: "/api/v1/markets/summary" }),
+      (err: Error) =>
+        err instanceof NonJsonResponseError &&
+        err.status === 200 &&
+        err.contentType === "text/html" &&
+        // The message has to point at the cause, not just say "parse failed".
+        err.message.includes("NEXUS_EXCHANGE_API_URL"),
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a 2xx plain-text body throws too — HTML is not the only wrong answer", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const client = clientWithResponse(
+      new Response("upstream connect error or disconnect/reset", {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }),
+    );
+    await assert.rejects(
+      () => client.request({ path: "/api/v1/markets/summary" }),
+      NonJsonResponseError,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("an empty 2xx body is still undefined, not an error", async () => {
+  // Seven operations in the spec document a 2xx with no content. An absent body
+  // is a valid answer and must stay distinguishable from an unreadable one.
+  const realFetch = globalThis.fetch;
+  try {
+    const noContent = clientWithResponse(new Response(null, { status: 204 }));
+    assert.equal(
+      await noContent.request({ path: "/api/v1/orders" }),
+      undefined,
+    );
+    // Also a 200 that simply carries nothing.
+    const emptyOk = clientWithResponse(new Response("", { status: 200 }));
+    assert.equal(await emptyOk.request({ path: "/api/v1/orders" }), undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("valid JSON bodies still decode, including the falsy ones", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    // `0`, `false`, `""`, and `null` are all valid JSON and all falsy. None may
+    // be mistaken for an absent body and turned into undefined.
+    for (const [body, expected] of [
+      ["[]", []],
+      ['{"a":1}', { a: 1 }],
+      ["0", 0],
+      ["false", false],
+      ['""', ""],
+      ["null", null],
+    ] as Array<[string, unknown]>) {
+      const client = clientWithResponse(new Response(body, { status: 200 }));
+      assert.deepEqual(
+        await client.request({ path: "/api/v1/markets/summary" }),
+        expected,
+        `body ${body}`,
+      );
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("a non-JSON error body is unchanged — that path already threw", async () => {
+  // A 4xx/5xx HTML body must keep raising ExchangeApiError with its status, not
+  // be reclassified as a non-JSON success.
+  const realFetch = globalThis.fetch;
+  try {
+    const client = clientWithResponse(
+      new Response(MARKETING_PAGE, {
+        status: 404,
+        headers: { "content-type": "text/html" },
+      }),
+    );
+    await assert.rejects(
+      () => client.request({ path: "/api/v1/markets/summary" }),
+      (err: Error) => err instanceof ExchangeApiError && err.status === 404,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("the thrown non-JSON body is scrubbed and bounded", async () => {
+  const realFetch = globalThis.fetch;
+  try {
+    const client = clientWithResponse(
+      new Response(
+        `<html>api_key: "nx_live_secret" ${"x".repeat(2000)}</html>`,
+        {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        },
+      ),
+    );
+    await assert.rejects(
+      () => client.request({ path: "/api/v1/markets/summary" }),
+      (err: Error) =>
+        err instanceof NonJsonResponseError &&
+        !err.body.includes("nx_live_secret") &&
+        err.body.includes("[REDACTED]") &&
+        err.body.includes("[truncated]"),
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

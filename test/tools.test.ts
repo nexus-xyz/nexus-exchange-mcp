@@ -1117,6 +1117,147 @@ test("dropped liveness tools are no longer registered", () => {
   assert.ok(findTool("get_service_status"), "the surviving /status tool stays");
 });
 
+// ── v0.7.2 portfolio-parity tools (ENG-6461) ─────────────────────────────────
+
+test("portfolio-parity reads sign the v1 account routes", async () => {
+  const cases: Array<[string, Record<string, unknown>, string]> = [
+    ["get_account_state", {}, `${BASE}/api/v1/account/state`],
+    ["get_account_fees", {}, `${BASE}/api/v1/account/fees`],
+    ["get_portfolio_history", {}, `${BASE}/api/v1/account/portfolio-history`],
+  ];
+  for (const [name, args, url] of cases) {
+    const calls = await capture(fullClient(), (c) =>
+      findTool(name)!.handler(c, args),
+    );
+    assert.equal(calls[0].method, "GET", name);
+    assert.equal(calls[0].url, url, name);
+    assert.ok(calls[0].headers.get("x-signature"), `${name} is HMAC-signed`);
+    assert.equal(calls[0].body, undefined, `${name} sends no body`);
+
+    // Every one of these is account-scoped: no credentials must mean a hard
+    // failure, never an unsigned request that would resolve to another account.
+    const noCreds = new ExchangeClient({
+      directBaseUrl: BASE,
+      gatewayBaseUrl: BASE,
+    });
+    await assert.rejects(
+      () => findTool(name)!.handler(noCreds, args) as Promise<unknown>,
+      MissingCredentialsError,
+      `${name} requires credentials`,
+    );
+  }
+});
+
+test("get_portfolio_history forwards window + limit, and omits them when unset", async () => {
+  const both = await capture(fullClient(), (c) =>
+    findTool("get_portfolio_history")!.handler(c, {
+      window: "week",
+      limit: 168,
+    }),
+  );
+  assert.equal(
+    both[0].url,
+    `${BASE}/api/v1/account/portfolio-history?window=week&limit=168`,
+  );
+
+  // Omitted args produce a bare path (no stray "?"), so the signed query
+  // string matches what the server verifies over.
+  const bare = await capture(fullClient(), (c) =>
+    findTool("get_portfolio_history")!.handler(c, {}),
+  );
+  assert.equal(bare[0].url, `${BASE}/api/v1/account/portfolio-history`);
+
+  const onlyWindow = await capture(fullClient(), (c) =>
+    findTool("get_portfolio_history")!.handler(c, { window: "all" }),
+  );
+  assert.equal(
+    onlyWindow[0].url,
+    `${BASE}/api/v1/account/portfolio-history?window=all`,
+  );
+});
+
+test("get_portfolio_history validates window as a closed enum and caps limit", () => {
+  const tool = findTool("get_portfolio_history")!;
+  for (const window of ["day", "week", "month", "all"]) {
+    assert.equal(tool.zod.safeParse({ window }).success, true, window);
+  }
+  // Anything outside the enum is rejected client-side rather than forwarded:
+  // the upstream answers 400 invalid_window, and nothing free-form should ever
+  // reach the signed query string.
+  for (const window of ["hour", "DAY", "", "day; drop", 1, null]) {
+    assert.equal(tool.zod.safeParse({ window }).success, false, String(window));
+  }
+  assert.equal(tool.zod.safeParse({ limit: 366 }).success, true);
+  assert.equal(tool.zod.safeParse({ limit: 367 }).success, false);
+  assert.equal(tool.zod.safeParse({ limit: 0 }).success, false);
+  assert.equal(tool.zod.safeParse({ limit: -1 }).success, false);
+  assert.equal(tool.zod.safeParse({ limit: 1.5 }).success, false);
+  // Strict schema: unknown keys are rejected, not silently dropped.
+  assert.equal(tool.zod.safeParse({ cursor: "abc" }).success, false);
+});
+
+test("argless portfolio-parity tools take no arguments", () => {
+  for (const name of ["get_account_state", "get_account_fees"]) {
+    const tool = findTool(name)!;
+    assert.equal(tool.zod.safeParse({}).success, true, name);
+    assert.equal(tool.zod.safeParse({ limit: 10 }).success, false, name);
+  }
+});
+
+const POSITION_TOOLS = ["get_balance", "get_positions", "get_account_state"];
+
+test("tools returning positions document the enriched risk fields", () => {
+  // The enrichment is null-able with a companion <field>_error; an agent that
+  // read null as zero would compute nonsense risk, so the descriptions must
+  // say so on every tool that returns a Position.
+  for (const name of POSITION_TOOLS) {
+    const { description } = findTool(name)!;
+    assert.match(description, /notional_value/, name);
+    assert.match(description, /_error/, name);
+    assert.match(description, /never as zero/, name);
+    // All five genuinely-nullable fields, `leverage` included — the list is
+    // what a model pattern-matches against, so a partial one misleads.
+    for (const field of [
+      "notional_value",
+      "margin_used",
+      "roe",
+      "max_leverage",
+      "leverage",
+    ]) {
+      assert.match(description, new RegExp(`\`${field}\``), `${name}/${field}`);
+    }
+  }
+});
+
+test("position descriptions do not claim funding_paid is nullable", () => {
+  // Spec v0.7.2: `funding_paid` is `allOf: [Decimal]` with no null branch,
+  // documented always-present ("0" when nothing accrued), and there is no
+  // `funding_paid_error` property in the document at all — Position has
+  // exactly five `_error` companions. Telling a model otherwise inverts the
+  // null-vs-zero rule the rest of the note exists to enforce: it would report
+  // an authoritative zero as unknown and look for a key that never appears.
+  for (const name of POSITION_TOOLS) {
+    const { description } = findTool(name)!;
+    assert.doesNotMatch(description, /funding_paid_error/, name);
+    assert.match(description, /`funding_paid` is NOT one of those/, name);
+    assert.match(description, /always present/, name);
+  }
+});
+
+test("account tools warn that the authoritative-margin 502 is not an empty account", () => {
+  // v0.7.2 added `502 authoritative_margin_unavailable` to BOTH /account/state
+  // and /account/summary. The summary is the tool that advertises
+  // `withdrawable`, the field whose authoritative-margin dependency causes the
+  // fail-closed, so it needs the retry guidance just as much.
+  for (const name of ["get_account_state", "get_account_summary"]) {
+    const { description } = findTool(name)!;
+    assert.match(description, /authoritative_margin_unavailable/, name);
+    assert.match(description, /retry/i, name);
+    assert.match(description, /do NOT read the error as a flat or empty/, name);
+  }
+  assert.match(findTool("get_account_summary")!.description, /withdrawable/);
+});
+
 test("tool names are unique and admin tools carry the adminOnly flag", () => {
   const names = tools.map((t) => t.name);
   assert.equal(new Set(names).size, names.length, "no duplicate tool names");

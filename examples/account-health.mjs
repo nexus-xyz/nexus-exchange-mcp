@@ -11,10 +11,13 @@
 //                                under the site's own key — see the top-level
 //                                README, "Authentication".
 //
-//   get_account_summary    -> equity / margin / PnL rollup
+//   get_account_state      -> summary + open positions in one coherent read
+//   get_account_summary    -> equity / margin / PnL rollup / withdrawable
+//   get_account_fees       -> effective maker/taker bps, tier, 30d volume
 //   get_balance            -> collateral snapshot
+//   get_portfolio_history  -> equity + PnL + volume series over a window
 //   get_equity_history     -> equity time-series (5s cadence, ~1h)
-//   get_positions          -> open positions
+//   get_positions          -> open positions (with per-position risk detail)
 //   get_closed_positions   -> realized PnL per closed position
 //   get_funding_payments   -> funding paid/received
 //   get_rate_limit_status  -> remaining request budget (agents: pace yourself)
@@ -63,9 +66,30 @@ async function main() {
   await client.connect(transport);
 
   try {
+    // One coherent read of summary + positions. Prefer this over pairing
+    // get_account_summary with get_positions: the two parts can't disagree.
+    const state = await callJson(client, "get_account_state");
+    console.log("Account state (summary + positions):");
+    console.log(JSON.stringify(state, null, 2).slice(0, 600));
+    // `withdrawable` is free margin floored at zero — what can actually leave
+    // the account. The endpoint fails closed (502) rather than estimating it,
+    // so if the call succeeded but the field is missing, treat it as unknown.
+    console.log(`  withdrawable: ${state.summary?.withdrawable ?? "unknown"}`);
+
     const summary = await callJson(client, "get_account_summary");
-    console.log("Portfolio summary:");
+    console.log("\nPortfolio summary:");
     console.log(JSON.stringify(summary, null, 2).slice(0, 600));
+
+    const fees = await callJson(client, "get_account_fees");
+    // The spec marks `volume_30d_estimated` required, but don't let an absent
+    // field read as "full 30-day coverage" just because `undefined` is falsy —
+    // claiming coverage the server never asserted is the unsafe direction.
+    const estimated = fees.volume_30d_estimated !== false;
+    console.log(
+      `\nFee schedule: maker=${fees.maker_fee_bps}bps taker=${fees.taker_fee_bps}bps ` +
+        `tier=${fees.tier} 30d volume=${fees.volume_30d}` +
+        (estimated ? " (estimated)" : ""),
+    );
 
     const balance = await callJson(client, "get_balance");
     console.log("\nBalance snapshot:");
@@ -79,6 +103,20 @@ async function main() {
       console.log(
         `  first=${JSON.stringify(points[0])}\n  last =${JSON.stringify(points[points.length - 1])}`,
       );
+    }
+
+    // Longer horizon than get_equity_history, and with PnL + volume alongside
+    // equity. This is a heavy read — one call, not a poll loop.
+    const portfolio = await callJson(client, "get_portfolio_history", {
+      window: "week",
+    });
+    const series = portfolio.points ?? [];
+    console.log(
+      `\nPortfolio history (${portfolio.window}, cadence ${portfolio.cadence_ms}ms): ` +
+        `${series.length} points`,
+    );
+    if (series.length > 0) {
+      console.log(`  last =${JSON.stringify(series[series.length - 1])}`);
     }
 
     const positions = await callJson(client, "get_positions");

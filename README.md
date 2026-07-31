@@ -260,19 +260,27 @@ published by
 This repo does not vendor a copy — the checks below fetch the pinned release. The
 line above is bot-managed; everything around it is human-owned.
 
-Two checks watch the pin, and they answer different questions:
+Three separate things watch the pin, and they answer different questions:
 
-| Check           | Question                                                | Where                              |
-| --------------- | ------------------------------------------------------- | ---------------------------------- |
-| `spec-drift`    | Does the tool surface still match the spec it **pins**? | `.github/workflows/spec-drift.yml` |
-| `drift` (in CI) | Is the pin **behind** the latest release?               | `.github/workflows/ci.yml`         |
+| Check           | Question                                                | Where                                 |
+| --------------- | ------------------------------------------------------- | ------------------------------------- |
+| `spec-drift`    | Does the tool surface still match the spec it **pins**? | `.github/workflows/spec-drift.yml`    |
+| `drift` (in CI) | Is the pin **behind** the latest release?               | `.github/workflows/ci.yml`            |
+| `spec-autobump` | A newer spec released — is the delta breaking?          | `.github/workflows/spec-autobump.yml` |
 
-The scheduled `api-version-sync` workflow opens a PR when a newer spec releases.
+`spec-autobump` (daily cron, `repository_dispatch` from the api repo, or manual
+dispatch) classifies the pin advance with **oasdiff** and opens a PR touching only
+`.api-version` and the managed line above, labelled `spec-autobump` or
+`breaking · needs-SDK-update`. It never merges: `allow_auto_merge` is disabled on
+this repo, so the workflow probes the setting and says so in the PR body rather
+than calling `gh pr merge --auto` and reporting success over a no-op. It
+supersedes the old poll-only `api-version-sync` workflow, which had no
+classification step.
 
 #### Spec drift
 
-`spec-drift` is the verification half, and it runs on **every** PR — including a
-pin-bump PR, where the pin _is_ the change. It enforces three invariants:
+`spec-drift` is the verification half, and it runs on **every** PR — including the
+autobump's own, where the pin _is_ the change. It enforces three invariants:
 
 1. every operation in `endpoints.txt` exists in the pinned spec;
 2. `endpoints.txt` matches the per-tool `ops` declarations byte-for-byte (it is a

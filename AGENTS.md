@@ -22,8 +22,9 @@ The Model Context Protocol server exposing the Nexus Exchange API as agent tools
 ## API contract
 
 - Keep the pinned `nexus-exchange-api` version in sync when the spec bumps.
-  `spec-drift` on the bump PR is the check that says whether it needs code
-  changes.
+  `spec-autobump` opens that PR for you and labels it breaking or not; merging it
+  is a human decision, and `spec-drift` on that PR is the check that says whether
+  it needs code changes.
 - New API capabilities should be surfaced as MCP tools so an agent can use them.
 - Every tool declares the spec operations it calls in its `ops` field — required
   by the type, verified against the handler by `scripts/check_spec_drift.py`, and

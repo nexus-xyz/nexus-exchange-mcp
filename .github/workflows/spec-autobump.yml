@@ -1,0 +1,276 @@
+name: Spec autobump
+
+# DETECTION + CLASSIFICATION half of the spec-pin lifecycle (ENG-7964), modelled
+# on nexus-exchange-rs's reference implementation (ENG-3563).
+#
+# Supersedes `api-version-sync.yml` (poll-only, no oasdiff gate), removed in the
+# same change. Its pin-bump helper (scripts/sync_api_version.py) is reused here.
+#
+# When the api repo cuts a release it fans out a `repository_dispatch`
+# (`spec-released`, carrying the tag); a daily `schedule` poll is the self-healing
+# fallback if a dispatch is dropped. Either path:
+#
+#   1. resolves the target tag and confirms it is newer than `.api-version`,
+#   2. fetches the pinned and target specs (raw-at-tag, so the release asset
+#      download_count stays reserved as an external adoption signal),
+#   3. runs oasdiff to classify old-pin -> new as BREAKING vs NON-BREAKING,
+#   4. bumps `.api-version` + the managed README line, and opens a labelled PR.
+#
+# It touches ONLY the pin and that one README line. It does not edit the README
+# SDK<->spec compatibility table (which records what *released* versions shipped
+# against, so a bare spec release changes nothing in it), and it does not touch
+# endpoints.txt or any tool. When a new spec drops an operation this server
+# implements, `spec-drift` goes red on this PR and a human pushes the tool changes
+# onto the branch. Green drift is the merge signal.
+#
+# WHY THIS IS SAFE TO LAND HERE, NOW: `spec-drift.yml` exists and runs on every
+# PR including this one. Adding an autobump to a repo with no drift check makes
+# things actively worse — it manufactures ungated pin advances at machine speed.
+# That was this repo's state until ENG-7964; do not reintroduce it.
+#
+# MERGE GATING — read before assuming this lands anything by itself:
+#   * `allow_auto_merge` is DISABLED on this repo. Porting rs's arming step
+#     verbatim would silently no-op, which is why the step below probes the
+#     setting and reports plainly that a human must merge (ENG-7688 is the same
+#     failure shape in the monorepo).
+#   * `spec-drift` is not yet a required status check here (ci.yml's required
+#     `drift` job is a lag check, not this verification).
+#   * ENG-4149 (bot ruleset bypass) gates any real auto-landing fleet-wide.
+#   So today this workflow's job is to open a correctly classified, verified PR
+#   for a human to merge. It never merges anything.
+#
+# NOTE on ci.yml's required `drift` job: it fails whenever the pin is behind the
+# api repo's latest release. So after a spec release, every open PR in this repo
+# is red until this bump lands — merging the autobump PR is what makes CI green
+# again, not an optional tidy-up.
+
+on:
+  repository_dispatch:
+    types: [spec-released]
+  schedule:
+    # Daily fallback poll; the dispatch from the api repo is the fast path.
+    # Same slot the superseded api-version-sync.yml used.
+    - cron: "23 8 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Spec tag to evaluate (e.g. v0.8.0). Defaults to api repo latest."
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  # Serialize on the workflow, not the tag: two near-simultaneous releases must
+  # not race to bump the same pin.
+  group: spec-autobump
+  cancel-in-progress: false
+
+env:
+  SPEC_REPO: nexus-xyz/nexus-exchange-api
+
+jobs:
+  autobump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A PR opened with the default GITHUB_TOKEN does not trigger other
+          # workflows, so the checks that verify the bump (spec-drift, CI) would
+          # never run on it — the exact "automation without verification" shape
+          # this lifecycle exists to prevent. With the PAT they run automatically;
+          # without it, re-run the checks once on the PR by hand.
+          token: ${{ secrets.API_VERSION_SYNC_TOKEN || github.token }}
+
+      - name: Resolve target tag
+        id: resolve
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # lifts the releases-API rate limit
+          DISPATCH_TAG: ${{ github.event.client_payload.tag }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${DISPATCH_TAG:-${INPUT_TAG:-}}"
+          if [ -z "$tag" ]; then
+            # Scheduled path: ask the api repo for its latest release tag.
+            tag="$(gh api "repos/${SPEC_REPO}/releases/latest" --jq .tag_name)"
+          fi
+          # Validate strictly before the tag reaches a URL, a file, or a branch
+          # name — a dispatch payload is untrusted data.
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error::resolved tag is not vX.Y.Z: '$tag'"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "pinned=$(tr -d '[:space:]' < .api-version)" >> "$GITHUB_OUTPUT"
+          echo "Resolved target tag: $tag (currently pinned: $(cat .api-version))"
+
+      - name: Stop if not newer than the pin
+        id: gate
+        env:
+          NEW_TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Reuse the lag check: exit 3 == behind (a newer spec exists), 0 == current.
+          if python3 scripts/sync_api_version.py --check --latest "$NEW_TAG"; then
+            echo "Pin is already at or ahead of $NEW_TAG; nothing to bump."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            rc=$?
+            if [ "$rc" -eq 3 ]; then
+              echo "A newer spec ($NEW_TAG) is available; proceeding."
+              echo "proceed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::sync_api_version.py --check failed (exit $rc)"
+              exit "$rc"
+            fi
+          fi
+
+      - name: Fetch pinned + target specs
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          OLD_TAG: ${{ steps.resolve.outputs.pinned }}
+          NEW_TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Raw-at-tag, matching scripts/spec-drift.sh: the release asset
+          # download_count is reserved as an external-adoption signal, so CI
+          # must not inflate it.
+          curl -fsSL "https://raw.githubusercontent.com/${SPEC_REPO}/${OLD_TAG}/openapi.json" -o /tmp/spec-old.json
+          curl -fsSL "https://raw.githubusercontent.com/${SPEC_REPO}/${NEW_TAG}/openapi.json" -o /tmp/spec-new.json
+
+      - name: Install oasdiff
+        if: steps.gate.outputs.proceed == 'true'
+        run: curl -fsSL https://raw.githubusercontent.com/oasdiff/oasdiff/main/install.sh | sh
+
+      - name: Classify old-pin -> new with oasdiff
+        if: steps.gate.outputs.proceed == 'true'
+        id: oasdiff
+        run: |
+          set -euo pipefail
+          # Informational changelog in the log for the PR reviewer.
+          oasdiff changelog /tmp/spec-old.json /tmp/spec-new.json || true
+
+          # Capture the breaking summary for the PR body.
+          oasdiff breaking /tmp/spec-old.json /tmp/spec-new.json --format text \
+            > /tmp/oasdiff-breaking.txt 2>&1 || true
+
+          # The classification: the same gate the api repo's "Classify API
+          # changes" uses. `--fail-on ERR` exits non-zero iff there is an
+          # ERR-level (breaking) change; WARN/INFO changes are non-breaking.
+          if oasdiff breaking /tmp/spec-old.json /tmp/spec-new.json --fail-on ERR; then
+            echo "verdict=non-breaking" >> "$GITHUB_OUTPUT"
+            echo "No ERR-level (breaking) changes — NON-BREAKING."
+          else
+            echo "verdict=breaking" >> "$GITHUB_OUTPUT"
+            echo "ERR-level (breaking) change(s) detected — BREAKING."
+          fi
+
+      - name: Apply the pin bump
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          NEW_TAG: ${{ steps.resolve.outputs.tag }}
+        run: python3 scripts/sync_api_version.py --write --latest "$NEW_TAG"
+
+      # Probe rather than assume. rs arms GitHub auto-merge unconditionally; that
+      # step would fail (or silently achieve nothing) here because the repo has
+      # `allow_auto_merge: false`. Reporting the truth beats a step that looks
+      # like it armed something — the whole point of ENG-7688.
+      - name: Check whether auto-merge is available
+        if: steps.gate.outputs.proceed == 'true'
+        id: automerge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          enabled="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge')"
+          echo "allow_auto_merge=$enabled" >> "$GITHUB_OUTPUT"
+          if [ "$enabled" != "true" ]; then
+            echo "::notice::allow_auto_merge is disabled on this repo, so " \
+                 "auto-merge cannot be armed. The PR will be opened for a human " \
+                 "to merge once the checks are green (ENG-7688 / ENG-4149)."
+          fi
+
+      - name: Ensure the classification labels exist
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.API_VERSION_SYNC_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          # `gh pr create --label` fails outright on an unknown label, which would
+          # lose an otherwise good PR. Create them idempotently; the wording
+          # matches nexus-exchange-rs so the fleet reads the same.
+          gh label create "spec-autobump" --color 0e8a16 \
+            --description "Automated non-breaking .api-version bump (ENG-7964)" \
+            --force
+          gh label create "breaking · needs-SDK-update" --color d93f0b \
+            --description "Spec bump is breaking; needs human tool changes (ENG-7964)" \
+            --force
+
+      - name: Open the bump PR
+        if: steps.gate.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.API_VERSION_SYNC_TOKEN || github.token }}
+          NEW_TAG: ${{ steps.resolve.outputs.tag }}
+          OLD_TAG: ${{ steps.resolve.outputs.pinned }}
+          VERDICT: ${{ steps.oasdiff.outputs.verdict }}
+          AUTO_MERGE: ${{ steps.automerge.outputs.allow_auto_merge }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No file change after bump — nothing to open."
+            exit 0
+          fi
+
+          branch="chore/spec-autobump-${NEW_TAG}"
+
+          # Idempotent: if the branch already exists upstream, or an open PR is
+          # already on it, leave it rather than churning a duplicate each poll.
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Branch $branch already exists upstream; nothing to do."
+            exit 0
+          fi
+          if [ -n "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            echo "An open PR for $branch already exists; nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add .api-version README.md
+          git commit -m "chore(spec): bump .api-version to ${NEW_TAG}"
+          git push --set-upstream origin "$branch"
+
+          # Render the body in Python: the markdown is dense with backticks and
+          # ${...} examples, which inline shell quoting handles badly.
+          python3 scripts/render_autobump_pr_body.py \
+            --new-tag "$NEW_TAG" \
+            --old-tag "$OLD_TAG" \
+            --verdict "$VERDICT" \
+            --oasdiff-file /tmp/oasdiff-breaking.txt \
+            --auto-merge "$AUTO_MERGE" \
+            > "$RUNNER_TEMP/pr-body.md"
+
+          if [ "$VERDICT" = "non-breaking" ]; then
+            gh pr create --base main --head "$branch" \
+              --title "chore(spec): bump .api-version to ${NEW_TAG}" \
+              --body-file "$RUNNER_TEMP/pr-body.md" \
+              --label "spec-autobump"
+            if [ "$AUTO_MERGE" = "true" ]; then
+              # Arming is not merging: the PR still needs its required checks and
+              # the ENG-4149 bypass before it can land.
+              gh pr merge "$branch" --auto --squash
+            else
+              echo "::notice::auto-merge unavailable; PR left for a human to merge."
+            fi
+          else
+            gh pr create --base main --head "$branch" \
+              --title "chore(spec): bump .api-version to ${NEW_TAG}" \
+              --body-file "$RUNNER_TEMP/pr-body.md" \
+              --label "breaking · needs-SDK-update"
+            # Route to a human; never arm auto-merge on a breaking bump.
+            gh pr edit "$branch" --add-reviewer nexus-xyz/eng || \
+              echo "::warning::could not request review (team handle may differ); add a reviewer manually."
+          fi

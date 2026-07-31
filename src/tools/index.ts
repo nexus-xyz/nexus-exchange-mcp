@@ -6,6 +6,12 @@
  * server-side; it returns an honest "pending" message rather than faking a
  * result. Operator-only admin tools (`adminOnly`) are registered only when
  * `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` is set — see `visibleTools`.
+ *
+ * Every tool declares the spec operations it calls in its `ops` field, which is
+ * what makes MCP's API coverage measurable rather than hand-counted (ENG-7788 /
+ * ENG-7964). `scripts/check_spec_drift.py` verifies each declaration against the
+ * handler it sits next to and emits endpoints.txt from the union — see
+ * docs/coverage-unit.md.
  */
 
 import { z } from "zod";
@@ -13,6 +19,30 @@ import { ExchangeClient } from "../client.js";
 
 export interface ToolDef {
   name: string;
+  /**
+   * The Exchange API spec operations this tool calls, as `"METHOD /path"` with
+   * the path spelled exactly as the pinned OpenAPI spec spells it — including
+   * placeholder names (`{market_id}`, not `{id}` or the local variable name).
+   *
+   * This is the **tool → spec-operation mapping** (ENG-7788). It exists because
+   * a tool is not one operation: `cancel_order` calls two (bulk and by-id),
+   * convenience tools can call several, and `get_deposit_target` calls none.
+   * Without a declared mapping, "how many spec operations does MCP cover" has no
+   * answer, and the registered-tool count gets reported as an operation count —
+   * which is not the same number and is not comparable to the SDK rows. See
+   * docs/coverage-unit.md for the unit decision this field implements.
+   *
+   * The field is REQUIRED, so a new tool cannot be added without stating what it
+   * calls; `[]` is a legitimate value for a tool that calls no operation, and
+   * must be listed in `TOOLS_WITHOUT_OPS` in scripts/check_spec_drift.py so the
+   * emptiness is deliberate rather than forgotten.
+   *
+   * Declarations are not taken on trust. `scripts/check_spec_drift.py` derives
+   * what each handler *actually* requests and fails if a declaration disagrees,
+   * generates endpoints.txt from the union of these lists, and checks every
+   * entry against the pinned spec. So this is a contract, not documentation.
+   */
+  ops: readonly string[];
   description: string;
   /** Raw JSON Schema (draft-07-ish) advertised over `tools/list`. */
   inputSchema: Record<string, unknown>;
@@ -400,6 +430,7 @@ export const tools: ToolDef[] = [
   // ── Public market data (no credentials) ──────────────────────────────────
   {
     name: "list_markets",
+    ops: ["GET /api/v1/markets/summary"],
     description:
       "List all tradable markets with their current summary (mark price, 24h " +
       "change, volume, open interest, funding). Public — no credentials needed.",
@@ -410,6 +441,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_ticker",
+    ops: ["GET /api/v1/markets/{market_id}/ticker"],
     description:
       "Get the ticker (last price, bid/ask, 24h stats) for one market, e.g. " +
       '"BTC-USDX-PERP". Public — no credentials needed.',
@@ -433,6 +465,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_orderbook",
+    ops: ["GET /api/v1/markets/{market_id}/orderbook"],
     description:
       "Get the current order book (bids/asks with price + size) for one market. " +
       "Public — no credentials needed.",
@@ -457,6 +490,7 @@ export const tools: ToolDef[] = [
 
   {
     name: "list_market_specs",
+    ops: ["GET /markets"],
     description:
       "List all markets with their static specs (tick size, lot size, leverage, " +
       "contract details) — the raw market definitions without live summary " +
@@ -470,6 +504,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_tickers",
+    ops: ["GET /api/v1/tickers"],
     description:
       "Get tickers (last price, bid/ask, 24h stats) for ALL markets in one " +
       "call. Public — no credentials needed.",
@@ -480,6 +515,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_mark_price",
+    ops: ["GET /api/v1/markets/{market_id}/mark-price"],
     description:
       "Get the current mark price for one market. Public — no credentials needed.",
     inputSchema: jsonSchema(
@@ -502,6 +538,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_market_status",
+    ops: ["GET /api/v1/markets/{market_id}/status"],
     description:
       "Get a market's trading status and halt info (whether trading is open, " +
       "halted, or in auction). Public — no credentials needed.",
@@ -525,6 +562,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_trades",
+    ops: ["GET /api/v1/markets/{market_id}/trades"],
     description:
       "Get recent public trades (prints) for one market. Public — no " +
       "credentials needed.",
@@ -560,6 +598,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_candles",
+    ops: ["GET /api/v1/markets/{market_id}/candles"],
     description:
       "Get OHLCV candles for one market. Public — no credentials needed. " +
       "Timeframe is one of 1s, 1m, 5m, 1h (default 1m).",
@@ -606,6 +645,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_funding_history",
+    ops: ["GET /api/v1/markets/{market_id}/funding"],
     description:
       "Get the funding-rate history for one perpetual market. Public — no " +
       "credentials needed.",
@@ -642,6 +682,7 @@ export const tools: ToolDef[] = [
 
   {
     name: "get_funding_samples",
+    ops: ["GET /api/v1/markets/{market_id}/funding-samples"],
     description:
       "Get the dense per-tick funding premium-index samples for one perpetual " +
       "market (60s cadence, up to 480 points = 8h). Finer-grained than " +
@@ -679,6 +720,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_market_risk_params",
+    ops: ["GET /markets/{market_id}/risk-params"],
     description:
       "Get one market's risk parameters: margin requirements and maximum " +
       "leverage, from the engine's market registry. Public — no credentials " +
@@ -706,6 +748,7 @@ export const tools: ToolDef[] = [
   // ── Public venue statistics (no credentials) ──────────────────────────────
   {
     name: "get_stats",
+    ops: ["GET /api/v1/stats"],
     description:
       "Get aggregate venue statistics (volume, trades, throughput) plus " +
       "rolling unique-trader counts. Public — no credentials needed.",
@@ -716,6 +759,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_stats_history",
+    ops: ["GET /api/v1/stats/history"],
     description:
       "Get the venue's per-second throughput history (ring buffer, up to 3600 " +
       "points). Public — no credentials needed.",
@@ -731,6 +775,7 @@ export const tools: ToolDef[] = [
   // demo show real balances/positions/orders with zero secrets.
   {
     name: "get_demo_account",
+    ops: ["GET /demo/account"],
     description:
       "Get a live, public demo account snapshot (balance, equity, positions). " +
       "No credentials needed — useful to show the account flow before API keys " +
@@ -743,6 +788,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_demo_positions",
+    ops: ["GET /demo/positions"],
     description:
       "Get the public demo account's open positions. No credentials needed.",
     inputSchema: jsonSchema({}),
@@ -753,6 +799,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_demo_orders",
+    ops: ["GET /demo/orders"],
     description:
       "Get the public demo account's open orders. No credentials needed.",
     inputSchema: jsonSchema({}),
@@ -765,6 +812,7 @@ export const tools: ToolDef[] = [
   // ── Account reads (require credentials) ───────────────────────────────────
   {
     name: "get_balance",
+    ops: ["GET /api/v1/account"],
     description:
       "Get the authenticated account snapshot: collateral balance, equity, and " +
       `positions. ${ENRICHED_POSITION_NOTE} Requires API credentials.`,
@@ -776,6 +824,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_account_summary",
+    ops: ["GET /api/v1/account/summary"],
     description:
       "Get the authenticated account's portfolio summary (equity, margin " +
       "usage, PnL rollup) — a richer view than `get_balance`. Includes " +
@@ -794,6 +843,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_account_state",
+    ops: ["GET /api/v1/account/state"],
     description:
       "Get the authenticated account's full state in ONE call: the portfolio " +
       "summary aggregates plus every open position (`{ summary, positions }`). " +
@@ -812,6 +862,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_account_fees",
+    ops: ["GET /api/v1/account/fees"],
     description:
       "Get the authenticated account's effective fee schedule: maker/taker " +
       "rate in basis points (a NEGATIVE maker rate is a rebate paid TO the " +
@@ -841,6 +892,7 @@ export const tools: ToolDef[] = [
   // changing the number an agent is told to budget against.
   {
     name: "get_portfolio_history",
+    ops: ["GET /api/v1/account/portfolio-history"],
     description:
       "Get the authenticated account's portfolio time-series — equity, " +
       "cumulative trading PnL, and cumulative traded volume — over a " +
@@ -895,6 +947,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_equity_history",
+    ops: ["GET /api/v1/account/equity-history"],
     description:
       "Get the authenticated account's equity time-series (5s cadence, ~1h " +
       "window), oldest first. For a longer window, or for PnL and volume " +
@@ -923,6 +976,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_positions",
+    ops: ["GET /api/v1/positions"],
     description:
       "Get the authenticated account's open positions. " +
       `${ENRICHED_POSITION_NOTE} Requires API credentials.`,
@@ -934,6 +988,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_closed_positions",
+    ops: ["GET /api/v1/positions/closed"],
     description:
       "Get the authenticated account's closed positions (realized PnL per " +
       "position). Requires API credentials.",
@@ -960,6 +1015,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_open_orders",
+    ops: ["GET /api/v1/orders"],
     description:
       "Get the authenticated account's resting (open) orders. Requires API credentials.",
     inputSchema: jsonSchema({}),
@@ -970,6 +1026,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_order",
+    ops: ["GET /orders/{order_id}"],
     description:
       "Get a single order by its id (status, fills, remaining size). Pass " +
       "`market_id` when known — the spec marks it required for routing, though " +
@@ -1012,6 +1069,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_order_history",
+    ops: ["GET /api/v1/orders/history"],
     description:
       "Get the authenticated account's terminal-status order history (filled / " +
       "cancelled / rejected / expired), newest first. Requires API credentials.",
@@ -1038,6 +1096,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_fills",
+    ops: ["GET /api/v1/fills"],
     description:
       "List the authenticated account's recent fills (executed trades). " +
       "Requires API credentials.",
@@ -1058,6 +1117,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_funding_payments",
+    ops: ["GET /funding"],
     description:
       "Get the authenticated account's funding-payment history, newest first, " +
       "optionally filtered to a single market. Requires API credentials.",
@@ -1095,6 +1155,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_withdrawals",
+    ops: ["GET /withdrawals"],
     description:
       "List the authenticated account's withdrawal history. Requires API " +
       "credentials.",
@@ -1120,6 +1181,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_deposits",
+    ops: ["GET /deposits"],
     description:
       "List the authenticated account's deposit history. Requires API " +
       "credentials.",
@@ -1147,6 +1209,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_rate_limit_status",
+    ops: ["GET /api/v1/account/rate-limit"],
     description:
       "Get the authenticated account's current rate-limit status (remaining " +
       "request budget). Useful for an agent to pace itself. Requires API " +
@@ -1159,6 +1222,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_adl_history",
+    ops: ["GET /account/{address}/adl-history"],
     description:
       "Get the auto-deleveraging (ADL) events that touched a given account. " +
       "Requires API credentials.",
@@ -1198,6 +1262,7 @@ export const tools: ToolDef[] = [
   // ── Cancel-on-disconnect (dead man's switch; requires credentials) ────────
   {
     name: "get_cancel_on_disconnect",
+    ops: ["GET /api/v1/account/cancel-on-disconnect"],
     description:
       "Get the authenticated account's cancel-on-disconnect (COD) status. COD " +
       "is an opt-in dead man's switch: when the account's last authenticated " +
@@ -1219,6 +1284,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "set_cancel_on_disconnect",
+    ops: ["PUT /api/v1/account/cancel-on-disconnect"],
     description:
       "Enable or disable cancel-on-disconnect (COD) for the authenticated " +
       "account. Pass `enabled: true` to arm the dead man's switch (the " +
@@ -1253,6 +1319,7 @@ export const tools: ToolDef[] = [
   // ── Trade actions (require credentials) ───────────────────────────────────
   {
     name: "place_order",
+    ops: ["POST /api/v1/orders"],
     description:
       "Place an order on a market, buy/sell. Supports limit, market, stop-loss " +
       "(stop_limit / stop_market), take-profit (take_profit_limit / " +
@@ -1276,6 +1343,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "place_orders_batch",
+    ops: ["POST /api/v1/orders/batch"],
     description:
       "Submit multiple orders in one request. Each order has the same shape as " +
       "`place_order` (market_id, side, type, size, and the type-dependent " +
@@ -1313,6 +1381,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "cancel_order",
+    ops: ["DELETE /api/v1/orders", "DELETE /api/v1/orders/{order_id}"],
     description:
       "Cancel a resting order. Pass `order_id` to cancel one order. To cancel " +
       "ALL open orders you must explicitly pass `cancel_all: true` — an empty " +
@@ -1389,6 +1458,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "amend_order",
+    ops: ["PATCH /api/v1/orders/{order_id}"],
     description:
       "Amend a resting order's price and/or size in one atomic cancel-replace " +
       "operation. At least one of `price` or `size` is required; a pre-trade " +
@@ -1454,6 +1524,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "preview_order",
+    ops: ["POST /api/v1/orders/preview"],
     description:
       "Preview an order without submitting it: projects the margin, equity, " +
       "and fee impact of the order. Takes the same arguments as `place_order`. " +
@@ -1475,6 +1546,7 @@ export const tools: ToolDef[] = [
   // ── Auto-deleveraging (per-market, requires credentials) ──────────────────
   {
     name: "get_market_adl_events",
+    ops: ["GET /markets/{market_id}/adl-events"],
     description:
       "Get the auto-deleveraging (ADL) settlement history for one market — the " +
       "events where the engine force-closed positions to cover a shortfall. " +
@@ -1515,6 +1587,7 @@ export const tools: ToolDef[] = [
   // ── Funding actions (require credentials) ─────────────────────────────────
   {
     name: "deposit_collateral",
+    ops: ["POST /account/deposit"],
     description:
       "Deposit USDX collateral into the authenticated account. `amount` is a " +
       "positive decimal string. Requires API credentials. This moves REAL " +
@@ -1544,6 +1617,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "claim_credit",
+    ops: ["POST /api/v1/account/credit"],
     description:
       "Claim synthetic USDX credit from the testnet faucet, up to a per-key " +
       "daily allowance (default 500 USDX, resets midnight UTC). Pass `amount` " +
@@ -1575,6 +1649,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "submit_deposit",
+    ops: ["POST /deposits"],
     description:
       "Submit a (testnet/synthetic) deposit for the authenticated account via " +
       "the deposits ledger (`POST /deposits` — unlike `deposit_collateral`, " +
@@ -1616,6 +1691,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "claim_faucet",
+    ops: ["POST /faucet"],
     description:
       "Claim the fixed testnet faucet amount of synthetic USDX for the " +
       "authenticated account, subject to a per-wallet cooldown and cumulative " +
@@ -1634,6 +1710,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "adjust_isolated_margin",
+    ops: ["POST /account/margin"],
     description:
       "Add or remove isolated margin on an open position. Fails if the " +
       "position is not in isolated margin mode (MarginModeNotIsolated), if " +
@@ -1692,6 +1769,7 @@ export const tools: ToolDef[] = [
   // ── Bridge: cross-chain deposits (Phase A) ────────────────────────────────
   {
     name: "get_bridge_assets",
+    ops: ["GET /api/v1/bridge/assets"],
     description:
       "List the bridgeable chains and, per chain, the depositable assets " +
       "(USDC, USDX) and withdrawable assets (USDX) with their decimals, " +
@@ -1705,6 +1783,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "create_bridge_deposit_address",
+    ops: ["POST /api/v1/bridge/deposit-addresses"],
     description:
       "Get or create the authenticated account's cross-chain deposit address " +
       "on a chain. Sending a supported asset to the returned address credits " +
@@ -1735,6 +1814,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_bridge_deposit_addresses",
+    ops: ["GET /api/v1/bridge/deposit-addresses"],
     description:
       "List the authenticated account's cross-chain deposit addresses across " +
       "chains. Requires API credentials.",
@@ -1749,6 +1829,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_bridge_deposits",
+    ops: ["GET /api/v1/bridge/deposits"],
     description:
       "List the authenticated account's cross-chain (bridge) deposits, newest " +
       "first. Optionally filter by source `chain`, `asset` (USDC|USDX), or " +
@@ -1807,6 +1888,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_bridge_deposit",
+    ops: ["GET /api/v1/bridge/deposits/{id}"],
     description:
       "Fetch a single cross-chain (bridge) deposit by id. Only deposits owned " +
       "by the authenticated account are returned. Requires API credentials.",
@@ -1833,6 +1915,7 @@ export const tools: ToolDef[] = [
   // ── Agent-key management (requires credentials) ───────────────────────────
   {
     name: "list_agents",
+    ops: ["GET /agents"],
     description:
       "List the delegated agent keys registered for the authenticated wallet " +
       "(address, label, expiry). Requires API credentials.",
@@ -1844,6 +1927,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "register_agent",
+    ops: ["POST /agents/register"],
     description:
       "Register a delegated agent key so an AI agent can trade on a wallet's " +
       "behalf without holding the wallet key. Authorized by an EIP-712 " +
@@ -1925,6 +2009,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "revoke_agent",
+    ops: ["DELETE /agents/{address}"],
     description:
       "Revoke a previously registered delegated agent key by its address. " +
       "Destructive: the agent can no longer trade on the wallet's behalf. To " +
@@ -1968,6 +2053,7 @@ export const tools: ToolDef[] = [
   // ── Session + API-key management (Bearer session token) ───────────────────
   {
     name: "login",
+    ops: ["POST /auth/login"],
     description:
       "Sign in with an EVM wallet to get a 24h session token. Submit an " +
       'EIP-191 personal_sign signature over the exact message "Sign in to ' +
@@ -2011,6 +2097,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "list_api_keys",
+    ops: ["GET /keys"],
     description:
       "List the HMAC API keys for the authenticated wallet (key ids and " +
       "metadata; never the secrets). Authenticates with a session token from " +
@@ -2023,6 +2110,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "create_api_key",
+    ops: ["POST /keys"],
     description:
       "Create a new HMAC API key for the authenticated wallet. The secret is " +
       "returned ONCE and never shown again — store it immediately. " +
@@ -2041,6 +2129,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "delete_api_key",
+    ops: ["DELETE /keys/{key_id}"],
     description:
       "Delete (revoke) an HMAC API key by its key id. Destructive: any caller " +
       "using that key stops working. You must pass `confirm: true`. " +
@@ -2084,6 +2173,7 @@ export const tools: ToolDef[] = [
   // ── WebSocket access (requires credentials) ───────────────────────────────
   {
     name: "get_ws_token",
+    ops: ["POST /ws/token"],
     description:
       "Mint a short-lived (60s, single-use) token for an authenticated " +
       "per-account WebSocket stream (order/fill/position updates). Uses the " +
@@ -2103,6 +2193,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "get_ws_token_legacy",
+    ops: ["POST /ws-tokens"],
     description:
       "Mint a short-lived (60s, single-use) token for the legacy public " +
       "`/stream` endpoint via `POST /ws-tokens`. Prefer `get_ws_token` " +
@@ -2128,6 +2219,7 @@ export const tools: ToolDef[] = [
   // single `get_service_status` below (ENG-6136).
   {
     name: "get_service_status",
+    ops: ["GET /status"],
     description:
       "Aggregate service health of the exchange stack (indexer / engine / " +
       "oracle / bots), as used by status pages. Public — no credentials needed.",
@@ -2143,6 +2235,7 @@ export const tools: ToolDef[] = [
   // so they are registered only when NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS is set.
   {
     name: "list_tiers",
+    ops: ["GET /admin/tiers"],
     description:
       "ADMIN: list the configured account fee-tier overrides. Operator-only — " +
       "uses the admin secret (NEXUS_EXCHANGE_ADMIN_SECRET) and is registered " +
@@ -2160,6 +2253,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "set_tier",
+    ops: ["PUT /admin/tiers"],
     description:
       "ADMIN: set an account's fee tier override. Operator-only and mutates " +
       "ANOTHER account — uses the admin secret and is registered only when " +
@@ -2195,6 +2289,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "delete_tier",
+    ops: ["DELETE /admin/tiers/{address}"],
     description:
       "ADMIN: reset an account's fee tier override back to default. " +
       "Operator-only, destructive on another account — uses the admin secret " +
@@ -2238,6 +2333,7 @@ export const tools: ToolDef[] = [
   // ── Capabilities pending sibling issues (honest, not faked) ───────────────
   {
     name: "get_deposit_target",
+    ops: [],
     description:
       "Get the on-chain deposit target (address/memo) to fund the account. " +
       "Superseded on the direct surface by the bridge deposit-address tools " +

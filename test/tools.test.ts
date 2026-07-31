@@ -1265,3 +1265,59 @@ test("tool names are unique and admin tools carry the adminOnly flag", () => {
     assert.equal(findTool(name)!.adminOnly, true, `${name} is adminOnly`);
   }
 });
+
+test("every tool declares the spec operations it calls", () => {
+  // The tool -> spec-operation mapping (ENG-7788 / docs/coverage-unit.md). The
+  // authoritative check is scripts/check_spec_drift.py, which also verifies each
+  // declaration against the handler next to it and against the pinned spec. This
+  // one is here because `test` is a required status check and `spec-drift` is not
+  // yet: it will not catch a *wrong* operation, but it catches a missing or
+  // malformed declaration before the mapping can rot.
+  const opFormat = /^(GET|POST|PUT|PATCH|DELETE) \/\S*$/;
+  // Tools that legitimately call nothing. Kept in step with TOOLS_WITHOUT_OPS in
+  // scripts/check_spec_drift.py; get_deposit_target describes a capability that
+  // is not built server-side yet and returns a local "pending" payload.
+  const NO_OPS = new Set(["get_deposit_target"]);
+
+  for (const tool of tools) {
+    assert.ok(Array.isArray(tool.ops), `${tool.name} declares ops`);
+    for (const op of tool.ops) {
+      assert.match(op, opFormat, `${tool.name} op "${op}" is METHOD /path`);
+      // Placeholders must be the spec's `{name}` form, not a TS template hole:
+      // endpoints.txt is intersected with spec paths as raw strings downstream.
+      assert.doesNotMatch(op, /\$\{/, `${tool.name} op "${op}" has no \${...}`);
+    }
+    assert.equal(
+      tool.ops.length === 0,
+      NO_OPS.has(tool.name),
+      `${tool.name}: an empty ops list must be one of the known no-op tools`,
+    );
+    assert.equal(
+      new Set(tool.ops).size,
+      tool.ops.length,
+      `${tool.name} declares no duplicate operations`,
+    );
+  }
+});
+
+test("the tool -> operation mapping is not 1:1", () => {
+  // The premise of the unit decision (docs/coverage-unit.md): a tool is not an
+  // operation, so the two counts are different quantities and neither may be
+  // reported as the other.
+  //
+  // Worth knowing while reading this: the totals currently COINCIDE — 66 tools
+  // declaring 66 distinct operations — which is why the test asserts the mapping's
+  // shape rather than an inequality of totals. A coincidence of totals is exactly
+  // how the tool count came to be reported as an operation count in the first
+  // place (ENG-7964), and 66 is still not the coverage figure: three of those
+  // operations are the non-contract `/demo/*` routes, so endpoints.txt publishes
+  // 63. Asserting `distinct !== tools.length` would be both brittle and, today,
+  // false — the shape below is the property that actually holds.
+  const multi = tools.filter((t) => t.ops.length > 1).map((t) => t.name);
+  assert.ok(multi.length > 0, "some tool covers multiple operations");
+  assert.ok(multi.includes("cancel_order"), "cancel_order covers two");
+  assert.ok(
+    tools.some((t) => t.ops.length === 0),
+    "some tool covers no operation",
+  );
+});

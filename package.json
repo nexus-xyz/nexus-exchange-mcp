@@ -27,6 +27,9 @@
     "test": "node --test --import tsx test/*.test.ts",
     "test:coverage": "c8 --reporter=text-summary --reporter=text --reporter=lcov --reporter=json-summary --src src node --test --import tsx test/*.test.ts",
     "smoke": "node --import tsx scripts/smoke.ts",
+    "spec:drift": "scripts/spec-drift.sh",
+    "spec:drift:write": "scripts/spec-drift.sh --write",
+    "spec:drift:test": "python3 scripts/test_check_spec_drift.py",
     "prepublishOnly": "npm run build && npm test"
   },
   "dependencies": {

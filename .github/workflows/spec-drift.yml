@@ -1,0 +1,78 @@
+name: Spec drift
+
+# VERIFICATION half of the spec-pin lifecycle (ENG-7964). Answers: does the tool
+# surface still match the spec it pins? Checks three invariants — endpoints.txt ->
+# pinned spec, endpoints.txt == the per-tool `ops` declarations, and those
+# declarations == what each handler actually requests. See docs/coverage-unit.md
+# and the header of scripts/check_spec_drift.py.
+#
+# Its forward counterpart is `spec-autobump.yml`, which proposes a NEWER spec.
+# Order matters and this one comes first: an autobump without a drift check
+# manufactures ungated pin advances at machine speed, which is the state this repo
+# was in (ENG-7958).
+#
+# NOT to be confused with the `drift` job in ci.yml, which is a *lag* check —
+# it asserts the pin equals the api repo's latest release and says nothing about
+# whether the code matches it. That job is a required status check; this workflow
+# is not one yet. Making `spec-drift` required is a repo-settings change and the
+# thing that turns "the drift check is green" into an actual merge gate — until
+# then a reviewer has to look.
+#
+# NO `paths:` FILTER, deliberately, for two reasons:
+#   1. The pin IS the change on an autobump PR. A check gated on spec-file diffs
+#      looks correct and does nothing on exactly the PR that needs it most.
+#      Filtering on `.api-version` would cover that case, but:
+#   2. A required check that is skipped by a path filter never reports, and GitHub
+#      blocks the PR forever waiting for it. Since this check is meant to become
+#      required, it has to run on every PR. It is a Python script plus one cached
+#      curl — a few seconds.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spec-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read pinned spec version
+        id: pin
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < .api-version)"
+          # Validated before it reaches a URL or a cache key: on a fork PR
+          # `.api-version` is attacker-controlled input.
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error file=.api-version::.api-version must look like vX.Y.Z (got: '$tag')"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned spec
+        uses: actions/cache@v6
+        with:
+          # scripts/spec-drift.sh writes both, and skips the download when the
+          # cached copy is for the pinned tag.
+          path: |
+            openapi.pinned.json
+            .spec-cache-tag
+          key: spec-${{ steps.pin.outputs.tag }}
+
+      # Prove the checker can fail before trusting it to pass. Each invariant is
+      # defeated in turn and asserted to go red; the parsers are asserted to abort
+      # rather than undercount. A green drift run means nothing without this.
+      - name: Self-test the drift checker
+        run: python3 scripts/test_check_spec_drift.py
+
+      - name: Check spec drift
+        run: npm run spec:drift

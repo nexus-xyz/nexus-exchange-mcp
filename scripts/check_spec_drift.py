@@ -605,6 +605,13 @@ def load_manifest(path=MANIFEST):
             f"cannot read {path!r}: {e}. It is generated — run "
             f"`python3 scripts/check_spec_drift.py <spec> --write`."
         )
+    return parse_manifest_text(text, path), text
+
+
+def parse_manifest_text(text, path=MANIFEST):
+    """Parse manifest lines out of `text`. Separate from load_manifest so a caller
+    holding the text can report on exactly that text rather than re-reading the
+    file — which would describe a different document than the one it checked."""
     ops = []
     seen = {}
     for lineno, raw in enumerate(text.splitlines(), 1):
@@ -621,7 +628,7 @@ def load_manifest(path=MANIFEST):
         ops.append(op)
     if not ops:
         fail(f"{path} lists zero operations; regenerate it with --write.")
-    return ops, text
+    return ops
 
 
 # --- invariants ---------------------------------------------------------------
@@ -780,8 +787,7 @@ def check_manifest_is_generated(tools, text):
             "(generated, not hand-maintained)."
         )
         return 0
-    have, _ = load_manifest()
-    have = set(have)
+    have = set(parse_manifest_text(text))
     want = declared_manifest_ops(tools)
     print(
         "\nERROR: endpoints.txt does not match the per-tool `ops` declarations. "
@@ -876,7 +882,9 @@ def main():
         print(f"Wrote {os.path.relpath(MANIFEST, REPO)}: {len(ops)} operation(s).")
         return
 
-    manifest, text = load_manifest()
+    with open(MANIFEST) as f:
+        text = f.read()
+    manifest = parse_manifest_text(text)
 
     failures = 0
     failures += check_manifest_vs_spec(manifest, available)

@@ -531,7 +531,8 @@ class TestAgainstRealSource(unittest.TestCase):
         csd.check_client_contract()  # exits non-zero if the client's default moved
 
     def test_generated_manifest_is_committed(self):
-        _, text = csd.load_manifest()
+        with open(csd.MANIFEST) as f:
+            text = f.read()
         self.assertEqual(
             _quiet(csd.check_manifest_is_generated, self.tools, text),
             0,

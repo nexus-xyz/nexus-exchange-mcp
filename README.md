@@ -121,9 +121,22 @@ the v0.7.2 operations it exposes as tools (see
 
 ### API-surface coverage
 
-The tool surface covers **63 of the 65** distinct operations in Exchange API
-spec **v0.7.2** (98 spec operations counting the `/api/v1` aliases of the
-legacy routes; each aliased pair is one tool).
+**66 registered tools** covering **63 spec operations** of Exchange API spec
+**v0.7.2**. Those are two different numbers and neither substitutes for the
+other: one tool can call several operations (`cancel_order` calls two) and one
+calls none. The operation count is the figure comparable with the rs / py / cli
+SDK manifests; the tool count is MCP's own axis and must never be reported as a
+coverage figure. [`docs/coverage-unit.md`](./docs/coverage-unit.md) records that
+decision and how it is enforced.
+
+63 of the **65** distinct operations, or 63 of the **98** the spec literally
+documents — the spec lists most operations twice, once on the legacy gateway
+route and once on its `/api/v1` alias, and each aliased pair is one tool.
+
+The operation list is not hand-counted: [`endpoints.txt`](./endpoints.txt) is
+generated from the per-tool `ops` declarations in `src/tools/index.ts` and
+verified against the pinned spec on every PR by `scripts/check_spec_drift.py`
+(see [Spec drift](#spec-drift)).
 
 The pin bump (ENG-6038) was pin-only — it advanced `.api-version` v0.6.2 →
 v0.7.1 without mapping the surface those releases had added. ENG-6136 then
@@ -244,10 +257,36 @@ Currently targets Exchange API spec **`v0.7.2`**.
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
-This repo does not vendor a copy — the `drift` CI job fetches the pinned release
-to check for drift, and the scheduled `api-version-sync` workflow opens a PR when
-a newer spec releases. The line above is bot-managed; everything around it is
-human-owned.
+This repo does not vendor a copy — the checks below fetch the pinned release. The
+line above is bot-managed; everything around it is human-owned.
+
+Two checks watch the pin, and they answer different questions:
+
+| Check           | Question                                                | Where                              |
+| --------------- | ------------------------------------------------------- | ---------------------------------- |
+| `spec-drift`    | Does the tool surface still match the spec it **pins**? | `.github/workflows/spec-drift.yml` |
+| `drift` (in CI) | Is the pin **behind** the latest release?               | `.github/workflows/ci.yml`         |
+
+The scheduled `api-version-sync` workflow opens a PR when a newer spec releases.
+
+#### Spec drift
+
+`spec-drift` is the verification half, and it runs on **every** PR — including a
+pin-bump PR, where the pin _is_ the change. It enforces three invariants:
+
+1. every operation in `endpoints.txt` exists in the pinned spec;
+2. `endpoints.txt` matches the per-tool `ops` declarations byte-for-byte (it is a
+   generated artifact, not a hand-maintained list);
+3. each tool's declared `ops` match the operations its handler actually requests.
+
+```bash
+npm run spec:drift        # verify against the pinned spec
+npm run spec:drift:write  # regenerate endpoints.txt after adding operations
+npm run spec:drift:test   # self-test: prove the checker goes red when defeated
+```
+
+Adding a tool without declaring what it calls is a type error, so the mapping
+cannot be skipped. See [`docs/coverage-unit.md`](./docs/coverage-unit.md).
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
 header (e.g. `X-Nexus-Api-Version: v0.7.2`), alongside a normalized
@@ -372,6 +411,7 @@ npm run typecheck  # tsc --noEmit
 npm test           # unit tests (HMAC scheme, arg mapping, schemas)
 npm run test:coverage # unit tests + coverage (text/lcov/json-summary); CI emits the %
 npm run smoke      # live end-to-end check against the gateway
+npm run spec:drift # tool surface vs. the pinned spec (see "Spec drift" above)
 ```
 
 ## License

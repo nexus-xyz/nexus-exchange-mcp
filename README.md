@@ -105,7 +105,8 @@ the v0.7.2 operations it exposes as tools (see
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
   `…/api/exchange` gateway path. `/api/v1/*` resolves at the root; the
   legacy-only routes append `/api/exchange`. A `NEXUS_EXCHANGE_API_URL` that
-  still ends in `/api/exchange` is accepted and normalized.
+  still ends in `/api/exchange` is accepted and normalized. Which host that is
+  comes from the [network axis](#networks).
 - **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
   v1 routes, the bare route (`/orders`) for legacy ones.
 - **`cancel_order` requires `market_id`** when cancelling a single order (the
@@ -237,14 +238,72 @@ Expected output ends with `list_markets OK -> N markets`.
 Copy `.env.example` and set as needed. Only trading/account tools need
 credentials — never commit real secrets.
 
-| Variable                            | Required                | Purpose                                                                                                                                          |
-| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXUS_EXCHANGE_API_URL`            | No                      | API host root (serves `/api/v1`). Defaults to `https://exchange.nexus.xyz`. A legacy value ending in `/api/exchange` is accepted and normalized. |
-| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                   |
-| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                               |
-| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                          |
-| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                |
-| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                     |
+| Variable                            | Required                | Purpose                                                                                                                                                                                                                                                      |
+| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, or `mainnet`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                                    |
+| `NEXUS_EXCHANGE_API_URL`            | No                      | Explicit host-root override (serves `/api/v1`); wins over `NEXUS_EXCHANGE_NETWORK`. Use it for a staging/beta deployment or a private indexer. Defaults to the selected network's host. A legacy value ending in `/api/exchange` is accepted and normalized. |
+| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                               |
+| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                           |
+| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                      |
+| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                            |
+| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                 |
+
+## Networks
+
+The target is chosen on a **network** axis — whose money is behind it — not a
+release channel. `NEXUS_EXCHANGE_NETWORK` takes `testnet`, `mainnet` or `local`;
+the map lives in one place, [`src/networks.ts`](./src/networks.ts), copied from
+the spec's `x-nexus-networks` extension.
+
+| Network   | Funds                    | Faucet | Target today                                     |
+| --------- | ------------------------ | ------ | ------------------------------------------------ |
+| `testnet` | Play (synthetic USDX)    | Yes    | `https://exchange.nexus.xyz` — **the default**   |
+| `local`   | Play (whatever you hold) | Yes    | `http://localhost:9090`                          |
+| `mainnet` | **Real money**           | No     | No reachable host yet — selecting it is an error |
+
+**Nothing changes if you set nothing.** The default resolves to exactly the host
+this server has always used.
+
+**`mainnet` deliberately does not work yet.** Its host `api.nexus.xyz` has no DNS
+(ENG-8155) and the pinned spec maps no operation onto its `/v1` base, so any URL
+built for it would be a guess — on the one network where a guess moves real
+money. It fails with an explanation instead. To target it once it is live, set
+`NEXUS_EXCHANGE_API_URL` explicitly.
+
+Three rules this implements, all from the spec extension:
+
+- **Hosts are never interpolated from the network name.** Mainnet is off-pattern
+  on purpose — `api.nexus.xyz`, not `api.mainnet.nexus.xyz` — so
+  `api.{network}.nexus.xyz` would resolve for every environment that can be
+  tested and fail only on real funds. Every host is a named literal.
+- **An unrecognized network is treated as real funds.** A typo is an error, never
+  a fallback to play money. `local` is likewise never a fallback for a public
+  host that fails to resolve — succeeding quietly against localhost would hide a
+  misconfigured client.
+- **Credentials never cross networks.** Session tokens, HMAC keys and agent
+  registrations are minted per network and are invalid on any other. Switching
+  network means switching credentials; never carry a signature or a nonce across.
+
+### Release channels are a URL, not a network
+
+`beta` / `staging` are deployments of testnet, not a third pool of money, so they
+are no longer enum values. Point `NEXUS_EXCHANGE_API_URL` at them instead — it
+overrides the network map and is validated (http(s) only, no embedded
+`user:password@`, no query or fragment, since the base is concatenated with a
+request path). Plaintext `http` to a non-loopback host warns on stderr: HMAC over
+http exposes the key id and signature in transit.
+
+### WebSocket targets
+
+`get_ws_token` and `get_ws_token_legacy` now return `ws_endpoint` alongside the
+token, so a caller is no longer handed a 60-second credential with no address to
+spend it at. The endpoints derive from the gateway base (`/ws`, `/stream`,
+`/ws/token`, `/ws-tokens` carry no per-path `servers` override in the spec):
+
+```
+wss://exchange.nexus.xyz/api/exchange/ws      # authenticated, connect with ?token=…
+wss://exchange.nexus.xyz/api/exchange/stream  # legacy public market data
+```
 
 ## API version
 

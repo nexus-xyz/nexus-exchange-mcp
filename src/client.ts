@@ -178,6 +178,21 @@ export class ExchangeClient {
     return hasAdminSecret(this.cfg);
   }
 
+  /**
+   * Where an authenticated WebSocket token is meant to be used
+   * (`${wsUrl}/ws`), or `undefined` on a config built without the network axis.
+   * Minting a token without telling the caller where to connect is the gap the
+   * network axis closes (ENG-6448), so the token tools return this alongside it.
+   */
+  wsAuthenticatedUrl(): string | undefined {
+    return this.cfg.wsAuthenticatedUrl;
+  }
+
+  /** Where a legacy `/stream` token is meant to be used (`${wsUrl}/stream`). */
+  wsMarketDataUrl(): string | undefined {
+    return this.cfg.wsMarketDataUrl;
+  }
+
   private sign(
     method: string,
     path: string,

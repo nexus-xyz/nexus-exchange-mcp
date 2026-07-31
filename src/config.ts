@@ -4,7 +4,24 @@
  * Everything is read from environment variables so no secret is ever
  * hardcoded. Market-data tools work with zero config; account/trade tools
  * require an API key + secret.
+ *
+ * The target is chosen on the **network axis** (`NEXUS_EXCHANGE_NETWORK` —
+ * testnet / mainnet / local, see `networks.ts`), with `NEXUS_EXCHANGE_API_URL`
+ * as an explicit override for anything off the map (a staging or beta
+ * deployment, a private indexer). Nothing here is cached or shared: `loadConfig`
+ * is a pure function of its `env` argument and returns a frozen object, so the
+ * hosted server can build a fresh per-request config (see
+ * `configForRequest` in http.ts) with no cross-session state to race over.
  */
+
+import {
+  DEFAULT_NETWORK,
+  NETWORKS,
+  resolveNetworkId,
+  unreachableNetworkMessage,
+  type Funds,
+  type NetworkId,
+} from "./networks.js";
 
 export interface ExchangeConfig {
   /**
@@ -64,13 +81,49 @@ export interface ExchangeConfig {
    * exchange dashboard. Optional; defaults to {@link DEFAULT_USER_AGENT}.
    */
   userAgent?: string;
+  /**
+   * Which network this config targets, or `"custom"` when
+   * `NEXUS_EXCHANGE_API_URL` points somewhere off the map (a staging deployment,
+   * a private indexer). Informational — it labels the target, it does not route.
+   *
+   * Optional so a partially-constructed config (tests, embedders) stays valid;
+   * `loadConfig` always sets it.
+   */
+  network?: NetworkId | "custom";
+  /**
+   * Whether balances on the selected target are real money or synthetic play
+   * money, or `"unknown"` for a custom URL that names no network.
+   *
+   * `"unknown"` is deliberately not the same as `"play"`: the spec's rule is
+   * that anything unrecognized is treated as real funds, so this must never be
+   * read as "safe to experiment on".
+   */
+  funds?: Funds | "unknown";
+  /**
+   * WebSocket origin for this target, scheme-swapped from
+   * {@link ExchangeConfig.gatewayBaseUrl} — `/ws`, `/stream`, `/ws/token` and
+   * `/ws-tokens` all resolve against the gateway base in the spec, not the
+   * direct `/api/v1` host.
+   *
+   * Before this existed the server could mint a WebSocket token but never told
+   * the caller where to connect, which is the gap the network axis closes
+   * (ENG-6448).
+   */
+  wsUrl?: string;
+  /** Authenticated per-account stream: `${wsUrl}/ws`. Connect with `?token=…`. */
+  wsAuthenticatedUrl?: string;
+  /** Legacy public market-data stream: `${wsUrl}/stream`. */
+  wsMarketDataUrl?: string;
 }
 
 /**
- * Default to the public production host root. `/api/v1/*` resolves here
- * directly; legacy tools append `/api/exchange`. (README.md §"Base URLs".)
+ * The default target is no longer a constant here: it is
+ * `NETWORKS[DEFAULT_NETWORK].baseUrl` (testnet — play funds), so the host lives
+ * in exactly one place (`networks.ts`). The resolved value is unchanged from
+ * when this was a local constant: `https://exchange.nexus.xyz`, the host root,
+ * where `/api/v1/*` resolves directly and legacy tools append `/api/exchange`.
+ * (README.md §"Base URLs".)
  */
-const DEFAULT_BASE_URL = "https://exchange.nexus.xyz";
 
 /**
  * The package version, and the single source of truth for the version we
@@ -127,20 +180,144 @@ export function deriveBases(raw: string): {
   return { directBaseUrl, gatewayBaseUrl: `${directBaseUrl}/api/exchange` };
 }
 
+/**
+ * Validate and normalize a `NEXUS_EXCHANGE_API_URL` override.
+ *
+ * Base URLs are concatenated with a path and a query by the client
+ * (`${base}${path}?${query}`), so a base carrying its own query or fragment
+ * silently corrupts every request it builds: `https://h/?x=1` + `/api/v1/orders`
+ * requests `/` with the path buried in a query value. That is a misdirected —
+ * and, for signed calls, credential-bearing — request, so it is rejected here
+ * rather than at the far end.
+ *
+ * Also rejected: any scheme that is not http(s) (a `file:`/`data:` base is never
+ * a valid exchange, and `fetch` would do something surprising with it), and
+ * embedded `user:password@` credentials (they would ride along on every request
+ * and land in any log that records a URL).
+ */
+export function normalizeBaseUrl(raw: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(
+      `NEXUS_EXCHANGE_API_URL is not a valid absolute URL: ${JSON.stringify(raw)}. ` +
+        `Expected something like "https://exchange.nexus.xyz".`,
+    );
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(
+      `NEXUS_EXCHANGE_API_URL must use http or https, got "${parsed.protocol}".`,
+    );
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      "NEXUS_EXCHANGE_API_URL must not embed credentials (user:password@). " +
+        "Set NEXUS_EXCHANGE_API_KEY / NEXUS_EXCHANGE_API_SECRET instead.",
+    );
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error(
+      "NEXUS_EXCHANGE_API_URL must not carry a query string or fragment — it is " +
+        "concatenated with a request path, so either one would corrupt every URL " +
+        `this server builds. Got ${JSON.stringify(raw)}.`,
+    );
+  }
+  // Re-serialize from the parsed URL so odd-but-legal input normalizes, then
+  // drop trailing slashes the way deriveBases expects.
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
+}
+
+/** Loopback hosts, where plaintext http carries no real network exposure. */
+function isLoopback(hostname: string): boolean {
+  // `new URL("http://[::1]:1").hostname` keeps the brackets; strip them first.
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    /^127\./.test(host)
+  );
+}
+
+/**
+ * Warn when signed traffic would cross a real network in plaintext. Not fatal:
+ * an internal deployment behind a private link is a legitimate setup, and
+ * refusing outright would break it. But HMAC over http exposes the key id and
+ * signature to anyone on the path, so it should never happen silently.
+ *
+ * stderr, not stdout — stdout is the MCP protocol channel on the stdio surface.
+ */
+function warnIfPlaintext(baseUrl: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(baseUrl);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "http:" || isLoopback(parsed.hostname)) return;
+  console.error(
+    `nexus-exchange-mcp: WARNING: API base ${parsed.origin} uses plaintext http. ` +
+      "API key id and HMAC signature will cross the network unencrypted. Use " +
+      "https unless this host is reachable only over a trusted private link.",
+  );
+}
+
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ExchangeConfig {
-  const raw = (env.NEXUS_EXCHANGE_API_URL || DEFAULT_BASE_URL).trim();
-  const { directBaseUrl, gatewayBaseUrl } = deriveBases(raw);
-  return {
+  const override = (env.NEXUS_EXCHANGE_API_URL ?? "").trim();
+  const rawNetwork = (env.NEXUS_EXCHANGE_NETWORK ?? "").trim();
+  // Throws on anything unrecognized rather than defaulting — an unknown network
+  // is treated as real funds, so guessing is the one thing we must not do.
+  const selected = rawNetwork ? resolveNetworkId(rawNetwork) : undefined;
+
+  let baseUrl: string;
+  let network: NetworkId | "custom";
+  let funds: Funds | "unknown";
+
+  if (override) {
+    // The explicit override wins for transport. This is where a staging/beta
+    // deployment lives now that it is no longer a network value. If the caller
+    // also named a network, keep that label — they are telling us whose money is
+    // behind this URL, and "mainnet + custom URL" is the sanctioned way to reach
+    // real funds before the durable host is live.
+    baseUrl = normalizeBaseUrl(override);
+    network = selected ?? "custom";
+    funds = selected ? NETWORKS[selected].funds : "unknown";
+  } else {
+    const desc = NETWORKS[selected ?? DEFAULT_NETWORK];
+    if (desc.baseUrl === null) {
+      throw new Error(unreachableNetworkMessage(desc));
+    }
+    baseUrl = desc.baseUrl;
+    network = desc.id;
+    funds = desc.funds;
+  }
+
+  warnIfPlaintext(baseUrl);
+  const { directBaseUrl, gatewayBaseUrl } = deriveBases(baseUrl);
+  // `/ws`, `/stream`, `/ws/token` and `/ws-tokens` carry no per-path `servers`
+  // override in the spec, so they resolve against the ROOT server — the gateway
+  // base — not the direct `/api/v1` host.
+  const wsUrl = gatewayBaseUrl.replace(/^http/, "ws");
+
+  // Frozen: a tool handler receives this object, and a base URL that can be
+  // rewritten at runtime is a redirect for every signed request that follows.
+  return Object.freeze({
     directBaseUrl,
     gatewayBaseUrl,
+    network,
+    funds,
+    wsUrl,
+    wsAuthenticatedUrl: `${wsUrl}/ws`,
+    wsMarketDataUrl: `${wsUrl}/stream`,
     apiKey: env.NEXUS_EXCHANGE_API_KEY || undefined,
     apiSecret: env.NEXUS_EXCHANGE_API_SECRET || undefined,
     sessionToken: env.NEXUS_EXCHANGE_SESSION_TOKEN || undefined,
     adminSecret: env.NEXUS_EXCHANGE_ADMIN_SECRET || undefined,
     enableAdminTools: isTruthy(env.NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS),
-  };
+  });
 }
 
 /** Treat `1`/`true`/`yes`/`on` (any case) as enabled; everything else is off. */

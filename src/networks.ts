@@ -66,6 +66,19 @@ export interface NetworkDescriptor {
    */
   readonly baseUrl: string | null;
   /**
+   * Where the legacy gateway surface hangs off {@link baseUrl} — the routes with
+   * no per-path `servers` override in the spec (`/orders`, `/ws`, `/stream`,
+   * `/ws/token`, `/ws-tokens`).
+   *
+   * Per-network because the spec's ROOT `servers` list is NOT uniform: the
+   * public host is `https://exchange.nexus.xyz/api/exchange`, but local
+   * development is the BARE origin `http://localhost:9090` — the indexer serves
+   * those routes at its root. Appending `/api/exchange` there would 404 every
+   * legacy call and hand `get_ws_token` a `ws_endpoint` nothing listens on,
+   * which is worse than no endpoint at all.
+   */
+  readonly gatewayPath: "" | "/api/exchange";
+  /**
    * The durable per-network REST base from the spec. Informational until the
    * hosts are live — see each entry's comment for why it is not yet `baseUrl`.
    */
@@ -97,6 +110,7 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // value is exactly what the server has always used, which is why the
       // default stays byte-for-byte unchanged.
       baseUrl: "https://exchange.nexus.xyz",
+      gatewayPath: "/api/exchange",
       durableRestBase: "https://api.testnet.nexus.xyz/v1",
       durableWsUrl: "wss://api.testnet.nexus.xyz",
     }),
@@ -112,6 +126,11 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // emitting a plausible-looking wrong URL. Point NEXUS_EXCHANGE_API_URL at
       // it deliberately once it is live.
       baseUrl: null,
+      // Unused while `baseUrl` is null (selecting mainnet throws before any URL
+      // is built). Carries the public-host convention so that whoever wires up
+      // the durable host has to make a deliberate choice here, not inherit a
+      // silent default.
+      gatewayPath: "/api/exchange",
       durableRestBase: "https://api.nexus.xyz/v1",
       durableWsUrl: "wss://api.nexus.xyz",
     }),
@@ -125,6 +144,11 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // that fails to resolve: silently succeeding against localhost hides a
       // misconfigured client, so nothing in this package falls back to it.
       baseUrl: "http://localhost:9090",
+      // No `/api/exchange` prefix: the spec's local `servers` entry is the bare
+      // origin (the public one carries the gateway path), because the indexer
+      // serves the legacy routes directly. `deriveBases` appends the prefix by
+      // default, so local has to say otherwise explicitly.
+      gatewayPath: "",
       durableRestBase: "http://localhost:9090",
       durableWsUrl: "ws://localhost:9090",
     }),

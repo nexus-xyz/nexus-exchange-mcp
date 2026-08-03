@@ -8,8 +8,9 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
-import { loadConfig, normalizeBaseUrl } from "../src/config.js";
+import { deriveBases, loadConfig, normalizeBaseUrl } from "../src/config.js";
 import {
   DEFAULT_NETWORK,
   NETWORKS,
@@ -213,8 +214,37 @@ test("ws endpoints hang off the gateway base with the scheme swapped", () => {
     "wss://exchange.nexus.xyz/api/exchange/stream",
   );
 
+  // Local is NOT `…/api/exchange`: the indexer serves the legacy routes at its
+  // root, so appending the gateway prefix would hand the caller a ws_endpoint
+  // nothing listens on. `gatewayPath` is what keeps the two apart.
   const local = loadConfig(env({ NEXUS_EXCHANGE_NETWORK: "local" }));
-  assert.equal(local.wsUrl, "ws://localhost:9090/api/exchange");
+  assert.equal(local.wsUrl, "ws://localhost:9090");
+  assert.equal(local.wsAuthenticatedUrl, "ws://localhost:9090/ws");
+  assert.equal(local.wsMarketDataUrl, "ws://localhost:9090/stream");
+  assert.equal(local.gatewayBaseUrl, "http://localhost:9090");
+});
+
+test("every network's gateway base matches the pinned spec's root servers", () => {
+  // The bug this pins: `deriveBases` appends `/api/exchange` unconditionally,
+  // but the spec's ROOT `servers` list is not uniform — production carries the
+  // gateway path and local development is the bare origin. Deriving the wrong
+  // one 404s every legacy route and misdirects the minted WebSocket token, so
+  // tie the map to the contract rather than to a hand-copied string.
+  const spec = JSON.parse(
+    readFileSync(new URL("../openapi.pinned.json", import.meta.url), "utf8"),
+  ) as { servers: { url: string }[] };
+  const roots = new Set(spec.servers.map((s) => s.url.replace(/\/+$/, "")));
+
+  for (const id of NETWORK_IDS) {
+    const desc = NETWORKS[id];
+    if (desc.baseUrl === null) continue; // mainnet: nothing is built for it yet
+    const { gatewayBaseUrl } = deriveBases(desc.baseUrl, desc.gatewayPath);
+    assert.ok(
+      roots.has(gatewayBaseUrl),
+      `${id} derives ${gatewayBaseUrl}, which is not a root server in the ` +
+        `pinned spec (${[...roots].join(", ")})`,
+    );
+  }
 });
 
 test("plaintext http to a non-loopback host warns; loopback stays quiet", () => {
@@ -296,4 +326,22 @@ test("a non-object upstream payload is passed through unreshaped", async () => {
     .find((t) => t.name === "get_ws_token")!
     .handler(stub, {});
   assert.equal(out, "plain-token-string");
+});
+
+test("an upstream ws_endpoint wins over the locally derived one", async () => {
+  // The spec publishes only `{token}` today, but if the API starts returning the
+  // endpoint itself then IT is authoritative — overwriting it with a value
+  // derived from local config would send the caller to the wrong host.
+  const stub = {
+    request: async () => ({
+      token: "tok_123",
+      ws_endpoint: "wss://upstream.example/ws",
+    }),
+    wsAuthenticatedUrl: () => "wss://h.example/api/exchange/ws",
+  } as never;
+  const out = (await tools
+    .find((t) => t.name === "get_ws_token")!
+    .handler(stub, {})) as Record<string, unknown>;
+  assert.equal(out.ws_endpoint, "wss://upstream.example/ws");
+  assert.ok(!("ws_endpoint_note" in out), "no note contradicting the upstream");
 });

@@ -117,15 +117,6 @@ export interface ExchangeConfig {
 }
 
 /**
- * The default target is no longer a constant here: it is
- * `NETWORKS[DEFAULT_NETWORK].baseUrl` (testnet — play funds), so the host lives
- * in exactly one place (`networks.ts`). The resolved value is unchanged from
- * when this was a local constant: `https://exchange.nexus.xyz`, the host root,
- * where `/api/v1/*` resolves directly and legacy tools append `/api/exchange`.
- * (README.md §"Base URLs".)
- */
-
-/**
  * The package version, and the single source of truth for the version we
  * advertise on the wire (`User-Agent`) and in the MCP handshake
  * (`SERVER_VERSION`). release-please keeps this line in step with
@@ -170,14 +161,22 @@ export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
  * (`https://exchange.nexus.xyz/api/exchange`). In the latter case we strip the
  * trailing `/api/exchange` before building v1 URLs — otherwise `/api/v1` would
  * wrongly resolve to `…/api/exchange/api/v1/…` (see nexus-exchange-api#41).
+ *
+ * `gatewayPath` is where the legacy surface hangs off the origin. It defaults to
+ * `/api/exchange` — the public host's convention and the only behaviour this
+ * function had before — and the network map overrides it for `local`, whose
+ * spec `servers` entry is the bare origin (see `NetworkDescriptor.gatewayPath`).
  */
-export function deriveBases(raw: string): {
+export function deriveBases(
+  raw: string,
+  gatewayPath: string = "/api/exchange",
+): {
   directBaseUrl: string;
   gatewayBaseUrl: string;
 } {
   const trimmed = raw.replace(/\/+$/, "");
   const directBaseUrl = trimmed.replace(/\/api\/exchange$/, "");
-  return { directBaseUrl, gatewayBaseUrl: `${directBaseUrl}/api/exchange` };
+  return { directBaseUrl, gatewayBaseUrl: `${directBaseUrl}${gatewayPath}` };
 }
 
 /**
@@ -275,6 +274,11 @@ export function loadConfig(
   let baseUrl: string;
   let network: NetworkId | "custom";
   let funds: Funds | "unknown";
+  // Where the legacy gateway surface sits, relative to the origin. Only the
+  // network map may change this: an explicit override is taken literally (the
+  // caller gave us a URL, and `/api/exchange` is what every existing config
+  // already resolves to), so this stays byte-identical for anyone upgrading.
+  let gatewayPath = "/api/exchange";
 
   if (override) {
     // The explicit override wins for transport. This is where a staging/beta
@@ -293,10 +297,11 @@ export function loadConfig(
     baseUrl = desc.baseUrl;
     network = desc.id;
     funds = desc.funds;
+    gatewayPath = desc.gatewayPath;
   }
 
   warnIfPlaintext(baseUrl);
-  const { directBaseUrl, gatewayBaseUrl } = deriveBases(baseUrl);
+  const { directBaseUrl, gatewayBaseUrl } = deriveBases(baseUrl, gatewayPath);
   // `/ws`, `/stream`, `/ws/token` and `/ws-tokens` carry no per-path `servers`
   // override in the spec, so they resolve against the ROOT server — the gateway
   // base — not the direct `/api/v1` host.

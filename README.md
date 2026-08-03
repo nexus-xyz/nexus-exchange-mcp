@@ -107,6 +107,13 @@ the v0.7.2 operations it exposes as tools (see
   legacy-only routes append `/api/exchange`. A `NEXUS_EXCHANGE_API_URL` that
   still ends in `/api/exchange` is accepted and normalized. Which host that is
   comes from the [network axis](#networks).
+- **Two surfaces, one host — so "the base URL" differs per SDK by design.** The
+  configured value here is the host **root**, from which both surfaces are
+  derived: `<root>/api/v1` (direct indexer) and `<root>/api/exchange` (legacy
+  gateway). A sibling SDK whose single base URL reads `…/api/v1` and one whose
+  reads `…/api/exchange` are therefore not in conflict — they name different
+  surfaces of the same deployment, and this server holds both at once. If you are
+  comparing configs across the SDKs, compare the surface, not the string.
 - **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
   v1 routes, the bare route (`/orders`) for legacy ones.
 - **`cancel_order` requires `market_id`** when cancelling a single order (the
@@ -304,6 +311,12 @@ spend it at. The endpoints derive from the gateway base (`/ws`, `/stream`,
 wss://exchange.nexus.xyz/api/exchange/ws      # authenticated, connect with ?token=…
 wss://exchange.nexus.xyz/api/exchange/stream  # legacy public market data
 ```
+
+On `local` the gateway path is absent — `ws://localhost:9090/ws` — because the
+indexer serves those routes at its root. That asymmetry is the spec's, not ours:
+the root `servers` list carries `/api/exchange` on the public host and the bare
+origin for local development, so the prefix is a per-network value
+(`gatewayPath` in `src/networks.ts`), never appended unconditionally.
 
 ## API version
 

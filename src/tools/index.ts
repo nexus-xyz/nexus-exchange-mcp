@@ -451,6 +451,10 @@ function withWsEndpoint(
   ) {
     return payload;
   }
+  // If the upstream ever starts returning its own endpoint, that value is
+  // authoritative and a locally-derived one must not overwrite it — the spec
+  // publishes only `{token}` today, so this is a forward guard, not dead code.
+  if (Object.hasOwn(payload, "ws_endpoint")) return payload;
   return {
     ...(payload as Record<string, unknown>),
     ws_endpoint: endpoint,

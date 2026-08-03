@@ -8,7 +8,6 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { deriveBases, loadConfig, normalizeBaseUrl } from "../src/config.js";
 import {
@@ -224,27 +223,34 @@ test("ws endpoints hang off the gateway base with the scheme swapped", () => {
   assert.equal(local.gatewayBaseUrl, "http://localhost:9090");
 });
 
-test("every network's gateway base matches the pinned spec's root servers", () => {
-  // The bug this pins: `deriveBases` appends `/api/exchange` unconditionally,
-  // but the spec's ROOT `servers` list is not uniform — production carries the
+test("the gateway path is per-network, not appended unconditionally", () => {
+  // The bug this pins: `deriveBases` used to append `/api/exchange` always, but
+  // the spec's ROOT `servers` list is not uniform — the public host carries the
   // gateway path and local development is the bare origin. Deriving the wrong
-  // one 404s every legacy route and misdirects the minted WebSocket token, so
-  // tie the map to the contract rather than to a hand-copied string.
-  const spec = JSON.parse(
-    readFileSync(new URL("../openapi.pinned.json", import.meta.url), "utf8"),
-  ) as { servers: { url: string }[] };
-  const roots = new Set(spec.servers.map((s) => s.url.replace(/\/+$/, "")));
-
-  for (const id of NETWORK_IDS) {
-    const desc = NETWORKS[id];
-    if (desc.baseUrl === null) continue; // mainnet: nothing is built for it yet
-    const { gatewayBaseUrl } = deriveBases(desc.baseUrl, desc.gatewayPath);
-    assert.ok(
-      roots.has(gatewayBaseUrl),
-      `${id} derives ${gatewayBaseUrl}, which is not a root server in the ` +
-        `pinned spec (${[...roots].join(", ")})`,
-    );
-  }
+  // one 404s every legacy route and misdirects the minted WebSocket token.
+  //
+  // These expectations are the pinned spec's root servers. They are checked
+  // AGAINST the spec by invariant 4 in scripts/check_spec_drift.py, which runs
+  // where openapi.pinned.json exists (it is gitignored and fetched by that job,
+  // so a unit test cannot read it); here they are asserted as literals so the
+  // derivation itself is covered.
+  assert.equal(NETWORKS.testnet.gatewayPath, "/api/exchange");
+  assert.equal(NETWORKS.local.gatewayPath, "");
+  assert.equal(
+    deriveBases(NETWORKS.testnet.baseUrl!, NETWORKS.testnet.gatewayPath)
+      .gatewayBaseUrl,
+    "https://exchange.nexus.xyz/api/exchange",
+  );
+  assert.equal(
+    deriveBases(NETWORKS.local.baseUrl!, NETWORKS.local.gatewayPath)
+      .gatewayBaseUrl,
+    "http://localhost:9090",
+  );
+  // The default keeps the old behaviour, so every existing caller is unchanged.
+  assert.equal(
+    deriveBases("https://exchange.nexus.xyz").gatewayBaseUrl,
+    "https://exchange.nexus.xyz/api/exchange",
+  );
 });
 
 test("plaintext http to a non-loopback host warns; loopback stays quiet", () => {

@@ -21,6 +21,10 @@ The Model Context Protocol server exposing the Nexus Exchange API as agent tools
 
 ## API contract
 
+- The network → host map lives in exactly one file, `src/networks.ts`, copied
+  from the spec's `x-nexus-networks`. Never interpolate a host from a network
+  name (mainnet is `api.nexus.xyz`, not `api.mainnet.nexus.xyz`), and never let
+  an unrecognized network fall back to a default — it is treated as real funds.
 - Keep the pinned `nexus-exchange-api` version in sync when the spec bumps.
   `spec-autobump` opens that PR for you and labels it breaking or not; merging it
   is a human decision, and `spec-drift` on that PR is the check that says whether

@@ -426,6 +426,44 @@ const PENDING = (capability: string) => ({
     `so the agent flow is complete, but the endpoint is pending.`,
 });
 
+/**
+ * Attach the WebSocket endpoint a freshly minted token is meant to be used
+ * against, so the caller is not left holding a 60-second credential with no
+ * address to spend it at (ENG-6448 — the network axis is what makes this
+ * knowable per target).
+ *
+ * Additive and defensive: the endpoint is added under a new key, and a payload
+ * that is not a plain JSON object is returned untouched rather than reshaped —
+ * an upstream that starts returning a bare string or an array must not have its
+ * response silently restructured by this server. The token is deliberately NOT
+ * interpolated into the URL; duplicating a credential into a second field just
+ * doubles the places it can be logged.
+ */
+function withWsEndpoint(
+  payload: unknown,
+  endpoint: string | undefined,
+): unknown {
+  if (!endpoint) return payload;
+  if (
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload)
+  ) {
+    return payload;
+  }
+  // If the upstream ever starts returning its own endpoint, that value is
+  // authoritative and a locally-derived one must not overwrite it — the spec
+  // publishes only `{token}` today, so this is a forward guard, not dead code.
+  if (Object.hasOwn(payload, "ws_endpoint")) return payload;
+  return {
+    ...(payload as Record<string, unknown>),
+    ws_endpoint: endpoint,
+    ws_endpoint_note:
+      "Connect with the token as a query parameter, e.g. " +
+      `${endpoint}?token=<token>. Tokens are single-use and expire in ~60s.`,
+  };
+}
+
 export const tools: ToolDef[] = [
   // ── Public market data (no credentials) ──────────────────────────────────
   {
@@ -2178,18 +2216,21 @@ export const tools: ToolDef[] = [
       "Mint a short-lived (60s, single-use) token for an authenticated " +
       "per-account WebSocket stream (order/fill/position updates). Uses the " +
       "current `/ws/token` endpoint, which supports HMAC keys and registered " +
-      "agents. The caller connects to `GET /ws?token=…` with the token. " +
+      "agents. The response carries `ws_endpoint` — the URL to connect to for " +
+      "the configured network — so no host has to be guessed. " +
       "Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({
+    handler: async (client) => {
+      const minted = await client.request({
         method: "POST",
         surface: "gateway",
         path: "/ws/token",
         signed: true,
-      }),
+      });
+      return withWsEndpoint(minted, client.wsAuthenticatedUrl());
+    },
   },
   {
     name: "get_ws_token_legacy",
@@ -2198,17 +2239,20 @@ export const tools: ToolDef[] = [
       "Mint a short-lived (60s, single-use) token for the legacy public " +
       "`/stream` endpoint via `POST /ws-tokens`. Prefer `get_ws_token` " +
       "(`/ws/token`) for new code; this is kept for `/stream` compatibility. " +
+      "The response carries `ws_endpoint` for the configured network. " +
       "Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({
+    handler: async (client) => {
+      const minted = await client.request({
         method: "POST",
         surface: "gateway",
         path: "/ws-tokens",
         signed: true,
-      }),
+      });
+      return withWsEndpoint(minted, client.wsMarketDataUrl());
+    },
   },
 
   // ── Service health (public) ───────────────────────────────────────────────

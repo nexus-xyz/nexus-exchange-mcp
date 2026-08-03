@@ -54,6 +54,18 @@ INVARIANTS
        be invisible to the per-tool comparison);
      * parsing zero tools, or a tool whose `ops` field cannot be read, aborts.
 
+4. network map -> spec `servers`
+   Every reachable network in src/networks.ts derives a gateway base that is a
+   root `servers` entry in the pinned spec. The root list is NOT uniform — the
+   public host carries `/api/exchange` and local development is the bare origin —
+   so a checker that assumed one suffix for all of them is exactly how
+   `NEXUS_EXCHANGE_NETWORK=local` came to derive `localhost:9090/api/exchange`,
+   404ing every legacy route and handing `get_ws_token` a `ws_endpoint` nothing
+   listens on. The map is hand-copied from the spec extension by design
+   (networks.ts explains why), so this is the direction that keeps the copy
+   honest. It lives here rather than in the TS unit tests because
+   openapi.pinned.json is gitignored and fetched by this job alone.
+
 ALLOWLISTS
 ----------
 Two named, documented sets hold the deliberate exceptions — an operation is only
@@ -544,6 +556,107 @@ def check_client_contract():
         )
 
 
+NETWORKS_TS = os.path.join(REPO, "src", "networks.ts")
+
+# `<id>: Object.freeze({ … }),` inside the NETWORKS map, at prettier's indent.
+_NETWORK_BLOCK_RE = re.compile(
+    r"\n {4}(?P<id>\w+): Object\.freeze\(\{(?P<body>.*?)\n {4}\}\),", re.S
+)
+_BASE_URL_RE = re.compile(r"\n\s*baseUrl:\s*(?:null|\"(?P<url>[^\"]*)\")\s*,")
+_GATEWAY_PATH_RE = re.compile(r"\n\s*gatewayPath:\s*\"(?P<path>[^\"]*)\"\s*,")
+_NETWORK_IDS_RE = re.compile(r"NETWORK_IDS = \[(?P<body>[^\]]*)\] as const")
+
+
+def parse_networks():
+    """Read the network -> target map out of src/networks.ts.
+
+    Fails loudly rather than skipping anything it cannot parse: a network this
+    function silently dropped would be a network the spec never checked, which is
+    the failure mode this whole file is written against."""
+    try:
+        with open(NETWORKS_TS) as f:
+            src = f.read()
+    except OSError as e:
+        fail(f"cannot read network map {NETWORKS_TS!r}: {e}")
+
+    m = _NETWORK_IDS_RE.search(src)
+    if not m:
+        fail(
+            f"could not find `NETWORK_IDS = [...] as const` in {NETWORKS_TS}; the "
+            f"network axis check cannot confirm it saw every network."
+        )
+    declared = set(re.findall(r"\"([^\"]+)\"", m.group("body")))
+    if not declared:
+        fail(f"NETWORK_IDS in {NETWORKS_TS} parsed as empty.")
+
+    found = {}
+    for block in _NETWORK_BLOCK_RE.finditer(src):
+        nid, body = block.group("id"), block.group("body")
+        if nid not in declared:
+            continue  # not a network entry (NETWORKS is the only such map today)
+        base = _BASE_URL_RE.search(body)
+        if not base:
+            fail(
+                f"network {nid!r} in {NETWORKS_TS} has no parseable `baseUrl:` "
+                f"(expected a string literal or null)."
+            )
+        gateway = _GATEWAY_PATH_RE.search(body)
+        if not gateway:
+            fail(
+                f"network {nid!r} in {NETWORKS_TS} has no parseable "
+                f"`gatewayPath:` string literal; it must say explicitly whether "
+                f"the legacy surface hangs off `/api/exchange` or the bare origin."
+            )
+        found[nid] = (base.group("url"), gateway.group("path"))
+
+    missing = declared - set(found)
+    if missing:
+        fail(
+            f"{NETWORKS_TS} declares {sorted(declared)} in NETWORK_IDS but no "
+            f"descriptor could be parsed for {sorted(missing)} — the parser is out "
+            f"of step with the source, so an unchecked network could slip through."
+        )
+    return found
+
+
+def check_network_gateway_bases(spec):
+    """Invariant 4: each reachable network's gateway base is a spec root server."""
+    servers = spec.get("servers") or []
+    roots = {
+        s["url"].rstrip("/")
+        for s in servers
+        if isinstance(s, dict) and "url" in s
+    }
+    if not roots:
+        fail(
+            "the pinned spec declares no root `servers`; the network axis check "
+            "cannot verify any gateway base against it."
+        )
+
+    failures = 0
+    for nid, (base, gateway_path) in sorted(parse_networks().items()):
+        if base is None:
+            continue  # no reachable host yet (mainnet) — nothing is built for it
+        derived = re.sub(r"/api/exchange$", "", base.rstrip("/")) + gateway_path
+        if derived not in roots:
+            failures += 1
+            print(
+                f"FAIL invariant 4: network {nid!r} derives gateway base "
+                f"{derived!r}, which is not a root server in the pinned spec.\n"
+                f"  spec root servers: {', '.join(sorted(roots))}\n"
+                f"  Fix `gatewayPath` for {nid} in src/networks.ts (the public "
+                f"host carries /api/exchange; local development is the bare "
+                f"origin), or update the map if the spec moved the host.",
+                file=sys.stderr,
+            )
+    if not failures:
+        print(
+            "OK: every reachable network derives a gateway base that is a root "
+            "server in the pinned spec."
+        )
+    return failures
+
+
 def spec_ops(spec):
     ops = set()
     for path, methods in spec.get("paths", {}).items():
@@ -891,6 +1004,7 @@ def main():
     failures += check_manifest_is_generated(tools, text)
     failures += check_declarations_vs_code(tools)
     failures += check_allowlists(tools, available)
+    failures += check_network_gateway_bases(spec)
 
     report_coverage(tools, manifest, available, version)
 

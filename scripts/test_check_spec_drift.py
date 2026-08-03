@@ -8,11 +8,11 @@ defeated", and the gap rs's own test suite exists to close.
 
 Three groups:
 
-* **The invariants.** For each of the three (manifest -> spec, manifest ==
-  declarations, declarations == code) a synthetic tool source or spec is built
-  that breaks exactly that one, and the check must report a non-zero error count.
-  Passing cases are asserted too, so a checker that simply always fails would not
-  satisfy this file either.
+* **The invariants.** For each of the four (manifest -> spec, manifest ==
+  declarations, declarations == code, network map -> spec `servers`) a synthetic
+  tool source, network map or spec is built that breaks exactly that one, and the
+  check must report a non-zero error count. Passing cases are asserted too, so a
+  checker that simply always fails would not satisfy this file either.
 
 * **The parsers, fail-closed.** The scanner's whole job is to not undercount, so
   every construct it cannot account for must abort: a path built into a variable,
@@ -496,6 +496,140 @@ class TestParsersFailClosed(unittest.TestCase):
         self.assertEqual(check_decl(tools), 0)
 
 
+def networks_source(*entries, ids=None):
+    """Build a synthetic src/networks.ts from (id, baseUrl, gatewayPath) triples.
+
+    `baseUrl=None` emits `baseUrl: null` — an unreachable network, which must be
+    skipped rather than failed. Pass `gatewayPath=None` to omit the field, the
+    case the parser has to refuse to guess at."""
+    declared = ids if ids is not None else [e[0] for e in entries]
+    parts = [
+        "export const NETWORK_IDS = ["
+        + ", ".join(f'"{i}"' for i in declared)
+        + "] as const;\n",
+        "export const NETWORKS = Object.freeze({",
+    ]
+    for nid, base, gateway in entries:
+        url = "null" if base is None else f'"{base}"'
+        parts.append(f"    {nid}: Object.freeze({{")
+        parts.append(f'      id: "{nid}",')
+        parts.append(f"      baseUrl: {url},")
+        if gateway is not None:
+            parts.append(f'      gatewayPath: "{gateway}",')
+        parts.append("    }),")
+    parts.append("  });")
+    return "\n".join(parts)
+
+
+def spec_with_servers(*urls):
+    """A minimal OpenAPI document whose root `servers` list is exactly `urls`."""
+    spec = spec_with("GET /api/v1/things")
+    spec["servers"] = [{"url": u} for u in urls]
+    return spec
+
+
+@contextlib.contextmanager
+def as_networks_source(text):
+    """Point the network-map parser at a synthetic source for one block."""
+    with tempfile.NamedTemporaryFile("w", suffix=".ts", delete=False) as fh:
+        fh.write(text)
+        name = fh.name
+    original = csd.NETWORKS_TS
+    csd.NETWORKS_TS = name
+    try:
+        yield name
+    finally:
+        csd.NETWORKS_TS = original
+        os.unlink(name)
+
+
+PUBLIC = "https://exchange.nexus.xyz"
+LOCAL = "http://localhost:9090"
+
+
+class TestInvariant4NetworkGatewayBases(unittest.TestCase):
+    """network map -> spec `servers`: the gateway path is per-network.
+
+    The spec's root `servers` list is not uniform — the public host carries
+    `/api/exchange`, local development is the bare origin — so a map that appends
+    one suffix to all of them misdirects every legacy route on the odd one out.
+    That is a live bug this check was written to catch, not a hypothetical."""
+
+    def check(self, source, spec):
+        with as_networks_source(source):
+            return _quiet(csd.check_network_gateway_bases, spec)
+
+    def test_matching_map_passes(self):
+        source = networks_source(
+            ("testnet", PUBLIC, "/api/exchange"), ("local", LOCAL, "")
+        )
+        spec = spec_with_servers(f"{PUBLIC}/api/exchange", LOCAL)
+        self.assertEqual(self.check(source, spec), 0)
+
+    def test_local_carrying_the_gateway_prefix_fails(self):
+        """The original bug: `/api/exchange` appended to the local origin."""
+        source = networks_source(
+            ("testnet", PUBLIC, "/api/exchange"), ("local", LOCAL, "/api/exchange")
+        )
+        spec = spec_with_servers(f"{PUBLIC}/api/exchange", LOCAL)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.check(source, spec), 1)
+
+    def test_public_host_missing_the_gateway_prefix_fails(self):
+        """And the mirror image, so the check is not just anti-prefix."""
+        source = networks_source(("testnet", PUBLIC, ""))
+        spec = spec_with_servers(f"{PUBLIC}/api/exchange", LOCAL)
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.check(source, spec), 1)
+
+    def test_a_legacy_suffix_in_baseurl_is_not_doubled(self):
+        """`deriveBases` strips a trailing /api/exchange before appending; the
+        check has to model that or it would flag a correct map."""
+        source = networks_source(("testnet", f"{PUBLIC}/api/exchange", "/api/exchange"))
+        self.assertEqual(
+            self.check(source, spec_with_servers(f"{PUBLIC}/api/exchange")), 0
+        )
+
+    def test_unreachable_network_is_skipped_not_failed(self):
+        """mainnet has no host yet, so there is no URL to check — and inventing an
+        expectation for it is exactly what networks.ts refuses to do."""
+        source = networks_source(
+            ("testnet", PUBLIC, "/api/exchange"), ("mainnet", None, "/api/exchange")
+        )
+        self.assertEqual(
+            self.check(source, spec_with_servers(f"{PUBLIC}/api/exchange")), 0
+        )
+
+    def test_spec_without_servers_aborts(self):
+        source = networks_source(("testnet", PUBLIC, "/api/exchange"))
+        with expect_abort(self):
+            self.check(source, spec_with("GET /api/v1/things"))
+
+    def test_missing_gateway_path_aborts(self):
+        """A network that does not say which surface it uses must not be guessed
+        at — that guess is the bug."""
+        source = networks_source(("testnet", PUBLIC, None))
+        with expect_abort(self):
+            self.check(source, spec_with_servers(f"{PUBLIC}/api/exchange"))
+
+    def test_declared_network_without_a_descriptor_aborts(self):
+        """A network in NETWORK_IDS the parser cannot see would be an unchecked
+        network — the undercount this file exists to prevent."""
+        source = networks_source(
+            ("testnet", PUBLIC, "/api/exchange"), ids=["testnet", "ghostnet"]
+        )
+        with expect_abort(self):
+            self.check(source, spec_with_servers(f"{PUBLIC}/api/exchange"))
+
+    def test_missing_network_ids_aborts(self):
+        source = networks_source(("testnet", PUBLIC, "/api/exchange"))
+        with expect_abort(self):
+            self.check(
+                source.replace("NETWORK_IDS", "NET_IDS"),
+                spec_with_servers(f"{PUBLIC}/api/exchange"),
+            )
+
+
 class TestAgainstRealSource(unittest.TestCase):
     """The real src/tools/index.ts, so the synthetic fixtures above cannot pass
     while the file they stand in for has drifted."""
@@ -529,6 +663,21 @@ class TestAgainstRealSource(unittest.TestCase):
 
     def test_client_default_method_contract_holds(self):
         csd.check_client_contract()  # exits non-zero if the client's default moved
+
+    def test_real_network_map_parses_with_every_field(self):
+        """The synthetic fixtures above could all pass while src/networks.ts was
+        reformatted out from under the parser — which would silently stop checking
+        every network against the spec."""
+        found = csd.parse_networks()
+        self.assertIn("testnet", found)
+        self.assertIn("local", found)
+        for nid, (base, gateway) in found.items():
+            with self.subTest(network=nid):
+                self.assertIn(gateway, ("", "/api/exchange"))
+                self.assertTrue(base is None or base.startswith("http"))
+        # The asymmetry itself, asserted where the real file is read.
+        self.assertEqual(found["local"][1], "")
+        self.assertEqual(found["testnet"][1], "/api/exchange")
 
     def test_generated_manifest_is_committed(self):
         with open(csd.MANIFEST) as f:

@@ -80,6 +80,33 @@ export class ExchangeApiError extends Error {
   }
 }
 
+/**
+ * A 2xx response whose body is neither empty nor JSON.
+ *
+ * Every one of the 89 documented 2xx responses in spec v0.7.2 is
+ * `application/json` (the other 7 operations return no content at all), so a
+ * non-JSON success body means the request did not reach the Exchange API —
+ * `NEXUS_EXCHANGE_API_URL` points at a web front-end, a captive portal, or a
+ * proxy answering with its own page. The client used to return that body as if
+ * it were the endpoint's data, which handed an agent a web page typed as a
+ * market list (ENG-8170). Failing is the only honest answer.
+ */
+export class NonJsonResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly contentType: string | null,
+    public readonly body: string,
+  ) {
+    super(
+      `Exchange API returned ${status} with a non-JSON body` +
+        `${contentType ? ` (content-type: ${contentType})` : ""}. This is not ` +
+        `the Exchange API — check that NEXUS_EXCHANGE_API_URL points at a host ` +
+        `serving the API rather than a web front-end. Body: ${body}`,
+    );
+    this.name = "NonJsonResponseError";
+  }
+}
+
 export class MissingCredentialsError extends Error {
   constructor(tool: string) {
     super(
@@ -283,11 +310,18 @@ export class ExchangeClient {
     if (!res.ok) {
       throw new ExchangeApiError(res.status, sanitizeErrorBody(text));
     }
+    // An empty body is legitimate: 7 operations in the spec document a 2xx with
+    // no content. `undefined` is the right value for those — distinct from a
+    // body we received and could not read.
     if (!text) return undefined as T;
     try {
       return JSON.parse(text) as T;
     } catch {
-      return text as unknown as T;
+      throw new NonJsonResponseError(
+        res.status,
+        res.headers.get("content-type"),
+        sanitizeErrorBody(text),
+      );
     }
   }
 }

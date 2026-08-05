@@ -30,14 +30,22 @@ write); run `npm run format` to fix.
 ### Smoke check
 
 `npm run smoke` spins the server up in-process (over the SDK's in-memory
-transport), lists the tools, and calls `list_markets` against the configured
-gateway (production by default):
+transport), lists the tools, and calls `list_markets` against the target you
+name. There is **no default target** — set `NEXUS_EXCHANGE_API_URL` to a host
+that serves the `/api/v1` surface:
 
 ```bash
-npm run smoke
+NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
 ```
 
-It needs network access to the gateway and does not require a build. For an
+Unset, the check stops before calling anything and names the variable. Pointed
+at something that is not the API — a web front-end, a proxy error page — it
+reports the HTML explicitly and exits non-zero rather than counting an
+unreadable body as a pass (ENG-8092). The target-resolution and payload rules
+are unit-tested in [`test/smoke.test.ts`](test/smoke.test.ts), so `npm test`
+covers them without network access.
+
+It needs network access to the target and does not require a build. For an
 out-of-process check that exercises the real stdio transport, see
 [`examples/`](examples/) — it spawns the built server as a subprocess, so run
 `npm run build` first.

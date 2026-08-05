@@ -105,7 +105,15 @@ the v0.7.2 operations it exposes as tools (see
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
   `…/api/exchange` gateway path. `/api/v1/*` resolves at the root; the
   legacy-only routes append `/api/exchange`. A `NEXUS_EXCHANGE_API_URL` that
-  still ends in `/api/exchange` is accepted and normalized.
+  still ends in `/api/exchange` is accepted and normalized. Which host that is
+  comes from the [network axis](#networks).
+- **Two surfaces, one host — so "the base URL" differs per SDK by design.** The
+  configured value here is the host **root**, from which both surfaces are
+  derived: `<root>/api/v1` (direct indexer) and `<root>/api/exchange` (legacy
+  gateway). A sibling SDK whose single base URL reads `…/api/v1` and one whose
+  reads `…/api/exchange` are therefore not in conflict — they name different
+  surfaces of the same deployment, and this server holds both at once. If you are
+  comparing configs across the SDKs, compare the surface, not the string.
 - **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
   v1 routes, the bare route (`/orders`) for legacy ones.
 - **`cancel_order` requires `market_id`** when cancelling a single order (the
@@ -121,9 +129,22 @@ the v0.7.2 operations it exposes as tools (see
 
 ### API-surface coverage
 
-The tool surface covers **63 of the 65** distinct operations in Exchange API
-spec **v0.7.2** (98 spec operations counting the `/api/v1` aliases of the
-legacy routes; each aliased pair is one tool).
+**66 registered tools** covering **63 spec operations** of Exchange API spec
+**v0.7.2**. Those are two different numbers and neither substitutes for the
+other: one tool can call several operations (`cancel_order` calls two) and one
+calls none. The operation count is the figure comparable with the rs / py / cli
+SDK manifests; the tool count is MCP's own axis and must never be reported as a
+coverage figure. [`docs/coverage-unit.md`](./docs/coverage-unit.md) records that
+decision and how it is enforced.
+
+63 of the **65** distinct operations, or 63 of the **98** the spec literally
+documents — the spec lists most operations twice, once on the legacy gateway
+route and once on its `/api/v1` alias, and each aliased pair is one tool.
+
+The operation list is not hand-counted: [`endpoints.txt`](./endpoints.txt) is
+generated from the per-tool `ops` declarations in `src/tools/index.ts` and
+verified against the pinned spec on every PR by `scripts/check_spec_drift.py`
+(see [Spec drift](#spec-drift)).
 
 The pin bump (ENG-6038) was pin-only — it advanced `.api-version` v0.6.2 →
 v0.7.1 without mapping the surface those releases had added. ENG-6136 then
@@ -245,28 +266,100 @@ npm start          # runs the stdio MCP server
 ```
 
 `npm start` waits on stdio for an MCP client; it is meant to be launched by
-Claude rather than run by hand. To verify it works end-to-end against the live
+Claude rather than run by hand. To verify it works end-to-end against a live
 API without a client, use the smoke check:
 
 ```bash
-npm run smoke      # lists tools, calls list_markets against production
+NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
 ```
 
 Expected output ends with `list_markets OK -> N markets`.
+
+The smoke check **requires an explicit `NEXUS_EXCHANGE_API_URL`** and has no
+default (ENG-8092). It must be a host that serves the `/api/v1` surface — the
+public site root (`https://exchange.nexus.xyz`) serves the marketing app there
+and answers `/api/v1/markets/summary` with a 404 page of HTML, so a run against
+it can only fail. If the target answers with HTML rather than JSON, on a 404 or
+on a 200, the check says so by name and exits non-zero; it never reports a
+passing run for a body it could not read as market-summary JSON.
 
 ## Environment variables
 
 Copy `.env.example` and set as needed. Only trading/account tools need
 credentials — never commit real secrets.
 
-| Variable                            | Required                | Purpose                                                                                                                                          |
-| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXUS_EXCHANGE_API_URL`            | No                      | API host root (serves `/api/v1`). Defaults to `https://exchange.nexus.xyz`. A legacy value ending in `/api/exchange` is accepted and normalized. |
-| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                   |
-| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                               |
-| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                          |
-| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                |
-| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                     |
+| Variable                            | Required                | Purpose                                                                                                                                                                                                                                                      |
+| ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, or `mainnet`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                                    |
+| `NEXUS_EXCHANGE_API_URL`            | No                      | Explicit host-root override (serves `/api/v1`); wins over `NEXUS_EXCHANGE_NETWORK`. Use it for a staging/beta deployment or a private indexer. Defaults to the selected network's host. A legacy value ending in `/api/exchange` is accepted and normalized. |
+| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                               |
+| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                           |
+| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                      |
+| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                            |
+| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                 |
+
+## Networks
+
+The target is chosen on a **network** axis — whose money is behind it — not a
+release channel. `NEXUS_EXCHANGE_NETWORK` takes `testnet`, `mainnet` or `local`;
+the map lives in one place, [`src/networks.ts`](./src/networks.ts), copied from
+the spec's `x-nexus-networks` extension.
+
+| Network   | Funds                    | Faucet | Target today                                     |
+| --------- | ------------------------ | ------ | ------------------------------------------------ |
+| `testnet` | Play (synthetic USDX)    | Yes    | `https://exchange.nexus.xyz` — **the default**   |
+| `local`   | Play (whatever you hold) | Yes    | `http://localhost:9090`                          |
+| `mainnet` | **Real money**           | No     | No reachable host yet — selecting it is an error |
+
+**Nothing changes if you set nothing.** The default resolves to exactly the host
+this server has always used.
+
+**`mainnet` deliberately does not work yet.** Its host `api.nexus.xyz` has no DNS
+(ENG-8155) and the pinned spec maps no operation onto its `/v1` base, so any URL
+built for it would be a guess — on the one network where a guess moves real
+money. It fails with an explanation instead. To target it once it is live, set
+`NEXUS_EXCHANGE_API_URL` explicitly.
+
+Three rules this implements, all from the spec extension:
+
+- **Hosts are never interpolated from the network name.** Mainnet is off-pattern
+  on purpose — `api.nexus.xyz`, not `api.mainnet.nexus.xyz` — so
+  `api.{network}.nexus.xyz` would resolve for every environment that can be
+  tested and fail only on real funds. Every host is a named literal.
+- **An unrecognized network is treated as real funds.** A typo is an error, never
+  a fallback to play money. `local` is likewise never a fallback for a public
+  host that fails to resolve — succeeding quietly against localhost would hide a
+  misconfigured client.
+- **Credentials never cross networks.** Session tokens, HMAC keys and agent
+  registrations are minted per network and are invalid on any other. Switching
+  network means switching credentials; never carry a signature or a nonce across.
+
+### Release channels are a URL, not a network
+
+`beta` / `staging` are deployments of testnet, not a third pool of money, so they
+are no longer enum values. Point `NEXUS_EXCHANGE_API_URL` at them instead — it
+overrides the network map and is validated (http(s) only, no embedded
+`user:password@`, no query or fragment, since the base is concatenated with a
+request path). Plaintext `http` to a non-loopback host warns on stderr: HMAC over
+http exposes the key id and signature in transit.
+
+### WebSocket targets
+
+`get_ws_token` and `get_ws_token_legacy` now return `ws_endpoint` alongside the
+token, so a caller is no longer handed a 60-second credential with no address to
+spend it at. The endpoints derive from the gateway base (`/ws`, `/stream`,
+`/ws/token`, `/ws-tokens` carry no per-path `servers` override in the spec):
+
+```
+wss://exchange.nexus.xyz/api/exchange/ws      # authenticated, connect with ?token=…
+wss://exchange.nexus.xyz/api/exchange/stream  # legacy public market data
+```
+
+On `local` the gateway path is absent — `ws://localhost:9090/ws` — because the
+indexer serves those routes at its root. That asymmetry is the spec's, not ours:
+the root `servers` list carries `/api/exchange` on the public host and the bare
+origin for local development, so the prefix is a per-network value
+(`gatewayPath` in `src/networks.ts`), never appended unconditionally.
 
 ## API version
 
@@ -279,10 +372,44 @@ Currently targets Exchange API spec **`v0.7.2`**.
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
-This repo does not vendor a copy — the `drift` CI job fetches the pinned release
-to check for drift, and the scheduled `api-version-sync` workflow opens a PR when
-a newer spec releases. The line above is bot-managed; everything around it is
-human-owned.
+This repo does not vendor a copy — the checks below fetch the pinned release. The
+line above is bot-managed; everything around it is human-owned.
+
+Three separate things watch the pin, and they answer different questions:
+
+| Check           | Question                                                | Where                                 |
+| --------------- | ------------------------------------------------------- | ------------------------------------- |
+| `spec-drift`    | Does the tool surface still match the spec it **pins**? | `.github/workflows/spec-drift.yml`    |
+| `drift` (in CI) | Is the pin **behind** the latest release?               | `.github/workflows/ci.yml`            |
+| `spec-autobump` | A newer spec released — is the delta breaking?          | `.github/workflows/spec-autobump.yml` |
+
+`spec-autobump` (daily cron, `repository_dispatch` from the api repo, or manual
+dispatch) classifies the pin advance with **oasdiff** and opens a PR touching only
+`.api-version` and the managed line above, labelled `spec-autobump` or
+`breaking · needs-SDK-update`. It never merges: `allow_auto_merge` is disabled on
+this repo, so the workflow probes the setting and says so in the PR body rather
+than calling `gh pr merge --auto` and reporting success over a no-op. It
+supersedes the old poll-only `api-version-sync` workflow, which had no
+classification step.
+
+#### Spec drift
+
+`spec-drift` is the verification half, and it runs on **every** PR — including the
+autobump's own, where the pin _is_ the change. It enforces three invariants:
+
+1. every operation in `endpoints.txt` exists in the pinned spec;
+2. `endpoints.txt` matches the per-tool `ops` declarations byte-for-byte (it is a
+   generated artifact, not a hand-maintained list);
+3. each tool's declared `ops` match the operations its handler actually requests.
+
+```bash
+npm run spec:drift        # verify against the pinned spec
+npm run spec:drift:write  # regenerate endpoints.txt after adding operations
+npm run spec:drift:test   # self-test: prove the checker goes red when defeated
+```
+
+Adding a tool without declaring what it calls is a type error, so the mapping
+cannot be skipped. See [`docs/coverage-unit.md`](./docs/coverage-unit.md).
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
 header (e.g. `X-Nexus-Api-Version: v0.7.2`), alongside a normalized
@@ -407,6 +534,7 @@ npm run typecheck  # tsc --noEmit
 npm test           # unit tests (HMAC scheme, arg mapping, schemas)
 npm run test:coverage # unit tests + coverage (text/lcov/json-summary); CI emits the %
 npm run smoke      # live end-to-end check against the gateway
+npm run spec:drift # tool surface vs. the pinned spec (see "Spec drift" above)
 ```
 
 ## License

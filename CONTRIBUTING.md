@@ -30,17 +30,46 @@ write); run `npm run format` to fix.
 ### Smoke check
 
 `npm run smoke` spins the server up in-process (over the SDK's in-memory
-transport), lists the tools, and calls `list_markets` against the configured
-gateway (production by default):
+transport), lists the tools, and calls `list_markets` against the target you
+name. There is **no default target** — set `NEXUS_EXCHANGE_API_URL` to a host
+that serves the `/api/v1` surface:
 
 ```bash
-npm run smoke
+NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
 ```
 
-It needs network access to the gateway and does not require a build. For an
+Unset, the check stops before calling anything and names the variable. Pointed
+at something that is not the API — a web front-end, a proxy error page — it
+reports the HTML explicitly and exits non-zero rather than counting an
+unreadable body as a pass (ENG-8092). The target-resolution and payload rules
+are unit-tested in [`test/smoke.test.ts`](test/smoke.test.ts), so `npm test`
+covers them without network access.
+
+It needs network access to the target and does not require a build. For an
 out-of-process check that exercises the real stdio transport, see
 [`examples/`](examples/) — it spawns the built server as a subprocess, so run
 `npm run build` first.
+
+## How a PR lands
+
+Squash-and-merge is the only method enabled, and the source branch is deleted on
+merge, so one PR is always exactly one commit on `main`.
+
+**That commit's subject is your PR title**, so it has to be a
+[conventional commit](https://www.conventionalcommits.org/) — `feat:`, `fix:`,
+`docs:`, `chore:`, `ci:`. It is the string
+[release-please](https://github.com/googleapis/release-please) parses to pick the
+next version and the changelog section; a title it cannot parse contributes
+nothing to the bump and files the change under "Other".
+
+**Declare a breaking change with `!` before the colon** — `feat!:`,
+`feat(tools)!: …`. A `BREAKING CHANGE:` footer also works, but only in a
+**commit** body: the squash commit's body is assembled from the commit messages
+on the branch and never from the PR description, so a footer written only in the
+PR description is dropped at merge. `release-please-config.json` sets
+`bump-minor-pre-major`, so a declared break is a minor bump and an undeclared one
+ships as a patch — which for this repo means the tool-surface break described
+below would land looking like a bug fix.
 
 ## Compatibility & deprecations
 
@@ -97,7 +126,10 @@ section for this).
 ### When a break is unavoidable
 
 Batch breaking changes into a single planned minor bump rather than one-per-PR,
-and call it out in the PR.
+and declare it with a `!` in the PR title — see
+[How a PR lands](#how-a-pr-lands). "Calling it out in the PR" is not enough on
+its own: prose in the PR description never reaches the commit, so release-please
+does not see it and the break ships as a patch.
 
 ### Toward 1.0
 

@@ -3,3 +3,11 @@ dist/
 coverage/
 .env
 *.log
+
+# Pinned spec fetched by scripts/spec-drift.sh (cached, never committed — the
+# pin in .api-version is the source of truth for which spec that is).
+openapi.pinned.json
+.spec-cache-tag
+
+# Python bytecode from the spec-drift scripts.
+__pycache__/

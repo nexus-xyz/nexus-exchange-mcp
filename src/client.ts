@@ -80,6 +80,33 @@ export class ExchangeApiError extends Error {
   }
 }
 
+/**
+ * A 2xx response whose body is neither empty nor JSON.
+ *
+ * Every one of the 89 documented 2xx responses in spec v0.7.2 is
+ * `application/json` (the other 7 operations return no content at all), so a
+ * non-JSON success body means the request did not reach the Exchange API —
+ * `NEXUS_EXCHANGE_API_URL` points at a web front-end, a captive portal, or a
+ * proxy answering with its own page. The client used to return that body as if
+ * it were the endpoint's data, which handed an agent a web page typed as a
+ * market list (ENG-8170). Failing is the only honest answer.
+ */
+export class NonJsonResponseError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly contentType: string | null,
+    public readonly body: string,
+  ) {
+    super(
+      `Exchange API returned ${status} with a non-JSON body` +
+        `${contentType ? ` (content-type: ${contentType})` : ""}. This is not ` +
+        `the Exchange API — check that NEXUS_EXCHANGE_API_URL points at a host ` +
+        `serving the API rather than a web front-end. Body: ${body}`,
+    );
+    this.name = "NonJsonResponseError";
+  }
+}
+
 export class MissingCredentialsError extends Error {
   constructor(tool: string) {
     super(
@@ -194,6 +221,21 @@ export class ExchangeClient {
     return hasAdminSecret(this.cfg);
   }
 
+  /**
+   * Where an authenticated WebSocket token is meant to be used
+   * (`${wsUrl}/ws`), or `undefined` on a config built without the network axis.
+   * Minting a token without telling the caller where to connect is the gap the
+   * network axis closes (ENG-6448), so the token tools return this alongside it.
+   */
+  wsAuthenticatedUrl(): string | undefined {
+    return this.cfg.wsAuthenticatedUrl;
+  }
+
+  /** Where a legacy `/stream` token is meant to be used (`${wsUrl}/stream`). */
+  wsMarketDataUrl(): string | undefined {
+    return this.cfg.wsMarketDataUrl;
+  }
+
   private sign(
     method: string,
     path: string,
@@ -301,11 +343,24 @@ export class ExchangeClient {
     }
     const nextCursor =
       (res.headers.get(NEXT_CURSOR_HEADER) ?? "").trim() || null;
+    // An empty body is legitimate: 7 operations in the spec document a 2xx with
+    // no content. `undefined` is the right value for those — distinct from a
+    // body we received and could not read. The cursor still rides along, since
+    // a paginated endpoint may legitimately return no items and a next cursor.
     if (!text) return { items: undefined as T, nextCursor };
     try {
       return { items: JSON.parse(text) as T, nextCursor };
     } catch {
-      return { items: text as unknown as T, nextCursor };
+      // This branch used to return the raw text as if it were the payload.
+      // ENG-8170 replaced that with a throw, and the throw wins here: a 2xx
+      // whose body we cannot parse is a broken response, and handing it back
+      // wrapped in `{ items, nextCursor }` would launder it into something that
+      // looks structured. Nothing to wrap — this path does not return.
+      throw new NonJsonResponseError(
+        res.status,
+        res.headers.get("content-type"),
+        sanitizeErrorBody(text),
+      );
     }
   }
 }

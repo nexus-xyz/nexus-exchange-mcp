@@ -21,5 +21,19 @@ The Model Context Protocol server exposing the Nexus Exchange API as agent tools
 
 ## API contract
 
+- The network → host map lives in exactly one file, `src/networks.ts`, copied
+  from the spec's `x-nexus-networks`. Never interpolate a host from a network
+  name (mainnet is `api.nexus.xyz`, not `api.mainnet.nexus.xyz`), and never let
+  an unrecognized network fall back to a default — it is treated as real funds.
 - Keep the pinned `nexus-exchange-api` version in sync when the spec bumps.
+  `spec-autobump` opens that PR for you and labels it breaking or not; merging it
+  is a human decision, and `spec-drift` on that PR is the check that says whether
+  it needs code changes.
 - New API capabilities should be surfaced as MCP tools so an agent can use them.
+- Every tool declares the spec operations it calls in its `ops` field — required
+  by the type, verified against the handler by `scripts/check_spec_drift.py`, and
+  the source `endpoints.txt` is generated from. Run `npm run spec:drift` after
+  touching a tool, and `npm run spec:drift:write` if the operation set moved.
+- Coverage is reported in two units and they are not interchangeable: registered
+  tools (MCP's own axis) and spec operations (comparable with the other SDKs).
+  Never report the tool count as a coverage figure. See `docs/coverage-unit.md`.

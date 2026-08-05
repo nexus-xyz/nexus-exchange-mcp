@@ -406,19 +406,117 @@ test("account summary / equity / closed positions / order history sign v1 GETs",
   }
 });
 
+/**
+ * Every `limit`-bearing tool must carry its OWN endpoint's `maximum` from spec
+ * v0.7.2. The caps are not interchangeable, and an unbounded schema is the
+ * harmful case: an out-of-schema `limit` validates, gets signed, and is
+ * forwarded, and if the upstream clamps rather than rejecting it, the agent
+ * reads a truncated list as a complete one with no signal (ENG-8173).
+ *
+ * Base args carry each tool's required fields so `limit` is the only thing
+ * under test. The five cursor-paginated tools' caps are covered separately in
+ * test/pagination.test.ts (ENG-7424).
+ */
 test("history tools enforce the spec limit caps in their schemas", () => {
-  const caps: Array<[string, number]> = [
-    ["get_equity_history", 720],
-    ["get_closed_positions", 200],
-    ["get_order_history", 500],
-    ["list_deposits", 100],
-    ["get_funding_payments", 1000],
+  const caps: Array<[string, number, Record<string, unknown>]> = [
+    ["get_equity_history", 720, {}],
+    ["get_closed_positions", 200, {}],
+    ["get_order_history", 500, {}],
+    ["list_deposits", 100, {}],
+    ["get_funding_payments", 1000, {}],
+    ["list_bridge_deposits", 100, {}],
+    ["get_withdrawals", 100, {}],
+    ["get_candles", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["get_funding_samples", 480, { market_id: "BTC-USDX-PERP" }],
+    ["get_funding_history", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["get_market_adl_events", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["get_adl_history", 1000, { address: "0xabc" }],
+    ["get_portfolio_history", 366, {}],
   ];
-  for (const [name, cap] of caps) {
+  for (const [name, cap, base] of caps) {
     const tool = findTool(name)!;
-    assert.equal(tool.zod.safeParse({ limit: cap }).success, true, name);
-    assert.equal(tool.zod.safeParse({ limit: cap + 1 }).success, false, name);
-    assert.equal(tool.zod.safeParse({ limit: 0 }).success, false, name);
+    assert.equal(
+      tool.zod.safeParse({ ...base, limit: cap }).success,
+      true,
+      `${name} should accept its cap ${cap}`,
+    );
+    assert.equal(
+      tool.zod.safeParse({ ...base, limit: cap + 1 }).success,
+      false,
+      `${name} should reject ${cap + 1}, one over its cap`,
+    );
+    // 0 is a sentinel that reads as "no limit" if it slips through.
+    assert.equal(
+      tool.zod.safeParse({ ...base, limit: 0 }).success,
+      false,
+      `${name} should reject 0`,
+    );
+    assert.equal(
+      tool.zod.safeParse({ ...base, limit: -1 }).success,
+      false,
+      `${name} should reject -1`,
+    );
+  }
+});
+
+/**
+ * The caps above are per-endpoint, so a tool must not silently inherit a
+ * neighbour's ceiling. These three are the ones ENG-8173 added; each is
+ * checked against the cap it does NOT have, to catch a copy-paste fix.
+ */
+test("limit caps are per-endpoint, not shared", () => {
+  // get_withdrawals is 100, not the 1000 its sibling legacy reads carry.
+  assert.equal(
+    findTool("get_withdrawals")!.zod.safeParse({ limit: 1000 }).success,
+    false,
+  );
+  // get_funding_history is 1000, not get_funding_samples' 480.
+  assert.equal(
+    findTool("get_funding_history")!.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      limit: 1000,
+    }).success,
+    true,
+  );
+  assert.equal(
+    findTool("get_funding_samples")!.zod.safeParse({
+      market_id: "BTC-USDX-PERP",
+      limit: 1000,
+    }).success,
+    false,
+  );
+  // get_adl_history is 1000, not get_market_adl_events' — both are 1000, so
+  // assert the shared value explicitly rather than assuming it transfers.
+  assert.equal(
+    findTool("get_adl_history")!.zod.safeParse({
+      address: "0xabc",
+      limit: 1001,
+    }).success,
+    false,
+  );
+});
+
+/**
+ * The cap has to reach the agent too: the zod schema is server-side
+ * validation, but `inputSchema` is the only thing an agent reads before
+ * choosing a `limit`. A silent rejection it could have avoided is a worse
+ * experience than a documented ceiling.
+ */
+test("limit descriptions state the cap the schema enforces", () => {
+  for (const [name, cap] of [
+    ["get_withdrawals", 100],
+    ["get_funding_history", 1000],
+    ["get_adl_history", 1000],
+  ] as Array<[string, number]>) {
+    const props = findTool(name)!.inputSchema.properties as Record<
+      string,
+      { description?: string }
+    >;
+    const description = props.limit?.description ?? "";
+    assert.ok(
+      description.includes(`max ${cap}`),
+      `${name} limit description should state "max ${cap}", got: ${description}`,
+    );
   }
 });
 
@@ -1264,4 +1362,60 @@ test("tool names are unique and admin tools carry the adminOnly flag", () => {
   for (const name of ["list_tiers", "set_tier", "delete_tier"]) {
     assert.equal(findTool(name)!.adminOnly, true, `${name} is adminOnly`);
   }
+});
+
+test("every tool declares the spec operations it calls", () => {
+  // The tool -> spec-operation mapping (ENG-7788 / docs/coverage-unit.md). The
+  // authoritative check is scripts/check_spec_drift.py, which also verifies each
+  // declaration against the handler next to it and against the pinned spec. This
+  // one is here because `test` is a required status check and `spec-drift` is not
+  // yet: it will not catch a *wrong* operation, but it catches a missing or
+  // malformed declaration before the mapping can rot.
+  const opFormat = /^(GET|POST|PUT|PATCH|DELETE) \/\S*$/;
+  // Tools that legitimately call nothing. Kept in step with TOOLS_WITHOUT_OPS in
+  // scripts/check_spec_drift.py; get_deposit_target describes a capability that
+  // is not built server-side yet and returns a local "pending" payload.
+  const NO_OPS = new Set(["get_deposit_target"]);
+
+  for (const tool of tools) {
+    assert.ok(Array.isArray(tool.ops), `${tool.name} declares ops`);
+    for (const op of tool.ops) {
+      assert.match(op, opFormat, `${tool.name} op "${op}" is METHOD /path`);
+      // Placeholders must be the spec's `{name}` form, not a TS template hole:
+      // endpoints.txt is intersected with spec paths as raw strings downstream.
+      assert.doesNotMatch(op, /\$\{/, `${tool.name} op "${op}" has no \${...}`);
+    }
+    assert.equal(
+      tool.ops.length === 0,
+      NO_OPS.has(tool.name),
+      `${tool.name}: an empty ops list must be one of the known no-op tools`,
+    );
+    assert.equal(
+      new Set(tool.ops).size,
+      tool.ops.length,
+      `${tool.name} declares no duplicate operations`,
+    );
+  }
+});
+
+test("the tool -> operation mapping is not 1:1", () => {
+  // The premise of the unit decision (docs/coverage-unit.md): a tool is not an
+  // operation, so the two counts are different quantities and neither may be
+  // reported as the other.
+  //
+  // Worth knowing while reading this: the totals currently COINCIDE — 66 tools
+  // declaring 66 distinct operations — which is why the test asserts the mapping's
+  // shape rather than an inequality of totals. A coincidence of totals is exactly
+  // how the tool count came to be reported as an operation count in the first
+  // place (ENG-7964), and 66 is still not the coverage figure: three of those
+  // operations are the non-contract `/demo/*` routes, so endpoints.txt publishes
+  // 63. Asserting `distinct !== tools.length` would be both brittle and, today,
+  // false — the shape below is the property that actually holds.
+  const multi = tools.filter((t) => t.ops.length > 1).map((t) => t.name);
+  assert.ok(multi.length > 0, "some tool covers multiple operations");
+  assert.ok(multi.includes("cancel_order"), "cancel_order covers two");
+  assert.ok(
+    tools.some((t) => t.ops.length === 0),
+    "some tool covers no operation",
+  );
 });

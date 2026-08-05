@@ -695,7 +695,9 @@ export const tools: ToolDef[] = [
         },
         limit: {
           type: "integer",
-          description: "Maximum number of funding records to return.",
+          description:
+            "Maximum number of funding records to return (max 1000, " +
+            "default 300).",
         },
       },
       ["market_id"],
@@ -703,7 +705,7 @@ export const tools: ToolDef[] = [
     zod: z
       .object({
         market_id: z.string().min(1),
-        limit: z.number().int().positive().optional(),
+        limit: z.number().int().positive().max(1000).optional(),
       })
       .strict(),
     requiresAuth: false,
@@ -1200,10 +1202,12 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
-        description: "Maximum number of records to return.",
+        description: "Maximum number of records to return (max 100).",
       },
     }),
-    zod: z.object({ limit: z.number().int().positive().optional() }).strict(),
+    zod: z
+      .object({ limit: z.number().int().positive().max(100).optional() })
+      .strict(),
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { limit?: number };
@@ -1272,7 +1276,8 @@ export const tools: ToolDef[] = [
         },
         limit: {
           type: "integer",
-          description: "Maximum number of records to return.",
+          description:
+            "Maximum number of records to return (max 1000, default 100).",
         },
       },
       ["address"],
@@ -1280,7 +1285,7 @@ export const tools: ToolDef[] = [
     zod: z
       .object({
         address: z.string().min(1),
-        limit: z.number().int().positive().optional(),
+        limit: z.number().int().positive().max(1000).optional(),
       })
       .strict(),
     requiresAuth: true,

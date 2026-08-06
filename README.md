@@ -330,7 +330,7 @@ origin for local development, so the prefix is a per-network value
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.2`**.
+Currently targets Exchange API spec **`v0.7.3`**.
 
 <!-- api-version-sync:end -->
 

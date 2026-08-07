@@ -101,6 +101,127 @@ type PortfolioWindow = (typeof PORTFOLIO_WINDOWS)[number];
 const MAX_PORTFOLIO_POINTS = 366;
 
 /**
+ * Per-endpoint `limit` maxima from spec v0.7.2. These are **not**
+ * interchangeable, so each tool validates against its own: a shared bound would
+ * either reject valid requests or forward out-of-schema ones.
+ *
+ * Note in particular that the `366` on `/account/portfolio-history`
+ * ({@link MAX_PORTFOLIO_POINTS}) is that endpoint's alone — it is not a
+ * fleet-wide list cap, and that endpoint is not cursor-paginated. Applying it
+ * here would sit *below* `/account/equity-history`'s own default of 720.
+ */
+const MAX_TRADES = 1000;
+const MAX_FILLS = 1000;
+const MAX_ORDER_HISTORY = 500;
+const MAX_CLOSED_POSITIONS = 200;
+const MAX_EQUITY_POINTS = 720;
+
+/**
+ * The `cursor` input advertised by the five cursor-paginated list tools
+ * (`get_trades`, `get_fills`, `get_order_history`, `get_closed_positions`,
+ * `get_equity_history`) — spec v0.7.2 (ENG-5506).
+ *
+ * The agent drives the loop: call once without `cursor`, then pass the previous
+ * response's `next_cursor` back here. Written for an agent reader, so it states
+ * the stop condition rather than assuming it: `next_cursor: null` means done.
+ */
+const CURSOR_INPUT = {
+  cursor: {
+    type: "string",
+    description:
+      "Opaque pagination cursor. Omit for the first page; to get the next " +
+      "page, pass back the `next_cursor` from the previous response verbatim. " +
+      "Stop when `next_cursor` is null — that means there are no more results. " +
+      "Never construct or edit a cursor: the format is not part of the " +
+      "contract.",
+  },
+} as const;
+
+const cursorArg = z.string().min(1).optional();
+
+/**
+ * Wording appended to every paginated tool's description, so an agent knows the
+ * result is an envelope rather than a bare array and knows when to stop.
+ */
+const PAGINATION_NOTE =
+  "Returns `{ items, next_cursor }`. `items` is this page of results; " +
+  "`next_cursor` is an opaque token for the next page, or null when this is " +
+  "the last page. To read the full history, keep calling with " +
+  "`cursor: <previous next_cursor>` until `next_cursor` is null. `limit` sets " +
+  "the size of ONE page, not a total.";
+
+/** The envelope every paginated list tool returns. */
+interface PagedResult {
+  items: unknown;
+  next_cursor: string | null;
+  /**
+   * Present only when paging had to be cut short — the upstream handed back the
+   * same cursor it was given, so it cannot advance. `next_cursor` is forced to
+   * null to break the agent's loop, and this field says the results are
+   * incomplete so a truncated history is not mistaken for a complete one.
+   */
+  pagination_error?: string;
+}
+
+/**
+ * `GET` one page of a cursor-paginated list endpoint and shape it for an agent.
+ *
+ * Three behaviours the agent depends on:
+ *
+ * 1. An absent `X-Next-Cursor` becomes `next_cursor: null` — the end of the
+ *    results, not an error.
+ * 2. An empty `items` array with a non-null `next_cursor` is passed through as
+ *    is: a sparse page is not the end, and the agent should keep going.
+ * 3. If the upstream returns the **same** cursor it was given, paging cannot
+ *    advance. Handing that back would put the agent in an infinite tool-call
+ *    loop, so `next_cursor` is forced to null and `pagination_error` explains
+ *    the truncation. A stateless tool cannot detect a longer cycle, so this
+ *    guards the case that actually occurs — a stuck upstream.
+ */
+async function fetchPage(
+  client: ExchangeClient,
+  requested: string | undefined,
+  opts: Parameters<ExchangeClient["requestPage"]>[0],
+): Promise<PagedResult> {
+  const { items, nextCursor } = await client.requestPage(opts);
+  const page = items ?? [];
+  if (
+    nextCursor !== null &&
+    requested !== undefined &&
+    nextCursor === requested
+  ) {
+    return {
+      items: page,
+      next_cursor: null,
+      pagination_error:
+        `The exchange returned the same pagination cursor it was given ` +
+        `(${nextCursor}), so paging cannot advance. Stopping here: these ` +
+        `results are INCOMPLETE, not the end of the history. Do not retry ` +
+        `with the same cursor.`,
+    };
+  }
+  return { items: page, next_cursor: nextCursor };
+}
+
+/**
+ * Build the query string for a paginated list tool: the caller's `limit` and
+ * `cursor`, each omitted when absent. Emitted in a fixed order so the signed
+ * canonical query and the sent query stay byte-identical.
+ */
+function pagedQuery(
+  args: { limit?: number; cursor?: string },
+  extra: Record<string, string | undefined> = {},
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(extra)) {
+    if (value !== undefined) params.set(key, value);
+  }
+  if (args.limit !== undefined) params.set("limit", String(args.limit));
+  if (args.cursor !== undefined) params.set("cursor", args.cursor);
+  return params.toString();
+}
+
+/**
  * Shared wording for every tool that returns `Position` objects (`get_balance`,
  * `get_positions`, `get_account_state`), describing the enriched per-position
  * risk fields added in spec v0.7.2 (ENG-6445).
@@ -602,8 +723,8 @@ export const tools: ToolDef[] = [
     name: "get_trades",
     ops: ["GET /api/v1/markets/{market_id}/trades"],
     description:
-      "Get recent public trades (prints) for one market. Public — no " +
-      "credentials needed.",
+      "Get recent public trades (prints) for one market, newest first. " +
+      `${PAGINATION_NOTE} Public — no credentials needed.`,
     inputSchema: jsonSchema(
       {
         market_id: {
@@ -612,25 +733,25 @@ export const tools: ToolDef[] = [
         },
         limit: {
           type: "integer",
-          description: "Maximum number of trades to return.",
+          description: `Maximum number of trades per page (max ${MAX_TRADES}).`,
         },
+        ...CURSOR_INPUT,
       },
       ["market_id"],
     ),
     zod: z
       .object({
         market_id: z.string().min(1),
-        limit: z.number().int().positive().optional(),
+        limit: z.number().int().positive().max(MAX_TRADES).optional(),
+        cursor: cursorArg,
       })
       .strict(),
     requiresAuth: false,
     handler: (client, args) => {
-      const a = args as { market_id: string; limit?: number };
-      const query =
-        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({
+      const a = args as { market_id: string; limit?: number; cursor?: string };
+      return fetchPage(client, a.cursor, {
         path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/trades`,
-        query,
+        query: pagedQuery(a),
       });
     },
   },
@@ -991,25 +1112,27 @@ export const tools: ToolDef[] = [
     description:
       "Get the authenticated account's equity time-series (5s cadence, ~1h " +
       "window), oldest first. For a longer window, or for PnL and volume " +
-      "series alongside equity, use `get_portfolio_history`. Requires API " +
-      "credentials.",
+      `series alongside equity, use \`get_portfolio_history\`. ${PAGINATION_NOTE} ` +
+      "Requires API credentials.",
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
-        description: "Maximum number of points to return (max 720).",
+        description: `Maximum number of points per page (max ${MAX_EQUITY_POINTS}).`,
       },
+      ...CURSOR_INPUT,
     }),
     zod: z
-      .object({ limit: z.number().int().positive().max(720).optional() })
+      .object({
+        limit: z.number().int().positive().max(MAX_EQUITY_POINTS).optional(),
+        cursor: cursorArg,
+      })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { limit?: number };
-      const query =
-        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({
+      const a = args as { limit?: number; cursor?: string };
+      return fetchPage(client, a.cursor, {
         path: "/api/v1/account/equity-history",
-        query,
+        query: pagedQuery(a),
         signed: true,
       });
     },
@@ -1031,24 +1154,26 @@ export const tools: ToolDef[] = [
     ops: ["GET /api/v1/positions/closed"],
     description:
       "Get the authenticated account's closed positions (realized PnL per " +
-      "position). Requires API credentials.",
+      `position). ${PAGINATION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
-        description: "Maximum number of records to return (max 200).",
+        description: `Maximum number of records per page (max ${MAX_CLOSED_POSITIONS}).`,
       },
+      ...CURSOR_INPUT,
     }),
     zod: z
-      .object({ limit: z.number().int().positive().max(200).optional() })
+      .object({
+        limit: z.number().int().positive().max(MAX_CLOSED_POSITIONS).optional(),
+        cursor: cursorArg,
+      })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { limit?: number };
-      const query =
-        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({
+      const a = args as { limit?: number; cursor?: string };
+      return fetchPage(client, a.cursor, {
         path: "/api/v1/positions/closed",
-        query,
+        query: pagedQuery(a),
         signed: true,
       });
     },
@@ -1112,24 +1237,27 @@ export const tools: ToolDef[] = [
     ops: ["GET /api/v1/orders/history"],
     description:
       "Get the authenticated account's terminal-status order history (filled / " +
-      "cancelled / rejected / expired), newest first. Requires API credentials.",
+      `cancelled / rejected / expired), newest first. ${PAGINATION_NOTE} ` +
+      "Requires API credentials.",
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
-        description: "Maximum number of records to return (max 500).",
+        description: `Maximum number of records per page (max ${MAX_ORDER_HISTORY}).`,
       },
+      ...CURSOR_INPUT,
     }),
     zod: z
-      .object({ limit: z.number().int().positive().max(500).optional() })
+      .object({
+        limit: z.number().int().positive().max(MAX_ORDER_HISTORY).optional(),
+        cursor: cursorArg,
+      })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { limit?: number };
-      const query =
-        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({
+      const a = args as { limit?: number; cursor?: string };
+      return fetchPage(client, a.cursor, {
         path: "/api/v1/orders/history",
-        query,
+        query: pagedQuery(a),
         signed: true,
       });
     },
@@ -1138,21 +1266,29 @@ export const tools: ToolDef[] = [
     name: "get_fills",
     ops: ["GET /api/v1/fills"],
     description:
-      "List the authenticated account's recent fills (executed trades). " +
-      "Requires API credentials.",
+      "List the authenticated account's fills (executed trades), newest first. " +
+      `${PAGINATION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({
       limit: {
         type: "integer",
-        description: "Maximum number of fills to return.",
+        description: `Maximum number of fills per page (max ${MAX_FILLS}).`,
       },
+      ...CURSOR_INPUT,
     }),
-    zod: z.object({ limit: z.number().int().positive().optional() }).strict(),
+    zod: z
+      .object({
+        limit: z.number().int().positive().max(MAX_FILLS).optional(),
+        cursor: cursorArg,
+      })
+      .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as { limit?: number };
-      const query =
-        a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
-      return client.request({ path: "/api/v1/fills", query, signed: true });
+      const a = args as { limit?: number; cursor?: string };
+      return fetchPage(client, a.cursor, {
+        path: "/api/v1/fills",
+        query: pagedQuery(a),
+        signed: true,
+      });
     },
   },
   {

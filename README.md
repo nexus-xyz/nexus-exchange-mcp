@@ -198,14 +198,9 @@ distinct operations to 68 while coverage stayed at 63. Unlike `cursor` below
 this is not blocked: the indexer serves these routes as of ENG-4624. Tracked as
 ENG-9636.
 
-One v0.7.2 addition is **not** exposed: the opaque `cursor` query parameter
-(ENG-5506) documented on `get_trades`, `get_fills`, `get_order_history`,
-`get_closed_positions`, and `get_equity_history` for keyset pagination. It adds
-no route, so the operation count above is unaffected. Two reasons it is not
-wired up: the spec is ahead of the indexer, which does not serve the
-`X-Next-Cursor` header yet, and consuming that header would mean wrapping those
-five tools' results in an envelope — an output-shape change to already-shipped
-tools. Tracked as ENG-7424, blocked on ENG-5506.
+The v0.7.2 `cursor` query parameter (ENG-5506) is now exposed on the five
+paginated list tools — see "Pagination" below. It adds no route, so the operation
+count above is unaffected.
 
 Two schema-only additions are likewise **not** exposed, neither of which affects
 the operation count. v0.7.3 documents the optional `max_slippage_bps` field on
@@ -221,6 +216,46 @@ Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and
 `get_health` / `get_readiness` tools — which called routes the pinned spec no
 longer documents — were **dropped** in favour of the surviving
 `get_service_status` (`/status`).
+
+### Pagination
+
+Five list tools are cursor-paginated (spec v0.7.2, ENG-5506):
+
+| Tool                   | Endpoint                             | `limit` max |
+| ---------------------- | ------------------------------------ | ----------- |
+| `get_trades`           | `GET /api/v1/markets/{id}/trades`    | 1000        |
+| `get_fills`            | `GET /api/v1/fills`                  | 1000        |
+| `get_order_history`    | `GET /api/v1/orders/history`         | 500         |
+| `get_closed_positions` | `GET /api/v1/positions/closed`       | 200         |
+| `get_equity_history`   | `GET /api/v1/account/equity-history` | 720         |
+
+Each returns an **envelope**, not a bare array:
+
+```json
+{ "items": [ … ], "next_cursor": "opaque-token" }
+```
+
+The agent drives the loop: call once with no `cursor`, then call again with
+`cursor: <previous next_cursor>`, and **stop when `next_cursor` is null**. Server
+state rides in the `X-Next-Cursor` response header, which the server sends only
+while more results exist — its absence is the documented end-of-results signal,
+not an error. An empty `items` array with a non-null `next_cursor` is _not_ the
+end either: a sparse page still has pages behind it.
+
+`limit` bounds **one page**, not the total, and is validated against that
+endpoint's own maximum (table above) before the request, so an out-of-schema
+value is never signed or forwarded. The maxima are not interchangeable — in
+particular `get_portfolio_history`'s `limit` cap of 366 is that endpoint's alone
+and it takes no `cursor` at all.
+
+If the upstream ever returns the _same_ cursor it was given, paging cannot
+advance. Handing that token back would put an agent in an unbounded tool-call
+loop, so the tool forces `next_cursor` to null and adds a `pagination_error`
+saying the results are incomplete — a stop, but explicitly not "end of history".
+
+These parameters were in the spec ahead of the indexer, which may not yet emit
+`X-Next-Cursor` (ENG-5506). That degrades safely: with no header every response
+is `next_cursor: null`, i.e. exactly the pre-pagination single-page behaviour.
 
 ### Authorization tiers
 

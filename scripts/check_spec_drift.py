@@ -293,8 +293,32 @@ _NAME_KEY_RE = re.compile(r"\bname\s*:")
 _OPS_KEY_RE = re.compile(r"\bops\s*:\s*\[")
 _PATH_KEY_RE = re.compile(r"\bpath\s*:")
 _METHOD_KEY_RE = re.compile(r"\bmethod\s*:")
-# `client.request(` with an optional type argument, e.g. `client.request<Foo>(`.
-_REQUEST_RE = re.compile(r"\bclient\s*\.\s*request\s*(?:<[^()]*>)?\s*\(")
+# The call shapes that issue an upstream request, and therefore attribute an
+# operation to the tool they sit in.
+#
+#   1. `client.request(` with an optional type argument, e.g. `client.request<Foo>(`.
+#   2. `fetchPage(client, <cursor>, {` — the paginating wrapper (ENG-7424).
+#
+# Why the wrapper is matched at its CALL SITES rather than at its delegate: the
+# body of `fetchPage` calls `client.requestPage(opts)`, forwarding an options
+# object it received as a parameter. Matching that would trip the
+# "no inline options object" failure below every time, because the literal is at
+# the call site, not in the wrapper. Matching `fetchPage(client,` puts the
+# scanner where the `path:` literal actually is, so the existing `path:`/`method:`
+# extraction works unchanged and the five paginated list tools attribute their
+# operations again.
+#
+# `\s*,` after `client` is what keeps the wrapper's own DEFINITION from matching:
+# there the first parameter reads `client: ExchangeClient,`, so the comma does not
+# immediately follow. A definition counted as a call site would break the
+# total-sites guard, since it sits outside every tool object.
+#
+# Note `client.requestPage(` does not match alternative 1 — `Page` intervenes
+# before the paren — which is deliberate. The only recognised way to reach it is
+# through the wrapper.
+_REQUEST_RE = re.compile(
+    r"\bclient\s*\.\s*request\s*(?:<[^()]*>)?\s*\(" r"|\bfetchPage\s*\(\s*client\s*,"
+)
 
 
 def _find_key_at_depth1(blanked, src, open_at, close_at, key_re):

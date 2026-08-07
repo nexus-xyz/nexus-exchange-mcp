@@ -83,7 +83,7 @@ export class ExchangeApiError extends Error {
 /**
  * A 2xx response whose body is neither empty nor JSON.
  *
- * Every one of the 89 documented 2xx responses in spec v0.7.2 is
+ * Every one of the 92 documented 2xx responses in spec v0.7.3 is
  * `application/json` (the other 7 operations return no content at all), so a
  * non-JSON success body means the request did not reach the Exchange API —
  * `NEXUS_EXCHANGE_API_URL` points at a web front-end, a captive portal, or a

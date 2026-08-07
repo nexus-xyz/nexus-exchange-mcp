@@ -99,7 +99,7 @@ single-target lookup is still unbuilt server-side.
 Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
 service exposes its own REST API and the indexer serves the exchange surface
 directly under `/api/v1` at the host root. This server calls those routes for
-the v0.7.2 operations it exposes as tools (see
+the v0.7.3 operations it exposes as tools (see
 [API-surface coverage](#api-surface-coverage) below).
 
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
@@ -130,14 +130,14 @@ the v0.7.2 operations it exposes as tools (see
 ### API-surface coverage
 
 **66 registered tools** covering **63 spec operations** of Exchange API spec
-**v0.7.2**. Those are two different numbers and neither substitutes for the
+**v0.7.3**. Those are two different numbers and neither substitutes for the
 other: one tool can call several operations (`cancel_order` calls two) and one
 calls none. The operation count is the figure comparable with the rs / py / cli
 SDK manifests; the tool count is MCP's own axis and must never be reported as a
 coverage figure. [`docs/coverage-unit.md`](./docs/coverage-unit.md) records that
 decision and how it is enforced.
 
-63 of the **65** distinct operations, or 63 of the **98** the spec literally
+63 of the **68** distinct operations, or 63 of the **101** the spec literally
 documents — the spec lists most operations twice, once on the legacy gateway
 route and once on its `/api/v1` alias, and each aliased pair is one tool.
 
@@ -149,8 +149,9 @@ verified against the pinned spec on every PR by `scripts/check_spec_drift.py`
 The pin bump (ENG-6038) was pin-only — it advanced `.api-version` v0.6.2 →
 v0.7.1 without mapping the surface those releases had added. ENG-6136 then
 exposed those additions as tools, and ENG-6461 advanced the pin to v0.7.2
-together with the portfolio-parity surface it added (the spec version each
-addition shipped in is noted):
+together with the portfolio-parity surface it added. ENG-9342 then advanced it
+to v0.7.3, pin-only again — the surface that release added is the gap ENG-9636
+tracks. Below, the spec version each addition shipped in is noted:
 
 - **Portfolio parity** (v0.7.2) — `get_portfolio_history`
   (`GET /api/v1/account/portfolio-history`: equity + PnL + volume series over a
@@ -180,15 +181,35 @@ addition shipped in is noted):
   order endpoint, so they change no route count — which is why the pin bump's
   operation-count metric never surfaced the gap.
 
-The remaining 2-operation gap is the WebSocket **upgrade** endpoints `GET /ws`
-and `GET /stream`, unmapped by design: a request/response MCP tool cannot hold a
-streaming socket open, so the server instead mints the auth token
-(`get_ws_token` / `get_ws_token_legacy`) the caller uses to connect to them
-directly.
+The remaining 5-operation gap has two distinct causes, and they should not be
+read as one number.
+
+**Two are unmapped by design** — the WebSocket **upgrade** endpoints `GET /ws`
+and `GET /stream`: a request/response MCP tool cannot hold a streaming socket
+open, so the server instead mints the auth token (`get_ws_token` /
+`get_ws_token_legacy`) the caller uses to connect to them directly.
+
+**Three are not yet mapped** — the registered-withdrawal-wallet routes v0.7.3
+added (ENG-8902): `POST /api/v1/bridge/wallets/challenge`,
+`POST /api/v1/bridge/wallets`, and `GET /api/v1/bridge/wallets`. These are
+`/api/v1`-native with no legacy alias, so unlike a schema-only addition they
+raise the denominator — the v0.7.2 → v0.7.3 pin bump (ENG-9342) moved it from 65
+distinct operations to 68 while coverage stayed at 63. Unlike `cursor` below
+this is not blocked: the indexer serves these routes as of ENG-4624. Tracked as
+ENG-9636.
 
 The v0.7.2 `cursor` query parameter (ENG-5506) is now exposed on the five
 paginated list tools — see "Pagination" below. It adds no route, so the operation
 count above is unaffected.
+
+Two schema-only additions are likewise **not** exposed, neither of which affects
+the operation count. v0.7.3 documents the optional `max_slippage_bps` field on
+`place_order`, `place_orders_batch`, and `preview_order` (ENG-7550) — note the
+engine has always accepted and enforced it (the fill VWAP is bounded against the
+mid captured at submission, and the remainder cancels when the cap would be
+crossed); v0.7.3 puts it on the public contract rather than introducing it, so
+this is exposure work, not a new capability. Tracked with the bridge-wallet
+routes as ENG-9636.
 
 Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and
 `/ready` routes from the public contract (only `/status` remains), so the former
@@ -365,7 +386,7 @@ origin for local development, so the prefix is a per-network value
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.2`**.
+Currently targets Exchange API spec **`v0.7.3`**.
 
 <!-- api-version-sync:end -->
 
@@ -412,7 +433,7 @@ Adding a tool without declaring what it calls is a type error, so the mapping
 cannot be skipped. See [`docs/coverage-unit.md`](./docs/coverage-unit.md).
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
-header (e.g. `X-Nexus-Api-Version: v0.7.2`), alongside a normalized
+header (e.g. `X-Nexus-Api-Version: v0.7.3`), alongside a normalized
 `User-Agent: nexus-exchange-mcp/<version>`, so the exchange edge can attribute
 and segment usage by client and by the contract version this server targets.
 The header value is the server's own compiled-against tag — it is baked in at

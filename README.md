@@ -194,16 +194,15 @@ added (ENG-8902): `POST /api/v1/bridge/wallets/challenge`,
 `POST /api/v1/bridge/wallets`, and `GET /api/v1/bridge/wallets`. These are
 `/api/v1`-native with no legacy alias, so unlike a schema-only addition they
 raise the denominator — the v0.7.2 → v0.7.3 pin bump (ENG-9342) moved it from 65
-distinct operations to 68 while coverage stayed at 63. Unlike `cursor` below
-this is not blocked: the indexer serves these routes as of ENG-4624. Tracked as
-ENG-9636.
+distinct operations to 68 while coverage stayed at 63. This is not blocked —
+the indexer serves these routes as of ENG-4624. Tracked as ENG-9636.
 
 The v0.7.2 `cursor` query parameter (ENG-5506) is now exposed on the five
 paginated list tools — see "Pagination" below. It adds no route, so the operation
 count above is unaffected.
 
-Two schema-only additions are likewise **not** exposed, neither of which affects
-the operation count. v0.7.3 documents the optional `max_slippage_bps` field on
+One schema-only addition is **not** exposed, and it does not affect the
+operation count. v0.7.3 documents the optional `max_slippage_bps` field on
 `place_order`, `place_orders_batch`, and `preview_order` (ENG-7550) — note the
 engine has always accepted and enforced it (the fill VWAP is bounded against the
 mid captured at submission, and the remainder cancels when the cap would be

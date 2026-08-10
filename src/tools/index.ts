@@ -269,6 +269,32 @@ const positiveDecimal = (field: string) =>
     });
 
 /**
+ * A 0x-prefixed 20-byte EVM address, as `invalid_address` on the bridge routes
+ * defines it. Case-insensitive on purpose: EIP-55 mixed-case checksumming is a
+ * *validity* signal, not a *format* requirement, so enforcing a checksum here
+ * would reject the all-lowercase addresses the spec's own examples and most
+ * tooling emit. Shape only — proof of control is the signature, not the string.
+ */
+const EVM_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * A 0x-prefixed 65-byte `personal_sign` signature (r ‖ s ‖ v = 130 hex chars).
+ *
+ * Checked client-side so a malformed signature is named as such instead of
+ * coming back as an opaque upstream `signature_mismatch`, which reads like "the
+ * wrong wallet signed" and sends an agent debugging the wrong thing.
+ */
+const EIP191_SIGNATURE_RE = /^0x[0-9a-fA-F]{130}$/;
+
+const evmAddress = (field: string) =>
+  z
+    .string()
+    .regex(
+      EVM_ADDRESS_RE,
+      `${field} must be a 0x-prefixed 20-byte hex EVM address`,
+    );
+
+/**
  * Friendly order args accepted by `place_order` / `place_orders_batch` /
  * `preview_order`.
  */
@@ -2089,6 +2115,185 @@ export const tools: ToolDef[] = [
         signed: true,
       });
     },
+  },
+
+  // ── Bridge: registered withdrawal wallets (spec v0.7.3) ───────────────────
+  //
+  // A two-step, stateless ownership proof (ENG-8902):
+  //
+  //   1. `create_bridge_wallet_challenge` returns an opaque `message` binding
+  //      the authenticated account, the address, and an expiry.
+  //   2. The wallet signs that message with EIP-191 `personal_sign` OUTSIDE
+  //      this server — it never holds a wallet key and cannot sign for you.
+  //   3. `register_bridge_wallet` echoes the message back VERBATIM with the
+  //      signature; the server re-derives the signed bytes, re-checks its own
+  //      integrity tag, the account binding and the expiry, then ecrecovers.
+  //
+  // Two properties the tool descriptions below have to carry, because getting
+  // either wrong is a correctness bug in the caller rather than a server error:
+  //
+  //   * The challenge is NOT a nonce. It stays valid until `expires_at` and the
+  //     same signature can be replayed inside that window. That is safe only
+  //     because the account is bound into the message, so a replay can do
+  //     nothing but re-register the same address for the same account. Nothing
+  //     may treat the challenge as single-use.
+  //   * `message` is server-defined and opaque. We forward it byte-for-byte and
+  //     deliberately do not parse, trim, or re-encode it: the integrity tag is
+  //     computed over those exact bytes, so any normalization we did "helpfully"
+  //     would invalidate a correct signature.
+  {
+    name: "create_bridge_wallet_challenge",
+    ops: ["POST /api/v1/bridge/wallets/challenge"],
+    description:
+      "Step 1 of registering a withdrawal wallet: get the message to sign. " +
+      "Returns `{ address, nonce, message, expires_at }`. Sign `message` " +
+      "EXACTLY as returned, using EIP-191 `personal_sign` with the key for " +
+      "`address` — this server holds no wallet key and cannot sign for you — " +
+      "then pass the message and signature to `register_bridge_wallet`. Treat " +
+      "`message` as opaque: do not reformat, re-encode, or trim it, and do not " +
+      "sign `nonce` (it is informational and carried inside the message). The " +
+      "challenge is NOT single-use: it stays valid until `expires_at`, which " +
+      "is safe because the account is bound into it. A 503 " +
+      "`wallet_registration_unavailable` means this deployment has no " +
+      "challenge key configured, so registration is off — retrying will not " +
+      "help. Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        address: {
+          type: "string",
+          description:
+            "0x-prefixed 20-byte EVM address to register as the withdrawal " +
+            "wallet.",
+        },
+      },
+      ["address"],
+    ),
+    zod: z.object({ address: evmAddress("address") }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { address } = args as { address: string };
+      return client.request({
+        method: "POST",
+        path: "/api/v1/bridge/wallets/challenge",
+        body: { address },
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "register_bridge_wallet",
+    ops: ["POST /api/v1/bridge/wallets"],
+    description:
+      "Step 2 of registering a withdrawal wallet: submit the signed challenge. " +
+      "IRREVERSIBLE AND HIGH-CONSEQUENCE — this sets where the account's " +
+      "withdrawals are paid. An account holds ONE wallet in this cut and " +
+      "replacement is NOT supported: once an address is registered, " +
+      "registering a different one is rejected with 409 " +
+      "`wallet_already_registered` rather than updating it. Confirm the " +
+      "address with the user before calling, and pass `confirm: true`. " +
+      "Registering an address the user does not control permanently " +
+      "misdirects their withdrawals. " +
+      "`message` must be the `message` from `create_bridge_wallet_challenge` " +
+      "echoed back BYTE-FOR-BYTE — the server re-derives the signed bytes from " +
+      "it, so any edit, re-encoding, or trimming invalidates a correct " +
+      "signature. Idempotent for the SAME address: re-registering it returns " +
+      "the existing record. Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        address: {
+          type: "string",
+          description:
+            "0x-prefixed 20-byte EVM address being registered. Must be the " +
+            "address the signature recovers to, and the one the challenge was " +
+            "issued for.",
+        },
+        message: {
+          type: "string",
+          description:
+            "The `message` from `create_bridge_wallet_challenge`, verbatim. " +
+            "Do not modify it in any way.",
+        },
+        signature: {
+          type: "string",
+          description:
+            "0x-prefixed 65-byte EIP-191 `personal_sign` signature over " +
+            "`message`, produced by the wallet key outside this server.",
+        },
+        confirm: {
+          type: "boolean",
+          description:
+            "Must be true to actually register. Guards an irreversible choice " +
+            "of withdrawal destination against a typo or a hallucinated " +
+            "address.",
+        },
+      },
+      ["address", "message", "signature"],
+    ),
+    zod: z
+      .object({
+        address: evmAddress("address"),
+        // NOT trimmed and NOT length-bounded beyond non-empty, on purpose: the
+        // server verifies an integrity tag over these exact bytes. `.trim()`
+        // here would silently break a valid signature whose message happens to
+        // end in a newline.
+        message: z.string().min(1),
+        signature: z
+          .string()
+          .regex(
+            EIP191_SIGNATURE_RE,
+            "signature must be a 0x-prefixed 65-byte hex EIP-191 signature",
+          ),
+        confirm: z.boolean().optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as {
+        address: string;
+        message: string;
+        signature: string;
+        confirm?: boolean;
+      };
+      if (!a.confirm) {
+        throw new Error(
+          `Refusing to register: pass \`confirm: true\` to set ${a.address} as ` +
+            `the account's withdrawal wallet. This cannot be undone — an ` +
+            `account holds one registered wallet and replacing it is not ` +
+            `supported.`,
+        );
+      }
+      return client.request({
+        method: "POST",
+        path: "/api/v1/bridge/wallets",
+        // Forwarded exactly as received. In particular `message` is passed
+        // through untouched — see the section note above.
+        body: {
+          address: a.address,
+          message: a.message,
+          signature: a.signature,
+        },
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "list_bridge_wallets",
+    ops: ["GET /api/v1/bridge/wallets"],
+    description:
+      "List the authenticated account's registered withdrawal wallets, as " +
+      "`{ wallets: [...] }`. Wallets are not chain-scoped — one EVM address is " +
+      "valid on every supported EVM chain, and the chain is chosen per " +
+      "withdrawal. Call this before `register_bridge_wallet` to check whether " +
+      "the account already has a wallet, since registering a different one is " +
+      "rejected rather than applied. Note that `verified` and `is_default` are " +
+      "always true in this cut (an unproven wallet is never stored, and an " +
+      "account holds at most one), so do not branch on them. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/api/v1/bridge/wallets", signed: true }),
   },
 
   // ── Agent-key management (requires credentials) ───────────────────────────

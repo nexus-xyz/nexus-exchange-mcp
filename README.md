@@ -310,8 +310,12 @@ credentials — never commit real secrets.
 
 | Variable                            | Required                | Purpose                                                                                                                                                                                                                                                      |
 | ----------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, or `mainnet`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                                    |
+| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, `mainnet`, or `custom`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                          |
 | `NEXUS_EXCHANGE_API_URL`            | No                      | Explicit host-root override (serves `/api/v1`); wins over `NEXUS_EXCHANGE_NETWORK`. Use it for a staging/beta deployment or a private indexer. Defaults to the selected network's host. A legacy value ending in `/api/exchange` is accepted and normalized. |
+| `NEXUS_EXCHANGE_NETWORK_LABEL`      | With `custom`           | Name for a custom stage. Restricted to `[A-Za-z0-9._-]`, max 64 — the Nexus clients namespace stored credentials by it. See [A custom stage](#a-custom-stage).                                                                                               |
+| `NEXUS_EXCHANGE_FUNDS`              | With `custom`           | Whose money is behind the URL: `real`, `play` or `unknown`. **No default.** Until it is declared, the tools that cannot be undone refuse to run.                                                                                                             |
+| `NEXUS_EXCHANGE_FAUCET`             | No                      | Set to `1` if a custom stage has a faucet. Separate from funds and absent until declared: `claim_faucet` / `claim_credit` need play funds **and** a faucet.                                                                                                  |
+| `NEXUS_EXCHANGE_GATEWAY_PATH`       | No                      | Where a custom stage serves the legacy routes: `/api/exchange` (default) or `/` for a bare indexer serving them at its root.                                                                                                                                 |
 | `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                               |
 | `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                           |
 | `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                      |
@@ -321,15 +325,17 @@ credentials — never commit real secrets.
 ## Networks
 
 The target is chosen on a **network** axis — whose money is behind it — not a
-release channel. `NEXUS_EXCHANGE_NETWORK` takes `testnet`, `mainnet` or `local`;
-the map lives in one place, [`src/networks.ts`](./src/networks.ts), copied from
-the spec's `x-nexus-networks` extension.
+release channel. `NEXUS_EXCHANGE_NETWORK` takes `testnet`, `mainnet`, `local` or
+`custom`; the map for the three named networks lives in one place,
+[`src/networks.ts`](./src/networks.ts), copied from the spec's
+`x-nexus-networks` extension.
 
-| Network   | Funds                    | Faucet | Target today                                     |
-| --------- | ------------------------ | ------ | ------------------------------------------------ |
-| `testnet` | Play (synthetic USDX)    | Yes    | `https://exchange.nexus.xyz` — **the default**   |
-| `local`   | Play (whatever you hold) | Yes    | `http://localhost:9090`                          |
-| `mainnet` | **Real money**           | No     | No reachable host yet — selecting it is an error |
+| Network   | Funds                    | Faucet         | Target today                                               |
+| --------- | ------------------------ | -------------- | ---------------------------------------------------------- |
+| `testnet` | Play (synthetic USDX)    | Yes            | `https://exchange.nexus.xyz` — **the default**             |
+| `local`   | Play (whatever you hold) | Yes            | `http://localhost:9090`                                    |
+| `mainnet` | **Real money**           | No             | No reachable host yet — selecting it is an error           |
+| `custom`  | You declare it           | You declare it | The URL you supply — see [A custom stage](#a-custom-stage) |
 
 **Nothing changes if you set nothing.** The default resolves to exactly the host
 this server has always used.
@@ -354,6 +360,60 @@ Three rules this implements, all from the spec extension:
   registrations are minted per network and are invalid on any other. Switching
   network means switching credentials; never carry a signature or a nonce across.
 
+### A custom stage
+
+A deployment that is not one of the three networks — a private stage, a sandbox,
+an indexer on your own machine — is a **custom target**: it carries the same
+descriptor a named network does (label, host, funds, faucet, gateway shape), and
+this package ships no hostname for any of them. You supply it.
+
+```bash
+NEXUS_EXCHANGE_NETWORK=custom
+NEXUS_EXCHANGE_API_URL=https://exchange.example.com   # the stage's host root
+NEXUS_EXCHANGE_NETWORK_LABEL=dev                      # a name for it
+NEXUS_EXCHANGE_FUNDS=play                             # real | play | unknown
+NEXUS_EXCHANGE_FAUCET=1                               # only if it has one
+NEXUS_EXCHANGE_GATEWAY_PATH=/                         # bare indexer; omit for /api/exchange
+```
+
+Four rules, and they are the same four in every Nexus client:
+
+- **`custom` carries the whole bundle, not just a URL.** A URL alone is what
+  makes a client report play-funds guardrails while pointed at a real-funds host.
+- **Funds are caller-declared, tri-state, and have no default.** `real`, `play`,
+  or `unknown`. A staging deployment of mainnet is real-funds-shaped, so
+  defaulting to `play` would make every guardrail lie in the direction that costs
+  money, and defaulting to `real` would make a dev stage unusable.
+- **A faucet is separate from funds, and absent until declared.** "Not real
+  money" does not imply "has a faucet".
+- **The label is restricted to `[A-Za-z0-9._-]` (max 64).** Across the clients it
+  is the key stored credentials are namespaced under, so a label that can name a
+  path (`../other`, `one/two`) or normalize onto another label is refused.
+
+`custom` is client-side only. It is not a value the API accepts and it does not
+appear in the spec's `x-nexus-networks`.
+
+### Undeclared funds refuse the tools that cannot be undone
+
+`NEXUS_EXCHANGE_API_URL` on its own still works exactly as it always has — same
+URLs, no bundle required — and it resolves to a custom target whose funds are
+**undeclared**. That is not the same as play funds, so these tools refuse rather
+than proceed on an assumption:
+
+| Tools                                                                                                                                                 | Need                                |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| `place_order`, `place_orders_batch`, `amend_order`, `deposit_collateral`, `submit_deposit`, `adjust_isolated_margin`, `create_bridge_deposit_address` | funds declared `real` **or** `play` |
+| `claim_faucet`, `claim_credit`                                                                                                                        | funds `play` **and** a faucet       |
+
+Everything else is unaffected: every read, `preview_order`, and — deliberately —
+`cancel_order`. Blocking a cancel would trap a caller holding open risk, which is
+the opposite of a guardrail.
+
+To lift the refusal, say what the target is: select a named network with
+`NEXUS_EXCHANGE_NETWORK`, or describe the stage with the bundle above. Declaring
+`real` is a legitimate answer and unlocks the irreversible tools — the guard asks
+that somebody know, not that the money be play.
+
 ### Release channels are a URL, not a network
 
 `beta` / `staging` are deployments of testnet, not a third pool of money, so they
@@ -361,7 +421,12 @@ are no longer enum values. Point `NEXUS_EXCHANGE_API_URL` at them instead — it
 overrides the network map and is validated (http(s) only, no embedded
 `user:password@`, no query or fragment, since the base is concatenated with a
 request path). Plaintext `http` to a non-loopback host warns on stderr: HMAC over
-http exposes the key id and signature in transit.
+http exposes the key id and signature in transit — a private stage on plain http
+is exactly what that warning is for.
+
+A bare URL leaves the funds undeclared, which is why it is a `custom` target with
+no bundle rather than a mechanism of its own; describe the stage to lift the
+refusals. Both are documented in [A custom stage](#a-custom-stage).
 
 ### WebSocket targets
 

@@ -41,6 +41,7 @@ the full block you'd end up with):
       "command": "node",
       "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
       "env": {
+        "NEXUS_EXCHANGE_NETWORK": "local",
         "NEXUS_EXCHANGE_API_URL": "http://localhost:9090",
         "NEXUS_EXCHANGE_API_KEY": "nx_your_key_id",
         "NEXUS_EXCHANGE_API_SECRET": "your_hex_secret"
@@ -52,6 +53,10 @@ the full block you'd end up with):
 
 Two things to know:
 
+- `NEXUS_EXCHANGE_NETWORK` names the network that URL belongs to. Without it the
+  target has not declared whose money is behind it, and the tools that cannot be
+  undone refuse to run (top-level README, "Undeclared funds"). It also tells the
+  server that a local indexer serves the legacy routes at its root.
 - `NEXUS_EXCHANGE_API_URL` must point at a **direct** indexer gateway that
   verifies client HMAC. The public production host proxies authenticated
   requests under the site's own key, so per-caller credentials are not honored

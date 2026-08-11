@@ -18,6 +18,21 @@ import {
   deriveBases,
   loadConfig,
 } from "../src/config.js";
+import { defineTarget } from "../src/networks.js";
+
+/**
+ * A target with DECLARED play funds and a faucet, for the tests that exercise a
+ * funds-guarded tool's happy path (ENG-9828). Absent a target the guard reads
+ * funds as undeclared and refuses, which is the point of it.
+ */
+const PLAY_TARGET = defineTarget({
+  id: "local",
+  label: "Local",
+  funds: "play",
+  faucet: true,
+  restBase: "http://example.test",
+  gatewayPath: "",
+});
 
 /**
  * Reference HMAC implementation that mirrors the indexer's verify_hmac
@@ -187,6 +202,7 @@ test("place_order maps friendly args to the engine wire shape", async () => {
     gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
+    target: PLAY_TARGET,
   });
 
   let body: any;
@@ -396,6 +412,7 @@ async function captureCalls(
     gatewayBaseUrl: "http://example.test",
     apiKey: "nx_test",
     apiSecret: "00",
+    target: PLAY_TARGET,
   });
   const calls: Array<{ url: string; method: string; body?: any }> = [];
   const realFetch = globalThis.fetch;

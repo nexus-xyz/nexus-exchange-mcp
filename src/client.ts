@@ -20,6 +20,11 @@ import {
   hasSessionToken,
   type ExchangeConfig,
 } from "./config.js";
+import {
+  CUSTOM_TARGET_ID,
+  type DeclaredFunds,
+  type ResolvedTarget,
+} from "./networks.js";
 
 /**
  * Header carrying the compiled-against Exchange API spec tag (see
@@ -139,6 +144,52 @@ export class MissingAdminSecretError extends Error {
 }
 
 /**
+ * Name the configured target in a guard message, without naming its host.
+ *
+ * The label is deliberately the only caller-supplied part: it is validated to
+ * `[A-Za-z0-9._-]` (see `validateTargetLabel`), so no control character can
+ * reach a log line through here, and the base URL of a private stage stays out
+ * of an agent-visible error.
+ */
+function describeTarget(target: ResolvedTarget | undefined): string {
+  if (!target) return "no target configured";
+  return target.id === CUSTOM_TARGET_ID
+    ? `custom target "${target.label}"`
+    : `network ${target.id}`;
+}
+
+/**
+ * What a tool needs to know about the target's funds before it will run. Declared
+ * per tool as `ToolDef.fundsGuard`; enforced by
+ * {@link ExchangeClient.assertFundsAllow}.
+ *
+ * - `"declared-funds"` — the target must say whether its money is real or play.
+ *   For tools whose effect cannot be undone: an order that fills, collateral or
+ *   margin that moves, an on-chain deposit address that funds get sent to.
+ * - `"play-funds"` — the target must be play funds AND have a faucet. For the
+ *   synthetic-funding tools, which exist only where the money is synthetic.
+ */
+export type FundsRequirement = "declared-funds" | "play-funds";
+
+/**
+ * A tool refused because of what the configured target says (or fails to say)
+ * about its funds.
+ *
+ * Not an upstream error and not a missing credential: the request was never
+ * made. The message names the environment variables that would make the call
+ * possible, because "declare your funds" is only actionable if it says how.
+ */
+export class FundsGuardError extends Error {
+  constructor(
+    public readonly tool: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "FundsGuardError";
+  }
+}
+
+/**
  * How a request authenticates:
  * - `"hmac"`   — per-account HMAC (x-api-key/x-timestamp/x-signature).
  * - `"bearer"` — session token from /auth/login (Authorization: Bearer …),
@@ -234,6 +285,65 @@ export class ExchangeClient {
   /** Where a legacy `/stream` token is meant to be used (`${wsUrl}/stream`). */
   wsMarketDataUrl(): string | undefined {
     return this.cfg.wsMarketDataUrl;
+  }
+
+  /**
+   * The resolved target, or `undefined` on a config built without one (tests,
+   * embedders). Callers that decide anything must go through
+   * {@link assertFundsAllow} rather than reading `funds` themselves, so the
+   * fail-closed reading of an absent target lives in exactly one place.
+   */
+  target(): ResolvedTarget | undefined {
+    return this.cfg.target;
+  }
+
+  /**
+   * Refuse a tool whose safety depends on whose money is behind the configured
+   * target. Throws {@link FundsGuardError}; returns silently when allowed.
+   *
+   * The tri-state is matched **positively** — `=== "play"`, never `!== "real"`
+   * (parent ENG-9823, resolved question 3). Negating `real` lets an undeclared
+   * target fall through as though it were safe, which is the one direction that
+   * costs money; matching `play` makes `unknown` fail closed for free. For the
+   * same reason an absent target is read as undeclared rather than skipped.
+   *
+   * This is why `funds` stopped being a label. A custom stage that never said
+   * whose money it holds is precisely where an irreversible action must not
+   * proceed on an assumption — so it does not.
+   */
+  assertFundsAllow(need: FundsRequirement, tool: string): void {
+    const target = this.cfg.target;
+    const funds: DeclaredFunds = target?.funds ?? "unknown";
+
+    if (need === "play-funds") {
+      if (funds === "play" && target?.faucet === true) return;
+      throw new FundsGuardError(
+        tool,
+        `Tool "${tool}" funds an account with synthetic money, which only exists ` +
+          `on a play-funds target with a faucet. This target ` +
+          `(${describeTarget(target)}) ${
+            funds === "play"
+              ? "is play funds but declares no faucet. On a custom stage, set " +
+                "NEXUS_EXCHANGE_FAUCET=1 if it has one."
+              : `reports funds "${funds}". Refusing rather than sending a funding ` +
+                `request at a host that may hold real money.`
+          }`,
+      );
+    }
+
+    // "declared-funds": real or play both proceed — the point is that somebody
+    // said which, so the caller knows what an irreversible action would move.
+    if (funds !== "unknown") return;
+    throw new FundsGuardError(
+      tool,
+      `Tool "${tool}" cannot be undone once it runs, and this target ` +
+        `(${describeTarget(target)}) has not declared whose money is behind it. ` +
+        `Refusing rather than assuming play funds. Either select a named network ` +
+        `with NEXUS_EXCHANGE_NETWORK (testnet | mainnet | local), or describe the ` +
+        `stage: NEXUS_EXCHANGE_NETWORK=custom with NEXUS_EXCHANGE_NETWORK_LABEL ` +
+        `and NEXUS_EXCHANGE_FUNDS=real|play. Read-only tools are unaffected, and ` +
+        `so is cancelling an order.`,
+    );
   }
 
   private sign(

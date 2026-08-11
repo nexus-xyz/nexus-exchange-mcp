@@ -6,21 +6,29 @@
  * require an API key + secret.
  *
  * The target is chosen on the **network axis** (`NEXUS_EXCHANGE_NETWORK` —
- * testnet / mainnet / local, see `networks.ts`), with `NEXUS_EXCHANGE_API_URL`
- * as an explicit override for anything off the map (a staging or beta
- * deployment, a private indexer). Nothing here is cached or shared: `loadConfig`
- * is a pure function of its `env` argument and returns a frozen object, so the
- * hosted server can build a fresh per-request config (see
- * `configForRequest` in http.ts) with no cross-session state to race over.
+ * testnet / mainnet / local, see `networks.ts`) or is the client-side `custom`
+ * target, which carries a caller-supplied bundle describing a private stage
+ * (ENG-9828). `NEXUS_EXCHANGE_API_URL` on its own is sugar over `custom` that
+ * supplies only the URL, leaving funds undeclared. Either way the result is one
+ * frozen {@link ResolvedTarget}, built once by `resolveTarget` and read by every
+ * guard, so there is no configuration mechanism with its own semantics.
+ *
+ * Nothing here is cached or shared: `loadConfig` is a pure function of its `env`
+ * argument and returns a frozen object, so the hosted server can build a fresh
+ * per-request config (see `configForRequest` in http.ts) with no cross-session
+ * state to race over.
  */
 
 import {
+  CUSTOM_TARGET_ID,
   DEFAULT_NETWORK,
+  defineTarget,
   NETWORKS,
   resolveNetworkId,
   unreachableNetworkMessage,
-  type Funds,
-  type NetworkId,
+  validateTargetLabel,
+  type DeclaredFunds,
+  type ResolvedTarget,
 } from "./networks.js";
 
 export interface ExchangeConfig {
@@ -82,23 +90,20 @@ export interface ExchangeConfig {
    */
   userAgent?: string;
   /**
-   * Which network this config targets, or `"custom"` when
-   * `NEXUS_EXCHANGE_API_URL` points somewhere off the map (a staging deployment,
-   * a private indexer). Informational — it labels the target, it does not route.
+   * The resolved target: which deployment this config points at, whose money is
+   * behind it, and whether it has a faucet. Built once by `loadConfig` and
+   * frozen — see {@link ResolvedTarget}.
    *
-   * Optional so a partially-constructed config (tests, embedders) stays valid;
-   * `loadConfig` always sets it.
-   */
-  network?: NetworkId | "custom";
-  /**
-   * Whether balances on the selected target are real money or synthetic play
-   * money, or `"unknown"` for a custom URL that names no network.
+   * This replaces the separate `network` / `funds` fields, which were widened
+   * union types assembled inline here (`NetworkId | "custom"`, `Funds |
+   * "unknown"`). Read `target.id` and `target.funds` instead.
    *
-   * `"unknown"` is deliberately not the same as `"play"`: the spec's rule is
-   * that anything unrecognized is treated as real funds, so this must never be
-   * read as "safe to experiment on".
+   * Optional so a partially-constructed config (tests, embedders) stays valid,
+   * and its ABSENCE fails closed: a config with no target has undeclared funds,
+   * so the guarded tools refuse rather than assuming play money. `loadConfig`
+   * always sets it.
    */
-  funds?: Funds | "unknown";
+  target?: ResolvedTarget;
   /**
    * WebSocket origin for this target, scheme-swapped from
    * {@link ExchangeConfig.gatewayBaseUrl} — `/ws`, `/stream`, `/ws/token` and
@@ -262,46 +267,208 @@ function warnIfPlaintext(baseUrl: string): void {
   );
 }
 
-export function loadConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): ExchangeConfig {
-  const override = (env.NEXUS_EXCHANGE_API_URL ?? "").trim();
-  const rawNetwork = (env.NEXUS_EXCHANGE_NETWORK ?? "").trim();
+/**
+ * Every environment variable that carries part of a custom bundle. Read ONLY
+ * when `NEXUS_EXCHANGE_NETWORK=custom`; setting one otherwise is an error rather
+ * than a silent no-op (see {@link resolveTarget}).
+ */
+const CUSTOM_BUNDLE_VARS = [
+  "NEXUS_EXCHANGE_NETWORK_LABEL",
+  "NEXUS_EXCHANGE_FUNDS",
+  "NEXUS_EXCHANGE_FAUCET",
+  "NEXUS_EXCHANGE_GATEWAY_PATH",
+] as const;
+
+/**
+ * Accepted `NEXUS_EXCHANGE_FUNDS` values, as an array so the lookup is an
+ * allowlist membership test rather than an object index — the same reason
+ * {@link NETWORK_IDS} is an array, and the reason
+ * `NEXUS_EXCHANGE_FUNDS=__proto__` cannot produce a truthy non-answer.
+ */
+const DECLARED_FUNDS_VALUES: readonly DeclaredFunds[] = [
+  "real",
+  "play",
+  "unknown",
+];
+
+/** Read an env var, treating set-but-blank as unset (a shell exports `X=` as ""). */
+function readVar(env: NodeJS.ProcessEnv, name: string): string {
+  return (env[name] ?? "").trim();
+}
+
+/**
+ * Parse `NEXUS_EXCHANGE_FUNDS`. Required for a custom bundle and has no default:
+ * a staging deployment of mainnet is real-funds-shaped, so defaulting to `play`
+ * would make every guard lie in exactly the direction that costs money, and
+ * defaulting to `real` would make a dev stage unusable. `unknown` is accepted as
+ * an explicit, honest answer — it just keeps the guards closed.
+ */
+function resolveDeclaredFunds(raw: string): DeclaredFunds {
+  const value = raw.toLowerCase();
+  if (!DECLARED_FUNDS_VALUES.includes(value as DeclaredFunds)) {
+    throw new Error(
+      `NEXUS_EXCHANGE_FUNDS must be one of ${DECLARED_FUNDS_VALUES.join(" | ")}, ` +
+        `got ${JSON.stringify(raw)}. It says whose money is behind ` +
+        `NEXUS_EXCHANGE_API_URL and has no default: a staging deployment of ` +
+        `mainnet holds real funds, so this server will not assume either way.`,
+    );
+  }
+  return value as DeclaredFunds;
+}
+
+/**
+ * Parse `NEXUS_EXCHANGE_GATEWAY_PATH` — where the legacy gateway surface hangs
+ * off the custom stage's host root. Blank (or unset) means the
+ * `/api/exchange` default; see {@link resolveTarget}.
+ *
+ * A closed set of the only two real deployment shapes (mirroring
+ * `NetworkDescriptor.gatewayPath`): `/api/exchange` for a host behind the public
+ * gateway convention, and `/` for a bare indexer that serves the legacy routes
+ * at its root — the `local` shape, and the one a private stage is most likely to
+ * be. Getting it wrong 404s every legacy route and hands `get_ws_token` a
+ * `ws_endpoint` nothing listens on, so it is a declared value, never a guess.
+ *
+ * The bare-origin shape is spelled `/` rather than the empty string on purpose:
+ * everywhere else here a set-but-blank variable means "unset" (a shell exports
+ * `X=` as `""`, and `.env.example` ships blank placeholders), so an empty value
+ * cannot also carry a meaning. `/` is the same thing said in a way that survives
+ * that convention.
+ */
+function resolveGatewayPath(raw: string): "" | "/api/exchange" {
+  const value = raw.replace(/\/+$/, "");
+  if (value === "" || value === "/api/exchange") return value;
+  throw new Error(
+    `NEXUS_EXCHANGE_GATEWAY_PATH must be "/api/exchange" (a host behind the ` +
+      `public gateway) or "/" (a bare indexer serving the legacy routes at its ` +
+      `root), got ${JSON.stringify(raw)}.`,
+  );
+}
+
+/**
+ * Resolve the target this config points at, from the environment.
+ *
+ * Three mechanisms, in the order they are checked:
+ *
+ *  1. `NEXUS_EXCHANGE_NETWORK=custom` — the full custom bundle. The one
+ *     documented way to describe a private stage: URL + label + funds, plus an
+ *     optional faucet flag and gateway path.
+ *  2. `NEXUS_EXCHANGE_API_URL` alone — sugar over (1) that supplies only the
+ *     URL, so funds are UNDECLARED. Byte-identical to what it always did for
+ *     transport (`/api/exchange` appended, taken literally), and unchanged in
+ *     what it reports: the label was already `custom` with `funds: "unknown"`.
+ *     Kept as the ergonomic path for tests and local development — not
+ *     deprecated (parent ENG-9823, resolved question 1).
+ *  3. A named network, or the default. Unchanged.
+ *
+ * (2) with a network ALSO named keeps that network's metadata: the caller is
+ * telling us whose money is behind the URL, and "mainnet + explicit URL" is the
+ * sanctioned way to reach real funds before the durable host is live.
+ */
+function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
+  const override = readVar(env, "NEXUS_EXCHANGE_API_URL");
+  const rawNetwork = readVar(env, "NEXUS_EXCHANGE_NETWORK");
+  const isCustom = rawNetwork.toLowerCase() === CUSTOM_TARGET_ID;
+
+  if (isCustom) {
+    if (!override) {
+      throw new Error(
+        `NEXUS_EXCHANGE_NETWORK=${CUSTOM_TARGET_ID} needs a host: set ` +
+          `NEXUS_EXCHANGE_API_URL to the stage's root URL. This package ships no ` +
+          `hostname for any private stage — the caller supplies it.`,
+      );
+    }
+    const rawLabel = readVar(env, "NEXUS_EXCHANGE_NETWORK_LABEL");
+    const rawFunds = readVar(env, "NEXUS_EXCHANGE_FUNDS");
+    if (!rawLabel || !rawFunds) {
+      throw new Error(
+        `NEXUS_EXCHANGE_NETWORK=${CUSTOM_TARGET_ID} requires ` +
+          `NEXUS_EXCHANGE_NETWORK_LABEL (a name for this stage) and ` +
+          `NEXUS_EXCHANGE_FUNDS (${DECLARED_FUNDS_VALUES.join(" | ")} — whose ` +
+          `money is behind it). Both are required and neither has a default. To ` +
+          `point at a host without describing it, leave NEXUS_EXCHANGE_NETWORK ` +
+          `unset and set NEXUS_EXCHANGE_API_URL alone; the tools that move funds ` +
+          `then refuse, because nothing declared what they would be moving.`,
+      );
+    }
+    return defineTarget({
+      id: CUSTOM_TARGET_ID,
+      label: validateTargetLabel(rawLabel, "NEXUS_EXCHANGE_NETWORK_LABEL"),
+      funds: resolveDeclaredFunds(rawFunds),
+      // Assumed absent until declared: "not real money" does not imply "has a
+      // faucet", and the funding tools must not route at one that is not there.
+      faucet: isTruthy(env.NEXUS_EXCHANGE_FAUCET),
+      restBase: normalizeBaseUrl(override),
+      // Unset keeps the public-gateway convention, which is what every existing
+      // config resolves to; `/` opts into the bare-indexer shape.
+      gatewayPath: resolveGatewayPath(
+        readVar(env, "NEXUS_EXCHANGE_GATEWAY_PATH") || "/api/exchange",
+      ),
+    });
+  }
+
+  // A bundle variable set without selecting the custom target is refused, not
+  // ignored. Silently dropping `NEXUS_EXCHANGE_FUNDS=play` would leave the
+  // operator believing they had configured a safety property that is not in
+  // effect, and honoring it here would create a second, undocumented way to
+  // describe a target. Blank values are already treated as unset above, so
+  // `.env.example`'s empty placeholders do not trip this.
+  const stray = CUSTOM_BUNDLE_VARS.filter((name) => readVar(env, name));
+  if (stray.length > 0) {
+    throw new Error(
+      `${stray.join(", ")} ${stray.length === 1 ? "is" : "are"} only read when ` +
+        `NEXUS_EXCHANGE_NETWORK=${CUSTOM_TARGET_ID}. Set that to describe a ` +
+        `custom stage, or unset ${stray.length === 1 ? "it" : "them"} — this ` +
+        `server will not apply half a bundle and leave you thinking the rest ` +
+        `took effect.`,
+    );
+  }
+
   // Throws on anything unrecognized rather than defaulting — an unknown network
   // is treated as real funds, so guessing is the one thing we must not do.
   const selected = rawNetwork ? resolveNetworkId(rawNetwork) : undefined;
 
-  let baseUrl: string;
-  let network: NetworkId | "custom";
-  let funds: Funds | "unknown";
-  // Where the legacy gateway surface sits, relative to the origin. Only the
-  // network map may change this: an explicit override is taken literally (the
-  // caller gave us a URL, and `/api/exchange` is what every existing config
-  // already resolves to), so this stays byte-identical for anyone upgrading.
-  let gatewayPath = "/api/exchange";
-
   if (override) {
-    // The explicit override wins for transport. This is where a staging/beta
-    // deployment lives now that it is no longer a network value. If the caller
-    // also named a network, keep that label — they are telling us whose money is
-    // behind this URL, and "mainnet + custom URL" is the sanctioned way to reach
-    // real funds before the durable host is live.
-    baseUrl = normalizeBaseUrl(override);
-    network = selected ?? "custom";
-    funds = selected ? NETWORKS[selected].funds : "unknown";
-  } else {
-    const desc = NETWORKS[selected ?? DEFAULT_NETWORK];
-    if (desc.baseUrl === null) {
-      throw new Error(unreachableNetworkMessage(desc));
-    }
-    baseUrl = desc.baseUrl;
-    network = desc.id;
-    funds = desc.funds;
-    gatewayPath = desc.gatewayPath;
+    const desc = selected ? NETWORKS[selected] : undefined;
+    return defineTarget({
+      id: desc?.id ?? CUSTOM_TARGET_ID,
+      label: desc?.label ?? CUSTOM_TARGET_ID,
+      funds: desc?.funds ?? "unknown",
+      faucet: desc?.faucet ?? false,
+      restBase: normalizeBaseUrl(override),
+      // Taken literally. Only the network map may change this: the caller gave
+      // us a URL, and `/api/exchange` is what every existing config already
+      // resolves to, so this stays byte-identical for anyone upgrading. A custom
+      // stage that needs the bare-origin shape says so with the bundle above.
+      gatewayPath: "/api/exchange",
+    });
   }
 
-  warnIfPlaintext(baseUrl);
-  const { directBaseUrl, gatewayBaseUrl } = deriveBases(baseUrl, gatewayPath);
+  const desc = NETWORKS[selected ?? DEFAULT_NETWORK];
+  if (desc.baseUrl === null) {
+    throw new Error(unreachableNetworkMessage(desc));
+  }
+  return defineTarget({
+    id: desc.id,
+    label: desc.label,
+    funds: desc.funds,
+    faucet: desc.faucet,
+    restBase: desc.baseUrl,
+    gatewayPath: desc.gatewayPath,
+  });
+}
+
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): ExchangeConfig {
+  const target = resolveTarget(env);
+
+  // Applies to a custom stage exactly as it does to a named network: a private
+  // deployment on plain http is precisely the case this warning exists for.
+  warnIfPlaintext(target.restBase);
+  const { directBaseUrl, gatewayBaseUrl } = deriveBases(
+    target.restBase,
+    target.gatewayPath,
+  );
   // `/ws`, `/stream`, `/ws/token` and `/ws-tokens` carry no per-path `servers`
   // override in the spec, so they resolve against the ROOT server — the gateway
   // base — not the direct `/api/v1` host.
@@ -312,8 +479,9 @@ export function loadConfig(
   return Object.freeze({
     directBaseUrl,
     gatewayBaseUrl,
-    network,
-    funds,
+    // Already frozen by `defineTarget` — `Object.freeze` is shallow, so the
+    // target has to carry its own immutability rather than inherit it here.
+    target,
     wsUrl,
     wsAuthenticatedUrl: `${wsUrl}/ws`,
     wsMarketDataUrl: `${wsUrl}/stream`,

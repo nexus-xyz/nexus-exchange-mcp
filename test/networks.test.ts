@@ -43,8 +43,8 @@ test("the default target is unchanged: testnet, play funds, legacy host", () => 
   const cfg = loadConfig(env());
   assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
   assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
-  assert.equal(cfg.network, "testnet");
-  assert.equal(cfg.funds, "play");
+  assert.equal(cfg.target?.id, "testnet");
+  assert.equal(cfg.target?.funds, "play");
   assert.equal(DEFAULT_NETWORK, "testnet");
 });
 
@@ -54,11 +54,11 @@ test("a set-but-empty override falls back to the network, not to an error", () =
   for (const blank of ["", "   ", "\n"]) {
     const cfg = loadConfig(env({ NEXUS_EXCHANGE_API_URL: blank }));
     assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
-    assert.equal(cfg.network, "testnet");
+    assert.equal(cfg.target?.id, "testnet");
   }
   // Same for the network variable itself.
   const cfg = loadConfig(env({ NEXUS_EXCHANGE_NETWORK: "  " }));
-  assert.equal(cfg.network, "testnet");
+  assert.equal(cfg.target?.id, "testnet");
 });
 
 test("mainnet is a named host, never interpolated from the network name", () => {
@@ -132,7 +132,7 @@ test("release channels are demoted to a URL override, not aliased", () => {
 test("local resolves to the indexer and is never a fallback", () => {
   const cfg = loadConfig(env({ NEXUS_EXCHANGE_NETWORK: "local" }));
   assert.equal(cfg.directBaseUrl, "http://localhost:9090");
-  assert.equal(cfg.network, "local");
+  assert.equal(cfg.target?.id, "local");
   // Nothing may degrade to localhost: a failed public host must stay failed,
   // because silently succeeding against localhost hides a misconfigured client.
   assert.throws(() => loadConfig(env({ NEXUS_EXCHANGE_NETWORK: "mainnet" })));
@@ -148,18 +148,23 @@ test("a URL override wins for transport and carries the declared network", () =>
     }),
   );
   assert.equal(cfg.directBaseUrl, "https://api.nexus.xyz");
-  assert.equal(cfg.network, "mainnet");
-  assert.equal(cfg.funds, "real");
+  assert.equal(cfg.target?.id, "mainnet");
+  assert.equal(cfg.target?.funds, "real");
+  // The network's own metadata rides along, so a faucet call still refuses here.
+  assert.equal(cfg.target?.faucet, false);
 });
 
 test("an override with no network is custom/unknown funds, never play", () => {
   const cfg = loadConfig(
     env({ NEXUS_EXCHANGE_API_URL: "https://staging.example.com" }),
   );
-  assert.equal(cfg.network, "custom");
+  assert.equal(cfg.target?.id, "custom");
+  assert.equal(cfg.target?.label, "custom");
   // "unknown" must not be read as "safe to experiment on".
-  assert.equal(cfg.funds, "unknown");
-  assert.notEqual(cfg.funds, "play");
+  assert.equal(cfg.target?.funds, "unknown");
+  assert.notEqual(cfg.target?.funds, "play");
+  // Faucet is absent until declared: "not real money" does not imply it exists.
+  assert.equal(cfg.target?.faucet, false);
 });
 
 test("a base URL carrying a query or fragment is rejected", () => {

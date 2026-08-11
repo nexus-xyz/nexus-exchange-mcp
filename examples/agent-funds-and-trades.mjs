@@ -8,6 +8,10 @@
 //   NEXUS_EXCHANGE_API_URL     - a DIRECT indexer gateway that verifies client
 //                                HMAC (e.g. http://localhost:9090); the public
 //                                host's proxy doesn't honor per-caller HMAC.
+//   NEXUS_EXCHANGE_NETWORK     - the network that URL belongs to (e.g. `local`
+//                                for a local indexer). Required for the tools
+//                                that move funds: an undeclared target refuses
+//                                them rather than assume play money (ENG-9828).
 //
 // The full lifecycle, each step one MCP tool call:
 //

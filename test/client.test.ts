@@ -833,7 +833,7 @@ test("cancel_order requires market_id when cancelling a single order", async () 
 
 /**
  * A 2xx body that is not JSON must never be returned as if it were the
- * endpoint's data (ENG-8170). Every documented 2xx in spec v0.7.3 is
+ * endpoint's data (ENG-8170). Every documented 2xx in spec v0.8.1 is
  * `application/json`, so a non-JSON success body means the request never
  * reached the Exchange API.
  */

@@ -185,6 +185,15 @@ test("a base URL with embedded credentials or a bad scheme is rejected", () => {
     () => normalizeBaseUrl("https://user:pw@h.example"),
     /must not embed credentials/,
   );
+  // Userinfo with NO password is the form that reads as a hostname to a human:
+  // `https://h.example@evil.example` is a request to evil.example carrying
+  // "h.example" as a username. Rejected because `parsed.username` is set, not
+  // because a colon appeared — pinned here because the sibling SDKs differ on
+  // exactly this shape (py accepts it), so a regression would be silent.
+  assert.throws(
+    () => normalizeBaseUrl("https://h.example@evil.example"),
+    /must not embed credentials/,
+  );
   assert.throws(
     () => normalizeBaseUrl("file:///etc/passwd"),
     /must use http or https/,

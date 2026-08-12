@@ -513,6 +513,10 @@ test("the guard is wired into the tool objects themselves, and frozen there", as
   for (const tool of tools) {
     assert.ok(Object.isFrozen(tool), `${tool.name} is frozen`);
   }
+  // The registry itself, not only its entries: `findTool` and `visibleTools`
+  // read from this array, so a replaced slot would hand back an unguarded
+  // definition even though every object in it is frozen.
+  assert.ok(Object.isFrozen(tools));
   const guarded = findTool("place_order")!;
   try {
     (guarded as { handler: unknown }).handler = async () => "bypassed";

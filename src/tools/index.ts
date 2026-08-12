@@ -2595,6 +2595,13 @@ for (const tool of tools) {
   }
   Object.freeze(tool);
 }
+// The array too, not just its elements: `Object.freeze` is shallow, so freezing
+// each definition stops `tool.handler = ...` but leaves `tools[i] = {…}` and
+// `tools.push(…)` open — and `findTool` / `visibleTools` read straight from this
+// array, so either one would hand a caller an unguarded definition. Freezing
+// here is what makes "the guard cannot be swapped back out at runtime" true of
+// the registry and not just of the objects in it.
+Object.freeze(tools);
 
 export function findTool(name: string): ToolDef | undefined {
   return tools.find((t) => t.name === name);

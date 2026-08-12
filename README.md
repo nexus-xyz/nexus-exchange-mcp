@@ -99,7 +99,7 @@ single-target lookup is still unbuilt server-side.
 Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
 service exposes its own REST API and the indexer serves the exchange surface
 directly under `/api/v1` at the host root. This server calls those routes for
-the v0.7.3 operations it exposes as tools (see
+the v0.8.1 operations it exposes as tools (see
 [API-surface coverage](#api-surface-coverage) below).
 
 - **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
@@ -130,7 +130,7 @@ the v0.7.3 operations it exposes as tools (see
 ### API-surface coverage
 
 **66 registered tools** covering **63 spec operations** of Exchange API spec
-**v0.7.3**. Those are two different numbers and neither substitutes for the
+**v0.8.1**. Those are two different numbers and neither substitutes for the
 other: one tool can call several operations (`cancel_order` calls two) and one
 calls none. The operation count is the figure comparable with the rs / py / cli
 SDK manifests; the tool count is MCP's own axis and must never be reported as a
@@ -450,7 +450,7 @@ origin for local development, so the prefix is a per-network value
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.3`**.
+Currently targets Exchange API spec **`v0.8.1`**.
 
 <!-- api-version-sync:end -->
 
@@ -497,7 +497,7 @@ Adding a tool without declaring what it calls is a type error, so the mapping
 cannot be skipped. See [`docs/coverage-unit.md`](./docs/coverage-unit.md).
 
 Every upstream request also sends this pin as an `X-Nexus-Api-Version: <tag>`
-header (e.g. `X-Nexus-Api-Version: v0.7.3`), alongside a normalized
+header (e.g. `X-Nexus-Api-Version: v0.8.1`), alongside a normalized
 `User-Agent: nexus-exchange-mcp/<version>`, so the exchange edge can attribute
 and segment usage by client and by the contract version this server targets.
 The header value is the server's own compiled-against tag — it is baked in at

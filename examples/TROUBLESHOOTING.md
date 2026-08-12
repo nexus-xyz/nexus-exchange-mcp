@@ -85,6 +85,29 @@ Also check you're using the right protocol for the endpoint: `/ws` speaks
 `{op: "subscribe", channel: …}` envelopes; the legacy `/stream` takes a single
 `{"subscribe": [...]}` message (tokens for it come from `get_ws_token_legacy`).
 
+## `place_order` / the deposit tools say the target "has not declared whose money is behind it"
+
+You set `NEXUS_EXCHANGE_API_URL` and nothing else. A URL says where to send
+requests, not whether the balances there are real — so the tools that cannot be
+undone refuse rather than assume play funds. Reads, `preview_order` and
+`cancel_order` keep working throughout.
+
+Name the network that URL belongs to:
+
+```bash
+NEXUS_EXCHANGE_NETWORK=local   # alongside e.g. http://localhost:9090
+```
+
+For a deployment that is not one of the named networks, describe it once with the
+`custom` bundle — `NEXUS_EXCHANGE_NETWORK=custom` plus
+`NEXUS_EXCHANGE_NETWORK_LABEL` and `NEXUS_EXCHANGE_FUNDS=real|play` (top-level
+README, "A custom stage"). Declaring `real` is a valid answer: the guard asks
+that somebody know, not that the money be play.
+
+If instead the message names a faucet, `claim_faucet` / `claim_credit` also need
+the stage to HAVE one — set `NEXUS_EXCHANGE_FAUCET=1`. "Not real money" does not
+imply a faucet exists, so it is assumed absent.
+
 ## `cancel_order` refuses to run
 
 By design. An argless call could mean "cancel everything", so the tool makes

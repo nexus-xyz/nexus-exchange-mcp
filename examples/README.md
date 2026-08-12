@@ -43,7 +43,10 @@ the environment by the server itself; see [`.env.example`](../.env.example).
 - Examples marked **trades** submit real (testnet) orders with your key.
   They are written to be safe by default — resting far-from-market limit
   orders that are cancelled at the end, or tiny sizes — but read them before
-  running.
+  running. They also need `NEXUS_EXCHANGE_NETWORK` set (e.g. `local` alongside a
+  local indexer URL): a target that has not declared whose money is behind it
+  refuses the tools that cannot be undone, rather than assuming play funds. See
+  the top-level README "Undeclared funds" section.
 
 ## `list-markets.mjs`
 

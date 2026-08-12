@@ -25,6 +25,17 @@ The Model Context Protocol server exposing the Nexus Exchange API as agent tools
   from the spec's `x-nexus-networks`. Never interpolate a host from a network
   name (mainnet is `api.nexus.xyz`, not `api.mainnet.nexus.xyz`), and never let
   an unrecognized network fall back to a default — it is treated as real funds.
+- **No hostname for a private stage belongs in this repo** — not in source, docs,
+  tests, commit messages or PR bodies, and neither does the stage taxonomy that
+  names them. Point `custom` at them instead (ENG-9823). Illustrate with RFC 2606
+  reserved names (`example.com` in docs, `example.invalid` in tests) and generic
+  labels (`dev`, `example`).
+- `custom` is client-side only: it is not a value the API accepts and must never
+  appear in `x-nexus-networks`, so it is deliberately not in `NETWORK_IDS` or
+  `NETWORKS`. Its funds are a tri-state (`real | play | unknown`) that a caller
+  declares; match `play` positively in a guard, never `!== "real"`, or `unknown`
+  falls through as if it were safe. A tool that cannot be undone declares
+  `fundsGuard` and is refused on an undeclared target.
 - Keep the pinned `nexus-exchange-api` version in sync when the spec bumps.
   `spec-autobump` opens that PR for you and labels it breaking or not; merging it
   is a human decision, and `spec-drift` on that PR is the check that says whether

@@ -45,6 +45,18 @@ export const NETWORK_IDS = ["testnet", "mainnet", "local"] as const;
 /** Whether balances on a network are real money or synthetic play money. */
 export type Funds = "real" | "play";
 
+/**
+ * Funds as a **resolved target** carries them: real, play, or undeclared.
+ *
+ * Tri-state rather than a boolean, per parent ENG-9823's resolved question 3. A
+ * bool cannot represent a custom stage whose operator has not said whose money
+ * is behind it, and a bool plus a second "declared" flag makes the invalid
+ * combination representable. `"unknown"` is a first-class answer here, and the
+ * one every guard must fail closed on — see
+ * {@link ExchangeClient.assertFundsAllow}.
+ */
+export type DeclaredFunds = Funds | "unknown";
+
 export interface NetworkDescriptor {
   readonly id: NetworkId;
   /** Human-facing name, as the spec spells it. */
@@ -200,9 +212,156 @@ export function resolveNetworkId(raw: string): NetworkId {
   }
   throw new Error(
     `Unknown NEXUS_EXCHANGE_NETWORK=${quoteForMessage(raw)}. Valid values are ` +
-      `${NETWORK_IDS.join(" | ")}. Refusing to guess: an unrecognized network is ` +
-      `treated as real funds, so this fails rather than assuming play money.`,
+      `${NETWORK_IDS.join(" | ")} | ${CUSTOM_TARGET_ID}. Refusing to guess: an ` +
+      `unrecognized network is treated as real funds, so this fails rather than ` +
+      `assuming play money. To target a private stage, use ` +
+      `NEXUS_EXCHANGE_NETWORK=${CUSTOM_TARGET_ID} and declare its bundle (see ` +
+      `the README "A custom stage" section).`,
   );
+}
+
+// ── The custom target (ENG-9828, parent ENG-9823) ───────────────────────────
+//
+// Everything below this line is CLIENT-SIDE ONLY. `custom` is not a value the
+// server accepts and it must never appear in the spec's `x-nexus-networks`, so
+// it is deliberately NOT a member of {@link NETWORK_IDS} and has no entry in
+// {@link NETWORKS} — those two stay a faithful copy of the spec extension.
+//
+// What it replaces: this server used to synthesize an inline `"custom"` label
+// with `funds: "unknown"` inside `loadConfig` and carry the pair as widened
+// union types (`NetworkId | "custom"`, `Funds | "unknown"`). The label was
+// honest about not knowing whose money was behind the URL, but nothing acted on
+// it. A private stage is exactly where that matters, so the pair became a
+// descriptor — built once, validated once, frozen, and passed around.
+
+/**
+ * The id of the client-side custom target. Not a network: a network is a pool of
+ * money named by the spec, and this is "whatever host the operator pointed us
+ * at". No hostname for any private stage appears in this package — the caller
+ * supplies it.
+ */
+export const CUSTOM_TARGET_ID = "custom";
+
+/** What a resolved target can be: a named network, or the custom target. */
+export type TargetId = NetworkId | typeof CUSTOM_TARGET_ID;
+
+/**
+ * Characters allowed in a caller-supplied target label.
+ *
+ * Restricted on purpose (parent ENG-9823, resolved question 2): across the
+ * fleet this label is the key stored credentials are namespaced under — it ends
+ * up in a keyring entry or a filesystem path — so `../other`, `one/two`,
+ * `one:two`, `one two`, an embedded newline or NUL, and non-ASCII (where
+ * normalization makes two distinct labels collide) must all be rejected, or one
+ * target's label can address another target's credentials.
+ *
+ * This server namespaces nothing — its credentials come from the environment —
+ * but the constraint is enforced here anyway. It is a fleet-wide invariant, and
+ * a label that is safe in four clients and lax in the fifth is not an invariant.
+ * It also means the label is safe to interpolate into an error message or a log
+ * line, since no control character can reach one.
+ */
+const TARGET_LABEL_RE = /^[A-Za-z0-9._-]+$/;
+
+/** Cap on a caller-supplied label, so it cannot flood a log line. */
+export const MAX_TARGET_LABEL_LENGTH = 64;
+
+/**
+ * A fully-resolved target: everything the server needs to know about where it
+ * is pointed and whose money is there.
+ *
+ * This is the shape the named networks and the custom target BOTH produce, which
+ * is the point — a guard reads the same fields either way, so there is one code
+ * path instead of one per configuration mechanism.
+ */
+export interface ResolvedTarget {
+  readonly id: TargetId;
+  /**
+   * Human-facing name. For a named network this is the spec's spelling; for the
+   * custom target it is caller-supplied and validated against
+   * {@link TARGET_LABEL_RE}.
+   */
+  readonly label: string;
+  /** Whose money is behind this target — `"unknown"` when nobody said. */
+  readonly funds: DeclaredFunds;
+  /**
+   * Whether the synthetic-funding operations (faucet / credit) exist here.
+   *
+   * SEPARATE from {@link funds}, and assumed absent until declared: "not real
+   * money" does not imply "has a faucet", and routing a funding call at a stage
+   * that has none just produces a confusing upstream error.
+   */
+  readonly faucet: boolean;
+  /** Host root this target is reached at, no trailing slash, no query/fragment. */
+  readonly restBase: string;
+  /** Where the legacy gateway surface hangs off {@link restBase}. */
+  readonly gatewayPath: "" | "/api/exchange";
+}
+
+/**
+ * Validate a caller-supplied target label, or throw.
+ *
+ * Surrounding whitespace is trimmed first (an env var routinely picks up a
+ * trailing newline from a shell heredoc); everything after that must satisfy
+ * {@link TARGET_LABEL_RE}. `.` and `..` are rejected explicitly — both pass the
+ * character class and both are path traversal in the clients that use the label
+ * as a path segment.
+ *
+ * @param varName the environment variable being read, named in the error so the
+ * message is actionable rather than describing an abstract "label".
+ */
+export function validateTargetLabel(raw: string, varName: string): string {
+  const label = raw.trim();
+  if (!label) {
+    throw new Error(`${varName} must not be empty.`);
+  }
+  if (label.length > MAX_TARGET_LABEL_LENGTH) {
+    throw new Error(
+      `${varName} is ${label.length} characters; the maximum is ` +
+        `${MAX_TARGET_LABEL_LENGTH}.`,
+    );
+  }
+  if (label === "." || label === "..") {
+    throw new Error(
+      `${varName}=${quoteForMessage(label)} is not a usable label: it is a ` +
+        `path traversal in the clients that namespace stored credentials by it.`,
+    );
+  }
+  if (!TARGET_LABEL_RE.test(label)) {
+    throw new Error(
+      `${varName}=${quoteForMessage(raw)} contains characters that are not ` +
+        `allowed in a target label. Use only letters, digits, "." , "_" and "-" ` +
+        `(no "/", ":", whitespace, or non-ASCII): this label is the key stored ` +
+        `credentials are namespaced under across the Nexus clients, so a label ` +
+        `that can name a path or normalize onto another label is refused.`,
+    );
+  }
+  return label;
+}
+
+/**
+ * Build a {@link ResolvedTarget}, validating every field and freezing the
+ * result.
+ *
+ * The single constructor for both configuration mechanisms, so the invariants
+ * (label shape, tri-state funds, closed gateway-path set) hold once instead of
+ * per branch. Frozen for the same reason {@link NETWORKS} is: a tool handler
+ * receives this object transitively, and a target whose `funds` or `restBase`
+ * can be rewritten at runtime is a disabled guard and a redirect for every
+ * signed request that follows.
+ */
+export function defineTarget(fields: {
+  id: TargetId;
+  label: string;
+  funds: DeclaredFunds;
+  faucet: boolean;
+  restBase: string;
+  gatewayPath: "" | "/api/exchange";
+}): ResolvedTarget {
+  if (!fields.restBase) {
+    throw new Error(`Target "${fields.label}" has no base URL.`);
+  }
+  return Object.freeze({ ...fields });
 }
 
 /** The error text for selecting a network that has no reachable host yet. */

@@ -15,7 +15,7 @@
  */
 
 import { z } from "zod";
-import { ExchangeClient } from "../client.js";
+import { ExchangeClient, type FundsRequirement } from "../client.js";
 
 export interface ToolDef {
   name: string;
@@ -56,6 +56,19 @@ export interface ToolDef {
    * `visibleTools` / config `enableAdminTools`.
    */
   adminOnly?: boolean;
+  /**
+   * What this tool needs the configured target to have declared about its funds
+   * (ENG-9828, parent ENG-9823). Absent for the great majority of tools: reads
+   * are safe anywhere, and so is cancelling an order — refusing a cancel on a
+   * target we know little about would trap a caller with open risk, which is the
+   * opposite of a guardrail.
+   *
+   * Declared here and enforced centrally: every entry in {@link tools} has its
+   * handler wrapped once at module load (see the loop below `tools`), so the
+   * check cannot be skipped by a transport, a test, or a future caller that
+   * reaches a handler directly.
+   */
+  fundsGuard?: FundsRequirement;
   handler: (client: ExchangeClient, args: unknown) => Promise<unknown>;
 }
 
@@ -1509,6 +1522,7 @@ export const tools: ToolDef[] = [
       "This submits a REAL order to the matching engine.",
     inputSchema: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
     zod: friendlyOrderSchema,
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const body = toWireOrder(args as FriendlyOrder);
@@ -1545,6 +1559,7 @@ export const tools: ToolDef[] = [
         orders: z.array(friendlyOrderSchema).min(1).max(MAX_BATCH_ORDERS),
       })
       .strict(),
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { orders: FriendlyOrder[] };
@@ -1681,6 +1696,9 @@ export const tools: ToolDef[] = [
         message: "at least one of price or size is required",
         path: ["price"],
       }),
+    // An amend can cross the book and fill, so it is guarded like a
+    // placement. Cancelling deliberately is not — see `ToolDef.fundsGuard`.
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as {
@@ -1782,6 +1800,7 @@ export const tools: ToolDef[] = [
       ["amount"],
     ),
     zod: z.object({ amount: positiveDecimal("amount") }).strict(),
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const { amount } = args as { amount: string };
@@ -1812,6 +1831,7 @@ export const tools: ToolDef[] = [
       },
     }),
     zod: z.object({ amount: positiveDecimal("amount").optional() }).strict(),
+    fundsGuard: "play-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { amount?: string };
@@ -1854,6 +1874,7 @@ export const tools: ToolDef[] = [
         asset: z.string().min(1).optional(),
       })
       .strict(),
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as { amount: string; asset?: string };
@@ -1878,6 +1899,7 @@ export const tools: ToolDef[] = [
       "arguments. Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
+    fundsGuard: "play-funds",
     requiresAuth: true,
     handler: (client) =>
       client.request({
@@ -1924,6 +1946,7 @@ export const tools: ToolDef[] = [
         direction: z.enum(["add", "remove"]),
       })
       .strict(),
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const a = args as {
@@ -1980,6 +2003,10 @@ export const tools: ToolDef[] = [
       ["chain"],
     ),
     zod: z.object({ chain: z.string().min(1) }).strict(),
+    // The address this mints is where on-chain funds get sent, and a
+    // transfer to the wrong stage's address is not recoverable — so it needs
+    // a declared target even though the mint itself moves nothing.
+    fundsGuard: "declared-funds",
     requiresAuth: true,
     handler: (client, args) => {
       const { chain } = args as { chain: string };
@@ -2537,6 +2564,44 @@ export const tools: ToolDef[] = [
       PENDING("Deposit-target (on-chain deposit address) lookup"),
   },
 ];
+
+/**
+ * Apply every declared `fundsGuard` to the handler it guards, once, at module
+ * load — then freeze each definition.
+ *
+ * Wrapping here rather than at a dispatch site is the whole point: `tools`,
+ * `findTool` and `visibleTools` all hand out these same objects, and both
+ * transports plus the tests call `handler` directly. A check placed in
+ * `createServerForClient` would be one a second transport could forget; a check
+ * placed inside each handler body would be one a new tool could omit. This runs
+ * before any importer can observe the array (module evaluation is synchronous
+ * and there is no top-level await here), so there is no window in which an
+ * unguarded handler is reachable, and freezing afterwards means nothing can swap
+ * one back out at runtime.
+ *
+ * The wrapper is `async` so a refusal REJECTS rather than throwing
+ * synchronously: every caller treats a handler as returning a promise, and a
+ * synchronous throw would escape a `.catch()` and bypass the transport's error
+ * framing.
+ */
+for (const tool of tools) {
+  const need = tool.fundsGuard;
+  if (need) {
+    const inner = tool.handler;
+    tool.handler = async (client, args) => {
+      client.assertFundsAllow(need, tool.name);
+      return inner(client, args);
+    };
+  }
+  Object.freeze(tool);
+}
+// The array too, not just its elements: `Object.freeze` is shallow, so freezing
+// each definition stops `tool.handler = ...` but leaves `tools[i] = {…}` and
+// `tools.push(…)` open — and `findTool` / `visibleTools` read straight from this
+// array, so either one would hand a caller an unguarded definition. Freezing
+// here is what makes "the guard cannot be swapped back out at runtime" true of
+// the registry and not just of the objects in it.
+Object.freeze(tools);
 
 export function findTool(name: string): ToolDef | undefined {
   return tools.find((t) => t.name === name);

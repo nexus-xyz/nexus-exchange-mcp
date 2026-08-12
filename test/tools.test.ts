@@ -8,14 +8,31 @@ import {
 } from "../src/client.js";
 import { findTool, tools, visibleTools } from "../src/tools/index.js";
 import type { ExchangeConfig } from "../src/config.js";
+import { defineTarget } from "../src/networks.js";
 
 const BASE = "http://example.test";
+
+/**
+ * A target with DECLARED play funds and a faucet, so the funds-guarded tools
+ * (ENG-9828) run. A config with no target reads as undeclared funds and refuses
+ * them, which is the fail-closed default — the happy-path mapping tests have to
+ * say what they are pointed at, exactly as a real caller does.
+ */
+const PLAY_TARGET = defineTarget({
+  id: "local",
+  label: "Local",
+  funds: "play",
+  faucet: true,
+  restBase: BASE,
+  gatewayPath: "",
+});
 
 /** A client with full creds (HMAC + session + admin) for happy-path mapping. */
 function fullClient(overrides: Partial<ExchangeConfig> = {}): ExchangeClient {
   return new ExchangeClient({
     directBaseUrl: BASE,
     gatewayBaseUrl: BASE,
+    target: PLAY_TARGET,
     apiKey: "nx_test",
     apiSecret: "00",
     sessionToken: "sess_token",

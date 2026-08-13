@@ -155,9 +155,14 @@ test("a URL override wins for transport and carries the declared network", () =>
 });
 
 test("an override with no network is custom/unknown funds, never play", () => {
-  const cfg = loadConfig(
-    env({ NEXUS_EXCHANGE_API_URL: "https://staging.example.com" }),
-  );
+  // Deprecated as of ENG-10957 and otherwise unchanged; the notice it prints is
+  // captured here and asserted on in custom-target.test.ts.
+  let cfg!: ReturnType<typeof loadConfig>;
+  captureStderr(() => {
+    cfg = loadConfig(
+      env({ NEXUS_EXCHANGE_API_URL: "https://staging.example.com" }),
+    );
+  });
   assert.equal(cfg.target?.id, "custom");
   assert.equal(cfg.target?.label, "custom");
   // "unknown" must not be read as "safe to experiment on".
@@ -281,7 +286,10 @@ test("plaintext http to a non-loopback host warns; loopback stays quiet", () => 
     const quiet = captureStderr(() =>
       loadConfig(env({ NEXUS_EXCHANGE_API_URL: host })),
     );
-    assert.equal(quiet, "", `${host} is loopback and must not warn`);
+    // The bare override also prints the ENG-10957 deprecation notice, which is
+    // asserted on in custom-target.test.ts. What matters here is that loopback
+    // draws no plaintext warning: it carries no network exposure.
+    assert.doesNotMatch(quiet, /plaintext/, `${host} is loopback`);
   }
 });
 

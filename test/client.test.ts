@@ -739,9 +739,18 @@ test("deriveBases splits an origin into direct (/api/v1) and gateway bases", () 
 });
 
 test("loadConfig derives both bases from NEXUS_EXCHANGE_API_URL", () => {
-  const cfg = loadConfig({
-    NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz/api/exchange",
-  } as NodeJS.ProcessEnv);
+  // The bare var is deprecated (ENG-10957) and prints a startup notice on
+  // stderr; it is asserted on in custom-target.test.ts and silenced here.
+  const stderr = console.error;
+  console.error = () => {};
+  let cfg!: ReturnType<typeof loadConfig>;
+  try {
+    cfg = loadConfig({
+      NEXUS_EXCHANGE_API_URL: "https://exchange.nexus.xyz/api/exchange",
+    } as NodeJS.ProcessEnv);
+  } finally {
+    console.error = stderr;
+  }
   assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
   assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
 });

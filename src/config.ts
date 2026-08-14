@@ -8,10 +8,12 @@
  * The target is chosen on the **network axis** (`NEXUS_EXCHANGE_NETWORK` —
  * testnet / mainnet / local, see `networks.ts`) or is the client-side `custom`
  * target, which carries a caller-supplied bundle describing a private stage
- * (ENG-9828). `NEXUS_EXCHANGE_API_URL` on its own is sugar over `custom` that
- * supplies only the URL, leaving funds undeclared. Either way the result is one
- * frozen {@link ResolvedTarget}, built once by `resolveTarget` and read by every
- * guard, so there is no configuration mechanism with its own semantics.
+ * (ENG-9828). `NEXUS_EXCHANGE_API_URL` on its own is DEPRECATED sugar over
+ * `custom` that supplies only the URL, leaving funds undeclared (ENG-10957): it
+ * keeps working exactly as it always has and only gains a one-line stderr notice
+ * naming the declared form. Either way the result is one frozen
+ * {@link ResolvedTarget}, built once by `resolveTarget` and read by every guard,
+ * so there is no configuration mechanism with its own semantics.
  *
  * Nothing here is cached or shared: `loadConfig` is a pure function of its `env`
  * argument and returns a frozen object, so the hosted server can build a fresh
@@ -268,6 +270,27 @@ function warnIfPlaintext(baseUrl: string): void {
 }
 
 /**
+ * The one line printed when `NEXUS_EXCHANGE_API_URL` ALONE selected the target
+ * (ENG-10957, parent ENG-10950). Nothing is removed and no behaviour changes —
+ * this is the marker that says the declared form exists and why it is better.
+ *
+ * A fixed string, with no host or other environment value interpolated into it:
+ * a private stage's hostname must not reach a log through this notice, and a
+ * value nothing validated must not be able to forge a second record. It is one
+ * line for the same reason — see `validateTargetLabel`.
+ *
+ * stderr only, and that is load-bearing rather than stylistic: the stdio surface
+ * speaks JSON-RPC on stdout, so a stray line there corrupts the protocol for
+ * every client that ever starts this server.
+ */
+const BARE_URL_DEPRECATION_NOTICE =
+  "nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated " +
+  "and still works, unchanged. Prefer NEXUS_EXCHANGE_NETWORK=custom with " +
+  "NEXUS_EXCHANGE_NETWORK_LABEL and NEXUS_EXCHANGE_FUNDS: the bundle declares " +
+  "whose money is behind the URL, which a bare URL cannot — so the tools that " +
+  'cannot be undone refuse on it. See the README "A custom stage".';
+
+/**
  * Every environment variable that carries part of a custom bundle. Read ONLY
  * when `NEXUS_EXCHANGE_NETWORK=custom`; setting one otherwise is an error rather
  * than a silent no-op (see {@link resolveTarget}).
@@ -344,6 +367,23 @@ function resolveGatewayPath(raw: string): "" | "/api/exchange" {
   );
 }
 
+/** What {@link resolveTarget} resolved, and by which mechanism. */
+interface TargetSelection {
+  target: ResolvedTarget;
+  /**
+   * True only when `NEXUS_EXCHANGE_API_URL` ALONE selected the target — the
+   * deprecated form, and the one {@link BARE_URL_DEPRECATION_NOTICE} is about.
+   *
+   * False when a named network selected the target and the URL merely redirected
+   * its host: that use declares funds through the network and is a modifier, not
+   * a selector, so it is deliberately not deprecated (parent ENG-10950).
+   *
+   * Returned rather than re-derived from the environment by the caller so the
+   * notice cannot drift out of step with the branch it describes.
+   */
+  viaBareUrl: boolean;
+}
+
 /**
  * Resolve the target this config points at, from the environment.
  *
@@ -352,19 +392,22 @@ function resolveGatewayPath(raw: string): "" | "/api/exchange" {
  *  1. `NEXUS_EXCHANGE_NETWORK=custom` — the full custom bundle. The one
  *     documented way to describe a private stage: URL + label + funds, plus an
  *     optional faucet flag and gateway path.
- *  2. `NEXUS_EXCHANGE_API_URL` alone — sugar over (1) that supplies only the
- *     URL, so funds are UNDECLARED. Byte-identical to what it always did for
- *     transport (`/api/exchange` appended, taken literally), and unchanged in
- *     what it reports: the label was already `custom` with `funds: "unknown"`.
- *     Kept as the ergonomic path for tests and local development — not
- *     deprecated (parent ENG-9823, resolved question 1).
+ *  2. `NEXUS_EXCHANGE_API_URL` alone — DEPRECATED sugar over (1) that supplies
+ *     only the URL, so funds are UNDECLARED (ENG-10957, parent ENG-10950).
+ *     Nothing is removed and nothing behaves differently: still byte-identical
+ *     for transport (`/api/exchange` appended, taken literally), still
+ *     normalizing a legacy `/api/exchange` suffix, and still reporting the label
+ *     `custom` with `funds: "unknown"`. It gains only the stderr notice, because
+ *     a bare URL cannot say whose money is behind it — which is exactly why the
+ *     tools that cannot be undone refuse on it.
  *  3. A named network, or the default. Unchanged.
  *
  * (2) with a network ALSO named keeps that network's metadata: the caller is
  * telling us whose money is behind the URL, and "mainnet + explicit URL" is the
- * sanctioned way to reach real funds before the durable host is live.
+ * sanctioned way to reach real funds before the durable host is live. That is a
+ * modifier on a declared target, so it is not the deprecated form.
  */
-function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
+function resolveTarget(env: NodeJS.ProcessEnv): TargetSelection {
   const override = readVar(env, "NEXUS_EXCHANGE_API_URL");
   const rawNetwork = readVar(env, "NEXUS_EXCHANGE_NETWORK");
   const isCustom = rawNetwork.toLowerCase() === CUSTOM_TARGET_ID;
@@ -390,7 +433,7 @@ function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
           `then refuse, because nothing declared what they would be moving.`,
       );
     }
-    return defineTarget({
+    const target = defineTarget({
       id: CUSTOM_TARGET_ID,
       label: validateTargetLabel(rawLabel, "NEXUS_EXCHANGE_NETWORK_LABEL"),
       funds: resolveDeclaredFunds(rawFunds),
@@ -404,6 +447,7 @@ function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
         readVar(env, "NEXUS_EXCHANGE_GATEWAY_PATH") || "/api/exchange",
       ),
     });
+    return { target, viaBareUrl: false };
   }
 
   // A bundle variable set without selecting the custom target is refused, not
@@ -429,7 +473,7 @@ function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
 
   if (override) {
     const desc = selected ? NETWORKS[selected] : undefined;
-    return defineTarget({
+    const target = defineTarget({
       id: desc?.id ?? CUSTOM_TARGET_ID,
       label: desc?.label ?? CUSTOM_TARGET_ID,
       funds: desc?.funds ?? "unknown",
@@ -441,13 +485,17 @@ function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
       // stage that needs the bare-origin shape says so with the bundle above.
       gatewayPath: "/api/exchange",
     });
+    // The deprecated form is the URL SELECTING the target. With a network also
+    // named, the network selected it and the URL only redirected the host —
+    // funds are declared either way, so there is nothing to warn about.
+    return { target, viaBareUrl: !selected };
   }
 
   const desc = NETWORKS[selected ?? DEFAULT_NETWORK];
   if (desc.baseUrl === null) {
     throw new Error(unreachableNetworkMessage(desc));
   }
-  return defineTarget({
+  const target = defineTarget({
     id: desc.id,
     label: desc.label,
     funds: desc.funds,
@@ -455,12 +503,20 @@ function resolveTarget(env: NodeJS.ProcessEnv): ResolvedTarget {
     restBase: desc.baseUrl,
     gatewayPath: desc.gatewayPath,
   });
+  return { target, viaBareUrl: false };
 }
 
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ExchangeConfig {
-  const target = resolveTarget(env);
+  const { target, viaBareUrl } = resolveTarget(env);
+
+  // Printed after resolution, so a config that fails validation throws instead
+  // of first advertising a replacement for a target it never built. Once per
+  // `loadConfig`, which both surfaces call once per process at startup (stdio:
+  // `createServer`; hosted: `createHttpMcpServer` — `configForRequest` overlays
+  // the per-session credential and does not re-read the environment).
+  if (viaBareUrl) console.error(BARE_URL_DEPRECATION_NOTICE);
 
   // Applies to a custom stage exactly as it does to a named network: a private
   // deployment on plain http is precisely the case this warning exists for.

@@ -57,6 +57,19 @@ function captureStderr(fn: () => void): string {
   return out;
 }
 
+/**
+ * Evaluate `fn` with stderr captured and return its value. The bare-URL path is
+ * deprecated (ENG-10957) and prints a notice, which is asserted on in one place
+ * and silenced everywhere else so the suite's output stays clean.
+ */
+function quietly<T>(fn: () => T): T {
+  let value!: T;
+  captureStderr(() => {
+    value = fn();
+  });
+  return value;
+}
+
 // ── The bundle ───────────────────────────────────────────────────────────────
 
 test("a custom bundle from env resolves to one descriptor, frozen", () => {
@@ -194,7 +207,7 @@ test("a bundle variable without NEXUS_EXCHANGE_NETWORK=custom is refused", () =>
     const base = { NEXUS_EXCHANGE_API_URL: HOST, [name]: value };
     if (value === "") {
       // Blank reads as unset, so `.env.example`'s empty placeholders are safe.
-      assert.doesNotThrow(() => loadConfig(env(base)));
+      assert.doesNotThrow(() => quietly(() => loadConfig(env(base))));
       continue;
     }
     assert.throws(
@@ -263,10 +276,11 @@ test("a rejected label cannot forge a log line through the error message", () =>
 // ── The legacy path stays exactly as it was ──────────────────────────────────
 
 test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", () => {
-  // The sugar path (parent ENG-9823, resolved question 1). It is not deprecated:
-  // still the ergonomic path for tests and local development. What it reports is
-  // what it always reported — a `custom` label with funds it does not know.
-  const cfg = loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST }));
+  // The sugar path. Deprecated as of ENG-10957 but NOT changed: what it reports
+  // is what it always reported — a `custom` label with funds it does not know —
+  // and the deprecation adds a stderr notice and nothing else. Captured here so
+  // the suite's own output stays clean.
+  const cfg = quietly(() => loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })));
   assert.equal(cfg.directBaseUrl, HOST);
   assert.equal(cfg.gatewayBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.target?.id, "custom");
@@ -277,12 +291,74 @@ test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", (
   // who needs the bare-origin shape says so through the bundle.
   assert.equal(cfg.target?.gatewayPath, "/api/exchange");
 
-  // A value that still carries the old gateway suffix normalizes as it always did.
-  const suffixed = loadConfig(
-    env({ NEXUS_EXCHANGE_API_URL: `${HOST}/api/exchange` }),
+  // A value that still carries the old gateway suffix normalizes as it always
+  // did — the deprecation must not quietly drop the legacy-suffix handling.
+  const suffixed = quietly(() =>
+    loadConfig(env({ NEXUS_EXCHANGE_API_URL: `${HOST}/api/exchange` })),
   );
   assert.equal(suffixed.directBaseUrl, HOST);
   assert.equal(suffixed.gatewayBaseUrl, `${HOST}/api/exchange`);
+});
+
+test("the bare override prints one deprecation notice, and only that", () => {
+  // ENG-10957 (parent ENG-10950): a marker, not a behaviour change. The line
+  // names the declared form and says why the bare URL is the weaker one.
+  const notice = captureStderr(() =>
+    loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })),
+  );
+  assert.match(notice, /NEXUS_EXCHANGE_API_URL on its own is deprecated/);
+  assert.match(notice, /NEXUS_EXCHANGE_NETWORK=custom/);
+  assert.match(notice, /NEXUS_EXCHANGE_FUNDS/);
+  // Exactly one record: captureStderr adds one newline per call, so a notice
+  // carrying its own would read as two lines to anything parsing the log.
+  assert.equal(notice.trimEnd().split("\n").length, 1, notice);
+  // Nothing from the environment is interpolated, so a private stage's hostname
+  // cannot reach a log — or a bug report — through this notice.
+  assert.ok(!notice.includes(HOST), "the notice must not echo the URL");
+});
+
+test("the deprecation notice never reaches stdout", () => {
+  // stdout is the JSON-RPC channel on the stdio surface. One stray line there
+  // corrupts the protocol for every client that starts this server, so this
+  // guards the whole stream, not just `console.log`.
+  const realWrite = process.stdout.write;
+  let leaked = "";
+  process.stdout.write = ((chunk: unknown) => {
+    leaked += String(chunk);
+    return true;
+  }) as typeof process.stdout.write;
+  try {
+    captureStderr(() => loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })));
+  } finally {
+    process.stdout.write = realWrite;
+  }
+  assert.equal(leaked, "", "nothing may be written to the protocol channel");
+});
+
+test("only the bare selector is deprecated: the bundle and modifiers stay quiet", () => {
+  // The parent's distinction: a URL that SELECTS a target without declaring what
+  // it moves is the hazard. A URL that redirects a target already chosen by a
+  // named network carries no funds claim of its own and is not deprecated —
+  // "mainnet + explicit URL" is the sanctioned way to reach real funds today, so
+  // warning on it would train operators to ignore the notice.
+  for (const [label, over] of [
+    ["the declared bundle", BUNDLE],
+    ["a named network alone", { NEXUS_EXCHANGE_NETWORK: "local" }],
+    ["the default, with nothing set", {}],
+    [
+      "a named network + URL",
+      { NEXUS_EXCHANGE_NETWORK: "mainnet", NEXUS_EXCHANGE_API_URL: HOST },
+    ],
+    // Blank reads as unset everywhere else in this file; it must here too, or
+    // `.env.example`'s empty placeholder would warn about a var nobody set.
+    ["a set-but-empty URL", { NEXUS_EXCHANGE_API_URL: "   " }],
+  ] as const) {
+    assert.equal(
+      captureStderr(() => loadConfig(env(over))),
+      "",
+      label,
+    );
+  }
 });
 
 test("plaintext http still warns on a custom stage, loopback stays quiet", () => {
@@ -326,12 +402,14 @@ test("a custom URL is validated exactly like the override always was", () => {
 /** A fully-credentialled client on the given env, so only funds can refuse. */
 function clientFor(over: Record<string, string>): ExchangeClient {
   return new ExchangeClient(
-    loadConfig(
-      env({
-        ...over,
-        NEXUS_EXCHANGE_API_KEY: "nx_test",
-        NEXUS_EXCHANGE_API_SECRET: "00",
-      }),
+    quietly(() =>
+      loadConfig(
+        env({
+          ...over,
+          NEXUS_EXCHANGE_API_KEY: "nx_test",
+          NEXUS_EXCHANGE_API_SECRET: "00",
+        }),
+      ),
     ),
   );
 }

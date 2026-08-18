@@ -83,9 +83,10 @@ jobs:
       id-token: write # mint the OIDC token npm uses to attest provenance
     environment: npm-publish # optional manual-approval / secret-scoping gate
     steps:
-      # `ref:` below accepts any ref, so a dispatch of `main` would publish from
-      # HEAD rather than a released tag. Constrain the input to what it claims
-      # to be. Passed via env, never interpolated into the script body.
+      # `ref:` below would otherwise accept any ref, so a dispatch of `main`
+      # would publish from HEAD rather than a released tag. Constrain the input
+      # to what it claims to be. Passed via env, never interpolated into the
+      # script body. Shape only — `refs/tags/` below constrains the kind.
       - name: Validate dispatch tag
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -99,7 +100,15 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
+          # Fully qualified: checkout fetches heads as well as tags for a bare
+          # name (`+refs/heads/v0.2.0*` alongside `+refs/tags/v0.2.0*`), so a
+          # branch named like a version would be a candidate ref. release-please
+          # emits a bare `v0.2.0`, and the guard above rejects a pre-qualified
+          # input, so this can't double up.
+          ref: refs/tags/${{ needs.release-please.outputs.tag_name || inputs.tag }}
+          # This job holds a publish credential and never pushes; don't leave
+          # the Actions token sitting in .git/config for later steps.
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:

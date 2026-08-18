@@ -48,6 +48,9 @@ concurrency:
 
 jobs:
   release-please:
+    # Push-only: a workflow_dispatch re-publish must not re-run release-please
+    # against main, where it could open or update a release PR as a byproduct.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the release tag + GitHub release
@@ -65,13 +68,35 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
+    # `!cancelled()` supplies the status-check function that stops GitHub from
+    # implying success() over `needs` — without it, publish is skipped whenever
+    # release-please is skipped or failing, which is exactly when the manual
+    # re-publish hatch needs to work. `!cancelled()` not `always()`, so a
+    # cancelled run doesn't go on to publish.
+    if: >-
+      !cancelled() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write # mint the OIDC token npm uses to attest provenance
     environment: npm-publish # optional manual-approval / secret-scoping gate
     steps:
+      # `ref:` below accepts any ref, so a dispatch of `main` would publish from
+      # HEAD rather than a released tag. Constrain the input to what it claims
+      # to be. Passed via env, never interpolated into the script body.
+      - name: Validate dispatch tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+            echo "::error::tag must be a released v<major>.<minor>.<patch> tag, got '$TAG'"
+            exit 1
+          fi
+          echo "publishing tag $TAG"
+
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
@@ -99,8 +124,10 @@ jobs:
       # (release.yml, environment npm-publish) and `id-token: write` above, npm
       # exchanges the Actions OIDC token for a short-lived, 2FA-satisfying
       # publish credential. Trusted publishing needs npm >= 11.5.1; Node 22
-      # bundles npm 10.x, so upgrade the CLI first.
+      # bundles npm 10.x, so upgrade the CLI first. Pinned to the capability
+      # floor rather than `@latest`: this is the step holding a publish
+      # credential, and a bad npm release shouldn't land in it unannounced.
       #   --provenance:    signed build-provenance attestation.
       #   --access public: a scoped @nexus-xyz/ package is private by default.
-      - run: npm install -g npm@latest
+      - run: npm install -g "npm@^11.5.1"
       - run: npm publish --provenance --access public

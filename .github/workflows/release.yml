@@ -13,25 +13,30 @@ name: Release
 #
 # Security posture:
 #   - Default-deny permissions at the top; each job is granted only what it needs.
-#   - The NPM_TOKEN is referenced exclusively by the publish job, which runs only
-#     on a release commit on main — never on PRs.
+#   - No long-lived npm secret: the publish job authenticates via OIDC trusted
+#     publishing (a trusted publisher registered on npmjs.com for this repo +
+#     workflow). npm exchanges the Actions OIDC token for a short-lived
+#     credential at publish time -- nothing to leak, and it satisfies
+#     require-2FA-on-publish. Runs only on a release commit or manual dispatch,
+#     never on PRs (a fork PR can't assume this repo's OIDC subject anyway).
 #   - Provenance (--provenance + id-token: write) signs the published tarball so
 #     consumers can verify it was built from this repo at this commit.
 #   - npm ci installs exactly the lockfile; the registry rejects re-publishing an
 #     existing version, so a re-run can't clobber a release.
-#
-# First-release bootstrap (remove after v0.1.0 ships):
-#   The repo has no tags or releases yet, so .release-please-manifest.json is
-#   seeded empty ({}) — it records *published* versions only, and nothing is
-#   published. release-please-config.json pins `initial-version: 0.1.0` so the
-#   very first release PR proposes exactly 0.1.0 (matching package.json) instead
-#   of computing a bump past it. After the 0.1.0 release lands, delete the
-#   `initial-version` key — release-please writes the released version into the
-#   manifest and takes over normal conventional-commit versioning from there.
 
 on:
   push:
     branches: [main]
+  # Manual re-publish of an already-cut tag (e.g. when the automatic
+  # publish job failed after release-please created the release). Publishes
+  # the given existing tag to npm; the registry rejects clobbering an
+  # already-published version, so this is safe to retry.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish to npm, e.g. v0.2.0"
+        required: true
+        type: string
 
 # Default-deny; jobs opt into the minimum they need.
 permissions: {}
@@ -60,7 +65,7 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,11 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
@@ -89,8 +94,13 @@ jobs:
       # Sanity-check the tarball contents (dist + bin entries present).
       - run: npm pack --dry-run
 
-      # --provenance: signed build-provenance attestation.
-      # --access public: scoped (@nexus-xyz/…) packages are private by default.
+      # Publish via OIDC trusted publishing -- no long-lived npm secret. With a
+      # trusted publisher registered on npmjs.com for this repo + workflow
+      # (release.yml, environment npm-publish) and `id-token: write` above, npm
+      # exchanges the Actions OIDC token for a short-lived, 2FA-satisfying
+      # publish credential. Trusted publishing needs npm >= 11.5.1; Node 22
+      # bundles npm 10.x, so upgrade the CLI first.
+      #   --provenance:    signed build-provenance attestation.
+      #   --access public: a scoped @nexus-xyz/ package is private by default.
+      - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

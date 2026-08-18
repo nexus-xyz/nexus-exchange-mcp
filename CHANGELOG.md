@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.2.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.1.0...v0.2.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* `ExchangeConfig.network` and `ExchangeConfig.funds` are replaced by `ExchangeConfig.target` (`target.id`, `target.funds`). Tools that move value now refuse a target whose funds are undeclared: `place_order`, `place_orders_batch`, `amend_order`, `deposit_collateral`, `submit_deposit`, `adjust_isolated_margin` and `create_bridge_deposit_address` require `real` or `play`; `claim_faucet` and `claim_credit` require `play` plus a declared faucet. A bare `NEXUS_EXCHANGE_API_URL` resolves to the same URLs it always did, so read-only use is unaffected — but trading against one now needs the network named (`NEXUS_EXCHANGE_NETWORK=local`) or the stage described.
+* the five paginated list tools return `{ items, next_cursor }` instead of a bare array. There is nowhere else in an MCP tool result to carry pagination state, and a shape that appears only when a cursor happens to exist would be worse for an agent than a consistent envelope.
+
+### Features
+
+* adopt the {testnet, mainnet, local} network axis (ENG-6456) ([#57](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/57)) ([53f5b37](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/53f5b37c1930471366cea27aad7f99e7f33b3d8a))
+* deprecate bare `NEXUS_EXCHANGE_API_URL` in favour of `NEXUS_EXCHANGE_NETWORK=custom` (ENG-10957) ([#67](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/67)) ([a682be3](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/a682be3d3e41043b67576721bfa05e706ac260a5))
+* deprecate bare NEXUS_EXCHANGE_API_URL in favour of NEXUS_EXCHANGE_NETWORK=custom (ENG-10957) ([a682be3](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/a682be3d3e41043b67576721bfa05e706ac260a5))
+* expose v0.7.1 tool surface — COD, bridge Phase A, TrailingLimit (ENG-6136) ([#44](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/44)) ([305b05c](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/305b05c88e8f7d78d3ba8cb47d9dfafc9ba0e48c))
+* expose v0.7.2 cursor pagination on the five list tools (ENG-7424) ([#51](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/51)) ([d9b830e](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/d9b830ebfaf8b35fefaa7de845fe61ecf9d1c10d))
+* promote the ad-hoc custom target to a first-class Custom network (ENG-9828) ([#63](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/63)) ([03deeaa](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/03deeaae045f9b3fce223dd9820ab5a511f62961))
+* spec-pin lifecycle — define the coverage unit, then verify and classify (ENG-7964) ([#56](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/56)) ([d7a629e](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/d7a629e4f930e098b93335d80480dc31702dba89))
+* surface portfolio-parity data in the MCP tools (ENG-6461) ([#47](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/47)) ([f9c1a13](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/f9c1a133aff4e62d4166e7ee0422aa1dbe2bf909))
+
+
+### Bug Fixes
+
+* carry the spec v0.7.2 limit maximum on three tools that omitted it (ENG-8173) ([#53](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/53)) ([562a681](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/562a681f38aee70e438d499a4ccf9abce4492650))
+* reject a non-JSON 2xx body instead of returning it as data (ENG-8170) ([#54](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/54)) ([36539af](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/36539af31bdce55aaac8d003be5524e4cce5469e))
+* require an explicit smoke target and reject non-JSON bodies (ENG-8092) ([#52](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/52)) ([b7125d6](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/b7125d69f372a258ebdc3907b5d49f68d2a1f308))
+
 ## 0.1.0 (2026-07-16)
 
 

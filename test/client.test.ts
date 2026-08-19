@@ -719,21 +719,31 @@ test("every tool advertises a name, description, and object input schema", () =>
   }
 });
 
-test("deriveBases splits an origin into direct (/api/v1) and gateway bases", () => {
-  // Bare origin (the new default form).
+test("deriveBases hangs both surfaces off one deployment base", () => {
+  // Premise inverted deliberately. This used to assert that the v1 base is the
+  // bare origin, which pinned the bug: `…/api/v1/*` at the public root is the
+  // marketing app's 404 HTML, and only `…/api/exchange/api/v1/*` reaches the
+  // API. The base names the deployment; the path names the surface.
   assert.deepEqual(deriveBases("https://exchange.nexus.xyz"), {
-    directBaseUrl: "https://exchange.nexus.xyz",
+    directBaseUrl: "https://exchange.nexus.xyz/api/exchange",
     gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
   });
-  // Legacy value that still carries the /api/exchange suffix is normalized so
-  // /api/v1 does not resolve to …/api/exchange/api/v1/… .
+  // A value that already carries the suffix normalizes to the same thing —
+  // applying gatewayPath cannot double it up.
   assert.deepEqual(deriveBases("https://exchange.nexus.xyz/api/exchange"), {
-    directBaseUrl: "https://exchange.nexus.xyz",
+    directBaseUrl: "https://exchange.nexus.xyz/api/exchange",
     gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
+  });
+  // The bare-indexer shape: gatewayPath "" means the deployment base IS the
+  // origin, so /api/v1 resolves at the root. This is the case ENG-4740
+  // generalized from, and it still holds — as data now, not as an assumption.
+  assert.deepEqual(deriveBases("http://localhost:9090/", ""), {
+    directBaseUrl: "http://localhost:9090",
+    gatewayBaseUrl: "http://localhost:9090",
   });
   // Trailing slashes are trimmed before deriving.
   assert.deepEqual(deriveBases("http://localhost:9090/"), {
-    directBaseUrl: "http://localhost:9090",
+    directBaseUrl: "http://localhost:9090/api/exchange",
     gatewayBaseUrl: "http://localhost:9090/api/exchange",
   });
 });
@@ -751,7 +761,7 @@ test("loadConfig derives both bases from NEXUS_EXCHANGE_API_URL", () => {
   } finally {
     console.error = stderr;
   }
-  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz/api/exchange");
   assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
 });
 

@@ -104,7 +104,9 @@ test("a custom bundle from env resolves to one descriptor, frozen", () => {
 
 test("the custom bundle drives transport the same way a network does", () => {
   const cfg = loadConfig(env(BUNDLE));
-  assert.equal(cfg.directBaseUrl, HOST);
+  // Both surfaces hang off the declared deployment shape: this bundle leaves
+  // gatewayPath at /api/exchange, so v1 sits under it too.
+  assert.equal(cfg.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.gatewayBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.wsUrl, "wss://exchange.example.invalid/api/exchange");
   assert.equal(
@@ -281,7 +283,7 @@ test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", (
   // and the deprecation adds a stderr notice and nothing else. Captured here so
   // the suite's own output stays clean.
   const cfg = quietly(() => loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })));
-  assert.equal(cfg.directBaseUrl, HOST);
+  assert.equal(cfg.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.gatewayBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.target?.id, "custom");
   assert.equal(cfg.target?.label, "custom");
@@ -296,7 +298,7 @@ test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", (
   const suffixed = quietly(() =>
     loadConfig(env({ NEXUS_EXCHANGE_API_URL: `${HOST}/api/exchange` })),
   );
-  assert.equal(suffixed.directBaseUrl, HOST);
+  assert.equal(suffixed.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(suffixed.gatewayBaseUrl, `${HOST}/api/exchange`);
 });
 

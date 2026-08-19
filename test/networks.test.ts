@@ -38,10 +38,12 @@ function captureStderr(fn: () => void): string {
 }
 
 test("the default target is unchanged: testnet, play funds, legacy host", () => {
-  // The whole change must be a no-op for anyone who sets nothing. This is the
-  // regression that would silently repoint every existing install.
+  // Target identity must stay a no-op for anyone who sets nothing — that is the
+  // regression this pins. The v1 BASE does move, deliberately: it used to be the
+  // bare origin, where `/api/v1/*` is the marketing app's 404. Same deployment,
+  // corrected surface.
   const cfg = loadConfig(env());
-  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz/api/exchange");
   assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
   assert.equal(cfg.target?.id, "testnet");
   assert.equal(cfg.target?.funds, "play");
@@ -53,7 +55,7 @@ test("a set-but-empty override falls back to the network, not to an error", () =
   // as "", so an empty value must mean "unset" rather than reaching URL parsing.
   for (const blank of ["", "   ", "\n"]) {
     const cfg = loadConfig(env({ NEXUS_EXCHANGE_API_URL: blank }));
-    assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+    assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz/api/exchange");
     assert.equal(cfg.target?.id, "testnet");
   }
   // Same for the network variable itself.
@@ -147,7 +149,7 @@ test("a URL override wins for transport and carries the declared network", () =>
       NEXUS_EXCHANGE_API_URL: "https://api.nexus.xyz",
     }),
   );
-  assert.equal(cfg.directBaseUrl, "https://api.nexus.xyz");
+  assert.equal(cfg.directBaseUrl, "https://api.nexus.xyz/api/exchange");
   assert.equal(cfg.target?.id, "mainnet");
   assert.equal(cfg.target?.funds, "real");
   // The network's own metadata rides along, so a faucet call still refuses here.
@@ -311,7 +313,7 @@ test("the network map and the loaded config are frozen", () => {
   } catch {
     /* as above */
   }
-  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz/api/exchange");
 });
 
 test("every declared network id has a descriptor and vice versa", () => {

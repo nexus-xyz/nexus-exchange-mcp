@@ -35,13 +35,18 @@ import {
 
 export interface ExchangeConfig {
   /**
-   * Direct-service origin that serves the `/api/v1` surface, no trailing slash
-   * and NO path suffix (e.g. `https://exchange.nexus.xyz`).
+   * Deployment base for the `/api/v1` surface, no trailing slash (e.g.
+   * `https://exchange.nexus.xyz/api/exchange`, or `http://localhost:9090` for a
+   * bare indexer). Tools with a v1 route hit `${directBaseUrl}/api/v1/...`.
    *
-   * Per ENG-4740 the indexer now serves its REST API directly under an
-   * `/api/v1` prefix at the host root (the OpenAPI `servers` override in
-   * nexus-exchange-api pins these paths to the root, not the gateway base).
-   * Tools that have a v1 route hit `${directBaseUrl}/api/v1/...`.
+   * NOT the bare host root on a gatewayed deployment. ENG-4740 read the spec's
+   * per-path `servers` override as pinning `/api/v1` to the root; measured, the
+   * public root answers `/api/v1/*` with the marketing app's 404 HTML and only
+   * `…/api/exchange/api/v1/*` reaches the API. See {@link deriveBases}.
+   *
+   * Equal to {@link ExchangeConfig.gatewayBaseUrl} by construction — one
+   * deployment, two surfaces that differ by path. Kept distinct so a call site
+   * still declares which surface it is addressing.
    */
   directBaseUrl: string;
   /**
@@ -159,20 +164,45 @@ export const API_SPEC_VERSION = "v0.8.1";
 export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
 
 /**
- * Split a configured base URL into the direct-service origin (serves
- * `/api/v1`) and the legacy gateway base (`origin/api/exchange`).
+ * Resolve a configured base URL into the bases the two REST surfaces hang off.
  *
- * We accept either form for `NEXUS_EXCHANGE_API_URL` so existing configs keep
- * working: a bare origin (`https://exchange.nexus.xyz`, the new default) OR a
- * value that still includes the old gateway suffix
- * (`https://exchange.nexus.xyz/api/exchange`). In the latter case we strip the
- * trailing `/api/exchange` before building v1 URLs — otherwise `/api/v1` would
- * wrongly resolve to `…/api/exchange/api/v1/…` (see nexus-exchange-api#41).
+ * `gatewayPath` names the *deployment shape*, not just where the legacy routes
+ * live: `/api/exchange` for a host behind the public gateway, `""` for a bare
+ * indexer serving at its root. BOTH surfaces sit under it — the base names the
+ * deployment, the path names the surface (`/api/v1/account` vs `/account`), and
+ * the two are composed at request time.
  *
- * `gatewayPath` is where the legacy surface hangs off the origin. It defaults to
- * `/api/exchange` — the public host's convention and the only behaviour this
- * function had before — and the network map overrides it for `local`, whose
- * spec `servers` entry is the bare origin (see `NetworkDescriptor.gatewayPath`).
+ * This previously stripped `/api/exchange` when building the v1 base, on the
+ * premise (ENG-4740, nexus-exchange-api#41) that the indexer serves `/api/v1`
+ * at the host root. That premise was read faithfully off the spec — the
+ * per-path `servers` override on `/api/v1/*` really does list the bare
+ * `https://exchange.nexus.xyz` — but the SPEC IS WRONG about the public host.
+ * That is true of `local` and false of the public host, where the marketing app
+ * owns the root. Measured against `exchange.nexus.xyz`:
+ *
+ *     /api/v1/account                 404, text/html   (Next.js frontend)
+ *     /api/exchange/api/v1/account    401, application/json  (auth reached)
+ *
+ * `local` is unaffected because its `gatewayPath` is `""`, so the deployment
+ * base IS the origin and `/api/v1/...` still resolves at the root — the shape
+ * the old premise described, now expressed as data rather than assumed.
+ *
+ * The signed path is unchanged either way: HMAC covers the logical path
+ * (`/api/v1/account`), never the deployment prefix, because the gateway strips
+ * its own prefix before the indexer verifies.
+ *
+ * DELIBERATE DIVERGENCE FROM THE PINNED SPEC — do not "correct" this back when
+ * syncing. `scripts/check_spec_drift.py` invariant 4/5 checks the GATEWAY base
+ * against the spec's ROOT servers, which still agree; nothing checks the v1 base
+ * against the per-path override, so a sync that restores the old stripping will
+ * pass drift and silently 404 every v1 tool again. The upstream fix belongs in
+ * nexus-exchange-api's per-path `servers` list; until it lands, reality wins
+ * over the contract here and this comment is the guard.
+ *
+ * Either form of `NEXUS_EXCHANGE_API_URL` is still accepted so existing configs
+ * keep working: a bare origin, or a value that still carries the `/api/exchange`
+ * suffix — the suffix is normalized off the origin before `gatewayPath` is
+ * applied, so passing it cannot double up.
  */
 export function deriveBases(
   raw: string,
@@ -182,8 +212,12 @@ export function deriveBases(
   gatewayBaseUrl: string;
 } {
   const trimmed = raw.replace(/\/+$/, "");
-  const directBaseUrl = trimmed.replace(/\/api\/exchange$/, "");
-  return { directBaseUrl, gatewayBaseUrl: `${directBaseUrl}${gatewayPath}` };
+  const origin = trimmed.replace(/\/api\/exchange$/, "");
+  // One deployment base, two surfaces. These are equal by construction and the
+  // distinction between them lives in the request path; they are kept as
+  // separate fields so call sites still say which surface they mean.
+  const deploymentBase = `${origin}${gatewayPath}`;
+  return { directBaseUrl: deploymentBase, gatewayBaseUrl: deploymentBase };
 }
 
 /**

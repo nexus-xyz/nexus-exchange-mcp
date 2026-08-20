@@ -151,7 +151,12 @@ v0.7.1 without mapping the surface those releases had added. ENG-6136 then
 exposed those additions as tools, and ENG-6461 advanced the pin to v0.7.2
 together with the portfolio-parity surface it added. ENG-9342 then advanced it
 to v0.7.3, pin-only again — the surface that release added is the gap ENG-9636
-tracks. Below, the spec version each addition shipped in is noted:
+tracks. ENG-10482 then advanced the pin to v0.8.1, which added and removed no
+route: both tags document the same 101 operations, and all 92 documented 2xx
+bodies stay `application/json`. That is why the counts above did not move — not
+that the two releases were empty. v0.8.x did change schemas on routes this server
+already maps, and the additions it does not expose are listed with the gap below.
+Below, the spec version each addition shipped in is noted:
 
 - **Portfolio parity** (v0.7.2) — `get_portfolio_history`
   (`GET /api/v1/account/portfolio-history`: equity + PnL + volume series over a
@@ -201,14 +206,36 @@ The v0.7.2 `cursor` query parameter (ENG-5506) is now exposed on the five
 paginated list tools — see "Pagination" below. It adds no route, so the operation
 count above is unaffected.
 
-One schema-only addition is **not** exposed, and it does not affect the
-operation count. v0.7.3 documents the optional `max_slippage_bps` field on
+Two optional request fields are documented but **not** exposed, and neither
+affects the operation count. v0.7.3 documents `max_slippage_bps` on
 `place_order`, `place_orders_batch`, and `preview_order` (ENG-7550) — note the
 engine has always accepted and enforced it (the fill VWAP is bounded against the
 mid captured at submission, and the remainder cancels when the cap would be
 crossed); v0.7.3 puts it on the public contract rather than introducing it, so
 this is exposure work, not a new capability. Tracked with the bridge-wallet
 routes as ENG-9636.
+
+v0.8.0 documents the optional `stp` field on those same three order tools — the
+public exposure ENG-5022 asked for. It is opt-in self-trade prevention, one of
+`CancelNewest`, `CancelOldest` or `DecrementAndCancel`, where omitted or `null`
+means self-matching is allowed: that is the default and the industry-standard
+behaviour, so a caller who never sets it is unaffected. The engine has always
+accepted it, so this too is exposure work rather than a new capability. The same
+release added two read-only companions on `Order` that this server does not
+surface either — `stp` echoes back the mode an order was placed with, and
+`cancellation_reason` reports why a terminal order was cancelled (`null`, a bare
+string, or a single-key object such as `{"Stp": "CancelOldest"}`). None of the
+three adds a route. ENG-9636 is scoped to the v0.7.3 surface and does **not**
+cover them; the v0.8.x surface needs its own follow-up.
+
+One already-mapped route did change its response body: v0.8.1 repointed both
+`funding-samples` operations from `FundingSample` to a new `FundingPremiumSample`
+carrying only `timestamp` and `premium_index`. `FundingSample` is otherwise
+unchanged and still serves `GET /markets/{market_id}/funding`, so this is a
+schema repoint rather than a property removal — but the effect on the
+`funding-samples` body is that `funding_rate`, `mark_price` and `oracle_price`
+are gone from it. `get_funding_samples` describes the series and never named
+those keys, and nothing in this repo reads them, so no tool description drifted.
 
 Reconciling the liveness surface: v0.7.0 removed the standalone `/health` and
 `/ready` routes from the public contract (only `/status` remains), so the former
@@ -509,6 +536,12 @@ autobump's own, where the pin _is_ the change. It enforces three invariants:
 2. `endpoints.txt` matches the per-tool `ops` declarations byte-for-byte (it is a
    generated artifact, not a hand-maintained list);
 3. each tool's declared `ops` match the operations its handler actually requests.
+
+All three key an operation on `METHOD /path` (placeholder names normalized), never
+on `operationId`. Ids are not stable across releases: v0.8.0 swapped
+`createWsToken` and `createWsTokenLegacy` between `POST /ws/token` and
+`POST /ws-tokens` — changing no route, and nothing this server calls, but a guard
+keyed on ids would have broken on it anyway.
 
 ```bash
 npm run spec:drift        # verify against the pinned spec

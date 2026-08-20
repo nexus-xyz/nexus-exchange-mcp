@@ -60,9 +60,12 @@ export interface ExchangeConfig {
    * proxy that signs with the site's own frontend key, so per-caller HMAC
    * headers are not honored there — authenticated reads/trades resolve to the
    * site account, not yours. To act as a specific account against a legacy
-   * route, point NEXUS_EXCHANGE_API_URL at a direct indexer gateway that
-   * verifies client HMAC (auth.rs::verify_hmac), e.g. a local
-   * `http://localhost:9090`. See the README "Authentication" section.
+   * route, target a direct indexer gateway that verifies client HMAC
+   * (auth.rs::verify_hmac): `NEXUS_EXCHANGE_NETWORK=local` for the
+   * `http://localhost:9090` from the exchange `docker-compose`, or the `custom`
+   * bundle with `NEXUS_EXCHANGE_GATEWAY_PATH=/`. Naming the network is what
+   * carries the bare-origin shape — a bare `NEXUS_EXCHANGE_API_URL` assumes the
+   * public-gateway path. See the README "Authentication" section.
    */
   gatewayBaseUrl: string;
   /** HMAC API key id (header `x-api-key`). Optional — only needed for private tools. */
@@ -193,11 +196,13 @@ export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
  *
  * DELIBERATE DIVERGENCE FROM THE PINNED SPEC — do not "correct" this back when
  * syncing. `scripts/check_spec_drift.py` invariant 4/5 checks the GATEWAY base
- * against the spec's ROOT servers, which still agree; nothing checks the v1 base
- * against the per-path override, so a sync that restores the old stripping will
- * pass drift and silently 404 every v1 tool again. The upstream fix belongs in
- * nexus-exchange-api's per-path `servers` list; until it lands, reality wins
- * over the contract here and this comment is the guard.
+ * against the spec's ROOT servers, which still agree, and nothing there checks
+ * the v1 base against the per-path override — so a sync that restores the old
+ * stripping passes `spec:drift` green. What catches it is `npm test`:
+ * "deriveBases hangs both surfaces off one deployment base" pins the composed v1
+ * base, so restoring the stripping fails a required check rather than only
+ * contradicting a comment. The upstream fix belongs in nexus-exchange-api's
+ * per-path `servers` list; until it lands, reality wins over the contract here.
  *
  * Either form of `NEXUS_EXCHANGE_API_URL` is still accepted so existing configs
  * keep working: a bare origin, or a value that still carries the `/api/exchange`
@@ -319,7 +324,10 @@ function warnIfPlaintext(baseUrl: string): void {
  */
 const BARE_URL_DEPRECATION_NOTICE =
   "nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated " +
-  "and still works, unchanged. Prefer NEXUS_EXCHANGE_NETWORK=custom with " +
+  "and still works. On its own it also assumes the PUBLIC-GATEWAY shape, so " +
+  "/api/v1 resolves under /api/exchange; for an indexer that serves at its " +
+  "root, add NEXUS_EXCHANGE_NETWORK=local or the bundle's " +
+  "NEXUS_EXCHANGE_GATEWAY_PATH=/. Prefer NEXUS_EXCHANGE_NETWORK=custom with " +
   "NEXUS_EXCHANGE_NETWORK_LABEL and NEXUS_EXCHANGE_FUNDS: the bundle declares " +
   "whose money is behind the URL, which a bare URL cannot — so the tools that " +
   'cannot be undone refuse on it. See the README "A custom stage".';
@@ -513,11 +521,21 @@ function resolveTarget(env: NodeJS.ProcessEnv): TargetSelection {
       funds: desc?.funds ?? "unknown",
       faucet: desc?.faucet ?? false,
       restBase: normalizeBaseUrl(override),
-      // Taken literally. Only the network map may change this: the caller gave
-      // us a URL, and `/api/exchange` is what every existing config already
-      // resolves to, so this stays byte-identical for anyone upgrading. A custom
-      // stage that needs the bare-origin shape says so with the bundle above.
-      gatewayPath: "/api/exchange",
+      // A named network keeps its own deployment SHAPE; the URL only redirects
+      // the HOST. `local` serves both surfaces at its origin (`gatewayPath:
+      // ""`), so taking the URL and discarding the shape would send
+      // `/api/v1/*` to `…/api/exchange/api/v1/*` on a bare indexer that serves
+      // nothing under that prefix. This field used to move only the LEGACY
+      // base, which is why hardcoding it here was invisible; now that both
+      // surfaces hang off it (see {@link deriveBases}) it decides where v1
+      // lands too, and a hardcode silently 404s every v1 tool.
+      //
+      // With no network named — the deprecated bare-URL form — there is no
+      // descriptor to read a shape from, so the public-gateway convention
+      // stands: that is what every existing config already resolves to. A bare
+      // indexer declares itself with `NEXUS_EXCHANGE_NETWORK=local` (host
+      // included) or the custom bundle's `NEXUS_EXCHANGE_GATEWAY_PATH=/`.
+      gatewayPath: desc?.gatewayPath ?? "/api/exchange",
     });
     // The deprecated form is the URL SELECTING the target. With a network also
     // named, the network selected it and the URL only redirected the host —

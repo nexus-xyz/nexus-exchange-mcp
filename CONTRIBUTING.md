@@ -32,10 +32,14 @@ write); run `npm run format` to fix.
 `npm run smoke` spins the server up in-process (over the SDK's in-memory
 transport), lists the tools, and calls `list_markets` against the target you
 name. There is **no default target** — set `NEXUS_EXCHANGE_API_URL` to a host
-that serves the `/api/v1` surface:
+that serves the Exchange API. Where `/api/v1` hangs off that host is the
+deployment's gateway path, which comes from the network (ENG-6221), so a local
+indexer serving at its root wants the network named alongside the URL:
 
 ```bash
-NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
+NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
+# or, against the public host, where the bare-URL default shape is the right one:
+NEXUS_EXCHANGE_API_URL=https://exchange.nexus.xyz npm run smoke
 ```
 
 Unset, the check stops before calling anything and names the variable. Pointed

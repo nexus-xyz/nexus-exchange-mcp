@@ -14,9 +14,20 @@ A 404 whose body is HTML (not JSON) means the request reached a web app, not
 the exchange API — the host you're pointing at doesn't serve the direct
 `/api/v1` surface. Check `NEXUS_EXCHANGE_API_URL`:
 
-- It must be the API **host root** (e.g. `https://exchange.nexus.xyz` or
+- It must be the deployment's **host** (e.g. `https://exchange.nexus.xyz` or
   `http://localhost:9090`) — not a path like `…/api/v1`. A legacy value ending
   in `/api/exchange` is accepted and normalized.
+- **Check the gateway path, which is where `/api/v1` hangs off that host.** It
+  comes from the network, not the URL (ENG-6221): the public host serves
+  `…/api/exchange/api/v1/…`, while an indexer serving at its root needs
+  `NEXUS_EXCHANGE_NETWORK=local` alongside the URL (or the `custom` bundle's
+  `NEXUS_EXCHANGE_GATEWAY_PATH=/`). A bare `NEXUS_EXCHANGE_API_URL` assumes the
+  public-gateway shape, so pointing it alone at a bare indexer sends `/api/v1/*`
+  under `/api/exchange`, where that indexer serves nothing.
+- Pointing at the **bare public root** used to be the documented advice and was
+  the cause of this exact 404: `https://exchange.nexus.xyz/api/v1/*` is the
+  marketing app. Composing the v1 surface under the gateway path is what
+  ENG-6221 fixed.
 - Legacy-gateway tools (marked "(legacy)" in the top-level README table) can
   work while `/api/v1` tools 404 on the same host — that's the dual-stack
   migration (ENG-4740/ENG-4751), not a bug in your config.

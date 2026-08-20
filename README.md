@@ -12,9 +12,11 @@ read from environment variables.
 
 ## What works today
 
-Most tools now target the direct-indexer **`/api/v1`** surface served at the
-host root (ENG-4740 — the indexer serves its REST API directly instead of via
-the gateway REST proxy). The routes that have no `/api/v1` equivalent stay on
+Most tools now target the direct-indexer **`/api/v1`** surface, served under
+the deployment's gateway path (ENG-4740 — the indexer serves its REST API
+directly instead of via the gateway REST proxy — as corrected by ENG-6221:
+`…/api/exchange/api/v1/…` on the public host, and at the origin on a bare
+indexer such as `local`). The routes that have no `/api/v1` equivalent stay on
 the **legacy `/api/exchange`** gateway, which remains live dual-stack
 (ENG-4751), so nothing breaks. See "Migration to `/api/v1`" below.
 
@@ -98,22 +100,34 @@ single-target lookup is still unbuilt server-side.
 
 Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
 service exposes its own REST API and the indexer serves the exchange surface
-directly under `/api/v1` at the host root. This server calls those routes for
-the v0.8.1 operations it exposes as tools (see
+directly under `/api/v1`. This server calls those routes for the v0.8.1
+operations it exposes as tools (see
 [API-surface coverage](#api-surface-coverage) below).
 
-- **Base URL is the host root** (`https://exchange.nexus.xyz`), not the
-  `…/api/exchange` gateway path. `/api/v1/*` resolves at the root; the
-  legacy-only routes append `/api/exchange`. A `NEXUS_EXCHANGE_API_URL` that
-  still ends in `/api/exchange` is accepted and normalized. Which host that is
-  comes from the [network axis](#networks).
-- **Two surfaces, one host — so "the base URL" differs per SDK by design.** The
-  configured value here is the host **root**, from which both surfaces are
-  derived: `<root>/api/v1` (direct indexer) and `<root>/api/exchange` (legacy
-  gateway). A sibling SDK whose single base URL reads `…/api/v1` and one whose
-  reads `…/api/exchange` are therefore not in conflict — they name different
-  surfaces of the same deployment, and this server holds both at once. If you are
-  comparing configs across the SDKs, compare the surface, not the string.
+- **Both surfaces hang off the deployment base**, which is the origin plus the
+  network's gateway path — `https://exchange.nexus.xyz/api/exchange` on the
+  public host, and the bare origin (`http://localhost:9090`) on an indexer that
+  serves at its root, like `local`. So `/api/v1/*` resolves at
+  `…/api/exchange/api/v1/*` on the public host and at the origin on `local`.
+  **ENG-6221 corrected this**: the v1 base used to be composed at the bare host
+  root, where the public site serves its marketing app, so every `/api/v1` tool
+  answered 404 with a page of HTML. This deliberately diverges from the pinned
+  spec, whose per-path `servers` override still lists the bare root for
+  `/api/v1/*` — measured, only the gateway path answers, so reality wins and the
+  upstream fix belongs in `nexus-exchange-api`. A `NEXUS_EXCHANGE_API_URL` that
+  still ends in `/api/exchange` is accepted and normalized, so it cannot double
+  up. Which host that is comes from the [network axis](#networks) — and a named
+  network keeps its own gateway path when `NEXUS_EXCHANGE_API_URL` only
+  redirects the host, so `NEXUS_EXCHANGE_NETWORK=local` with a URL still serves
+  both surfaces at the origin.
+- **Two surfaces, one base — so "the base URL" differs per SDK by design.**
+  Both surfaces are derived from the same deployment base, and which one a
+  request addresses is named by its **path** (`/api/v1/account` versus the bare
+  `/account`) rather than by a different host. A sibling SDK whose single base
+  URL reads `…/api/v1` and one whose reads `…/api/exchange` are therefore not in
+  conflict — they name different surfaces of the same deployment, and this
+  server holds both at once. If you are comparing configs across the SDKs,
+  compare the surface, not the string.
 - **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
   v1 routes, the bare route (`/orders`) for legacy ones.
 - **`cancel_order` requires `market_id`** when cancelling a single order (the
@@ -713,24 +727,36 @@ npm run test:coverage # unit tests + coverage (text/lcov/json-summary); CI emits
 npm run spec:drift # tool surface vs. the pinned spec (see "Spec drift" above)
 ```
 
-The smoke check runs end-to-end against a live gateway:
+The smoke check runs end-to-end against a live deployment. Against a local
+indexer, name the network too, so the target keeps the bare-origin shape:
 
 ```bash
-NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
+NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
+```
+
+The public host works as well, and needs no network named — the deprecated
+bare-URL form assumes the public-gateway shape, which is the right one there:
+
+```bash
+NEXUS_EXCHANGE_API_URL=https://exchange.nexus.xyz npm run smoke
 ```
 
 Expected output ends with `list_markets OK -> N markets`.
 
 It **requires an explicit `NEXUS_EXCHANGE_API_URL`** and has no default
-(ENG-8092); it names its target with that variable, so a run prints the
-bare-URL deprecation notice on stderr and then proceeds — `list_markets` is a
-read, and reads are never funds-guarded. It must be a host that serves the
-`/api/v1` surface — the
-public site root (`https://exchange.nexus.xyz`) serves the marketing app there
-and answers `/api/v1/markets/summary` with a 404 page of HTML, so a run against
-it can only fail. If the target answers with HTML rather than JSON, on a 404 or
-on a 200, the check says so by name and exits non-zero; it never reports a
-passing run for a body it could not read as market-summary JSON.
+(ENG-8092) — `list_markets` is a read, and reads are never funds-guarded. The
+URL names the host; the **gateway path** decides where `/api/v1` lands under it
+(ENG-6221), and that comes from the network. So `NEXUS_EXCHANGE_API_URL` alone
+resolves `…/api/exchange/api/v1/…` and prints the bare-URL deprecation notice on
+stderr before proceeding, while `NEXUS_EXCHANGE_NETWORK=local` alongside it
+serves both surfaces at the origin and prints no notice — the network declared
+the target, so the URL only redirected the host. Pointing a bare
+`NEXUS_EXCHANGE_API_URL` at an indexer that serves at its root sends
+`/api/v1/*` under `/api/exchange`, where a bare indexer serves nothing; name the
+network, or use the custom bundle's `NEXUS_EXCHANGE_GATEWAY_PATH=/`. If the
+target answers with HTML rather than JSON, on a 404 or on a 200, the check says
+so by name and exits non-zero; it never reports a passing run for a body it
+could not read as market-summary JSON.
 
 ## License
 

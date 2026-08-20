@@ -223,11 +223,23 @@ interface RequestOptions {
    */
   auth?: AuthMode;
   /**
-   * Which base URL to hit. "v1" (default) is the direct-service host root that
-   * serves `/api/v1`; "gateway" is the legacy `/api/exchange` proxy, used by
-   * the routes without a v1 equivalent. Defaulting to "v1" fails safe: a route
-   * missing a v1 counterpart 404s loudly rather than silently resolving to the
-   * wrong account through the public gateway proxy.
+   * Which surface this route belongs to: "v1" (default) for the `/api/v1/*`
+   * routes, "gateway" for the legacy routes without a v1 equivalent.
+   *
+   * A DECLARATION, not a router. Since ENG-6221 both surfaces hang off the same
+   * deployment base (`directBaseUrl === gatewayBaseUrl` by construction — see
+   * `deriveBases`), so this value no longer changes the composed URL; the
+   * request path alone decides where a call lands.
+   *
+   * It therefore does not fail safe by itself. While the v1 base was the bare
+   * host root, defaulting to "v1" did: a bare route sent without this option
+   * 404'd at that root. Now it would compose the LIVE legacy route instead — and
+   * on the public host that proxy signs with the site's own frontend key (`GET
+   * /api/exchange/agents` answers `200` unauthenticated), so a misrouted
+   * *signed* call would resolve against the site identity rather than fail. The
+   * guard is therefore explicit: `send` rejects a non-v1 path that does not
+   * declare `"gateway"`, and `test/client.test.ts` scans the source so a call
+   * site that omits it fails `npm test` rather than at runtime.
    */
   surface?: "v1" | "gateway";
 }
@@ -434,6 +446,23 @@ export class ExchangeClient {
         throw new MissingAdminSecretError(where);
       }
       headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
+    }
+
+    // Restores the fail-safe ENG-6221 removed. Both bases are now the same
+    // deployment base, so an undeclared bare route no longer 404s at a bare
+    // root — it composes the live legacy route, which on the public host is a
+    // proxy signing with the site's own key. That must be loud rather than
+    // silent. This is a programming error, not an operator one: every call site
+    // is in this repo and all of them declare it today, which
+    // `test/client.test.ts` pins by scanning the source.
+    if (opts.surface !== "gateway" && !/^\/api\/v1(?:\/|$)/.test(opts.path)) {
+      throw new Error(
+        `client: ${method} ${opts.path} is not an /api/v1 route, so it must ` +
+          `declare surface: "gateway". Both surfaces hang off one deployment ` +
+          `base (ENG-6221), so an undeclared bare route is sent to the legacy ` +
+          `gateway proxy instead of failing — and that proxy signs with the ` +
+          `site's own key on the public host.`,
+      );
     }
 
     const base =

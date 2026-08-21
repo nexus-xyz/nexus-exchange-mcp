@@ -29,7 +29,7 @@ INVARIANTS
 
 2. manifest == declarations
    endpoints.txt equals the union of the per-tool `ops` declarations, minus the
-   two documented allowlists. The file is regenerated and compared byte-for-byte,
+   one documented allowlist. The file is regenerated and compared byte-for-byte,
    so the manifest cannot be edited into fiction and cannot fall behind a tool
    change: it is an emitted artifact, not a hand-maintained list. `--write`
    regenerates it.
@@ -68,15 +68,19 @@ INVARIANTS
 
 ALLOWLISTS
 ----------
-Two named, documented sets hold the deliberate exceptions — an operation is only
-kept out of endpoints.txt if it is in one of them:
+ONE named set holds the deliberate operation exceptions — an operation is only
+kept out of endpoints.txt if it is in it:
 
   * NON_SPEC_TARGETS — called by a tool but outside the OpenAPI contract.
-  * CODE_ONLY_OPS    — called by a tool and ahead of the pinned spec.
 
 Plus TOOLS_WITHOUT_OPS, naming the tools that legitimately call no operation at
-all. Every entry in all three carries a stale-entry check so the lists cannot rot
-into permanent exemptions.
+all. Every entry in both carries a stale-entry check so the lists cannot rot into
+permanent exemptions.
+
+CODE_ONLY_OPS is NOT an allowlist. It is a tripwire that must stay empty: any
+entry aborts the run, in verify AND in --write, because an operation the contract
+does not define must not be implemented at all (ENG-8616 / ENG-8619). See its
+comment for the policy.
 
 Usage:
   check_spec_drift.py <openapi.json>            # verify (CI)
@@ -117,16 +121,46 @@ NON_SPEC_TARGETS = {
     ("GET", "/demo/orders"),
 }
 
-# Called by a tool and AHEAD OF the pinned spec, so kept out of endpoints.txt
-# until the pin catches up — adding one now would (correctly) fail invariant 1.
-# Move an entry out once the pinned spec ships the operation; the stale-entry
-# check below flags it the moment that happens, so this cannot become a
-# permanent exemption.
+# MUST STAY EMPTY. Any entry fails the run — see enforce_no_parked_ops().
 #
-# Empty today: the pin is at the latest released spec and every operation the
-# tools call is either in it or in NON_SPEC_TARGETS. The mechanism exists so a
-# tool CAN legitimately land ahead of the pin without the checker forcing a
-# choice between a red build and a dishonest manifest.
+# THE POLICY (ENG-8616, 2026-08-20; this surface is ENG-8619)
+#   An endpoint the contract does not define must not be implemented. An
+#   operation absent from the spec is DELETED from the tool, not parked here, and
+#   it is implemented only once a PUBLISHED spec version defines it. There is no
+#   attribution, no parking, and no release-lag exception: an SDK that wants an
+#   operation waits for the tag that defines it. The cost is one release cycle.
+#
+# WHY THE MECHANISM ITSELF HAD TO GO, not just its entries
+#   This set used to mean "implemented, but ahead of the pinned spec", and it
+#   carried two rot checks: the operation stopped being called, or the pin caught
+#   up. BOTH ONLY FIRE WHEN SOMETHING CHANGES. An operation that has never
+#   appeared in any spec version — and never will — satisfies neither and sits
+#   green forever. Across the fleet that is exactly what happened: four phantom
+#   operations (`POST /account/margin-mode`, `POST /account/leverage`, transfers,
+#   sub-accounts) survived several spec generations parked in the equivalent
+#   lists, and the "move it out once the pin catches up" premise never once held
+#   for any of them. Two softer proposals were rejected with them: attribution
+#   (`op -> (caller, "ENG-XXXX")`), because a ticket reference beside a phantom
+#   operation only makes it look sanctioned; and a carve-out for operations in
+#   the monorepo spec but not yet in the pinned tag, because that IS the state
+#   this rule exists to remove.
+#
+# WHY IT MATTERS HERE SPECIFICALLY
+#   This package publishes to npm (ENG-6221), so a tool calling an uncontracted
+#   route no longer just sits in a repo: it ships to real installs, where it
+#   HMAC-signs a request at a path nothing serves and surfaces as an opaque 404
+#   to an agent that has no way to tell "not built yet" from "your credentials
+#   are wrong".
+#
+# WHAT TO DO INSTEAD, when the checker sends you here
+#   Delete the operation from the tool. If the tool has no other operation it
+#   becomes a TOOLS_WITHOUT_OPS entry or it goes too. If the route exists but is
+#   undocumented, the fix is upstream — document it in nexus-exchange-api and
+#   bump `.api-version` to the release that carries it (spec-autobump.yml opens
+#   that PR). If it is genuinely outside the contract and always will be, it is a
+#   NON_SPEC_TARGETS candidate: that set is for routes nobody intends to
+#   document, like the `/demo/*` fixtures, and it is argued case by case — not a
+#   second door into this one.
 CODE_ONLY_OPS = set()
 
 # Tools that call no spec operation at all. `ops: []` is a legitimate
@@ -145,7 +179,7 @@ TOOLS_WITHOUT_OPS = {
 # Spec operations this server deliberately does not target. They show up in the
 # informational "genuinely not covered" list at the end of a run, and that is
 # correct — documented here so the exclusion reads as a decision rather than an
-# oversight. Unlike the allowlists above these need no entry in any set: nothing
+# oversight. Unlike the allowlist above these need no entry in any set: nothing
 # claims them, so nothing can go stale.
 #
 #   GET /stream — the deprecated SSE stream, superseded by the /ws upgrade.
@@ -717,10 +751,14 @@ MANIFEST_HEADER = """\
 #   meant to, so a raw covered/total ratio understates coverage for every surface
 #   equally. The checker prints the split.
 #
-# Two documented allowlists in scripts/check_spec_drift.py hold operations a tool
-# calls that are deliberately absent here — NON_SPEC_TARGETS (outside the OpenAPI
-# contract, e.g. the `/demo/*` sample routes) and CODE_ONLY_OPS (ahead of the
-# pinned spec). Adding either to this file would fail the manifest -> spec check.
+# One documented allowlist in scripts/check_spec_drift.py holds operations a tool
+# calls that are deliberately absent here — NON_SPEC_TARGETS, for routes outside
+# the OpenAPI contract that nobody intends to document (the `/demo/*` fixtures).
+# Adding one to this file would fail the manifest -> spec check.
+#
+# There is no "ahead of the pinned spec" exception: an operation the contract does
+# not define is not implemented at all, so it never reaches this file
+# (ENG-8616/ENG-8619).
 #
 # Format: METHOD /path, one per line, path spelled exactly as the spec spells it.
 """
@@ -773,11 +811,20 @@ def parse_manifest_text(text, path=MANIFEST):
 
 def declared_manifest_ops(tools):
     """The operation set endpoints.txt should contain: every declared op, minus
-    the two documented allowlists."""
+    the one documented allowlist.
+
+    CODE_ONLY_OPS is deliberately NOT subtracted here, even though it is empty
+    and subtracting an empty set would be a no-op. Subtracting it is what
+    *implemented* parking: it is the step that hid an uncontracted operation from
+    the manifest and let invariant 1 pass over it. With the subtraction gone
+    there is no code path by which an entry can launder an operation out of
+    endpoints.txt — so if enforce_no_parked_ops() were ever deleted, an entry
+    would still land the operation in the manifest and fail invariant 1 against
+    the spec, loudly, instead of going quiet."""
     declared = set()
     for t in tools:
         declared |= set(t["declared"])
-    return declared - NON_SPEC_TARGETS - CODE_ONLY_OPS
+    return declared - NON_SPEC_TARGETS
 
 
 def check_declarations_vs_code(tools):
@@ -846,26 +893,65 @@ def check_declarations_vs_code(tools):
     return errors
 
 
+def enforce_no_parked_ops():
+    """CODE_ONLY_OPS must be empty. Any entry aborts the run.
+
+    An abort rather than an error count, and it runs BEFORE the --write branch,
+    for two reasons:
+
+      * `--write` would otherwise be the dangerous mode. It emits endpoints.txt
+        from the declarations and never consults the spec, so with a parked
+        operation it would write a manifest that silently omits it — a lie
+        committed to disk before anyone runs the verify pass that would object.
+      * This is a policy violation, not a drift measurement. Every number a run
+        prints is downstream of "which operations may exist at all", so there is
+        nothing useful to report alongside it; deciding the entry is the only
+        next step.
+    """
+    if CODE_ONLY_OPS:
+        listed = "\n".join(f"  - {m} {p}" for m, p in sorted(CODE_ONLY_OPS))
+        fail(
+            f"CODE_ONLY_OPS has {len(CODE_ONLY_OPS)} entr(ies), and it must be "
+            f"empty:\n{listed}\n"
+            f"An operation the contract does not define must not be implemented "
+            f"(ENG-8616/ENG-8619). Operations are not parked here — they are "
+            f"deleted from the tool, and implemented once a PUBLISHED spec "
+            f"version defines them. If the route exists but is undocumented, "
+            f"document it in nexus-exchange-api and bump .api-version to the "
+            f"release that carries it. If it is outside the contract for good, "
+            f"argue it into NON_SPEC_TARGETS instead. See the policy comment on "
+            f"CODE_ONLY_OPS in this file."
+        )
+    print(
+        "\nOK: no operations parked ahead of the spec (CODE_ONLY_OPS is empty, "
+        "as the policy requires)."
+    )
+
+
 def check_allowlists(tools, available):
-    """Stale-entry checks for the two operation allowlists: an entry no tool calls
-    any more, or one the pinned spec now defines, is a lie the manifest is built
-    on. Returns the number of errors printed."""
+    """Stale-entry checks for the operation allowlist: an entry no tool calls any
+    more, or one the pinned spec now defines, is a lie the manifest is built on.
+    Returns the number of errors printed.
+
+    NON_SPEC_TARGETS only. CODE_ONLY_OPS is not checked for staleness because it
+    cannot hold an entry to go stale (enforce_no_parked_ops), and because
+    staleness was never the failure mode that mattered: the operation that has
+    never been in any spec and never will be is stale by no definition these
+    checks can express, which is precisely how the fleet's phantoms survived."""
     requested = {norm_op(o) for t in tools for o in t["requested"]}
     available_norm = {norm_op(o) for o in available}
     errors = 0
 
+    # One entry since CODE_ONLY_OPS stopped being an allowlist. Kept as a loop
+    # rather than inlined: the per-allowlist message is the part that differs,
+    # and the next allowlist — if one is ever argued for — should have to supply
+    # one rather than inherit NON_SPEC_TARGETS' wording.
     for label, entries, now_in_spec_msg in (
         (
             "NON_SPEC_TARGETS",
             NON_SPEC_TARGETS,
             "the pinned spec now defines it — move it into the manifest by "
             "removing it from the allowlist",
-        ),
-        (
-            "CODE_ONLY_OPS",
-            CODE_ONLY_OPS,
-            "the pinned spec now defines it — it is no longer ahead of spec, so "
-            "remove it from the allowlist and let it into the manifest",
         ),
     ):
         stale = sorted(e for e in entries if norm_op(e) not in requested)
@@ -889,9 +975,8 @@ def check_allowlists(tools, available):
 
     if not errors:
         print(
-            f"\nOK: both operation allowlists are current "
-            f"({len(NON_SPEC_TARGETS)} NON_SPEC_TARGETS, "
-            f"{len(CODE_ONLY_OPS)} CODE_ONLY_OPS)."
+            f"\nOK: the operation allowlist is current "
+            f"({len(NON_SPEC_TARGETS)} NON_SPEC_TARGETS)."
         )
     return errors
 
@@ -1008,6 +1093,11 @@ def main():
 
     version = spec.get("info", {}).get("version", "?")
     available = spec_ops(spec)
+
+    # Before anything is emitted or measured: an operation the contract does not
+    # define must not exist in the first place, and --write must not be able to
+    # emit a manifest that omits one.
+    enforce_no_parked_ops()
 
     check_client_contract()
     tools = parse_tools()

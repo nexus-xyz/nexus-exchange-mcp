@@ -32,10 +32,12 @@ Run: python3 scripts/test_check_spec_drift.py   (stdlib unittest; no pytest)
 """
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_spec_drift as csd  # noqa: E402
@@ -358,43 +360,66 @@ class TestInvariant3DeclarationsVsCode(unittest.TestCase):
 
 
 class TestAllowlistStaleness(unittest.TestCase):
-    """Both operation allowlists must rot loudly, not silently."""
+    """The operation allowlist must rot loudly, not silently.
+
+    NON_SPEC_TARGETS only. The CODE_ONLY_OPS cases that used to live here moved
+    to TestNoParkedOps, where the answer is "any entry fails" rather than "this
+    entry went stale" — see that class for why staleness was never the check
+    that would have caught the entries this policy exists to prevent."""
 
     def setUp(self):
         self.tools = parse(GOOD)
         self.spec = csd.spec_ops(spec_with(*GOOD_SPEC_OPS))
 
-    def check(self, tools, non_spec=frozenset(), code_only=frozenset()):
-        """Both allowlists scoped to the entries under test, so each case fails
-        for its own reason and not because the real allowlists name real tools
-        that a synthetic fixture does not have."""
-        with patched("NON_SPEC_TARGETS", set(non_spec)), patched(
-            "CODE_ONLY_OPS", set(code_only)
-        ):
+    def check(self, tools, non_spec=frozenset()):
+        """The allowlist scoped to the entries under test, so each case fails for
+        its own reason and not because the real allowlist names real tools that a
+        synthetic fixture does not have."""
+        with patched("NON_SPEC_TARGETS", set(non_spec)):
             return _quiet(csd.check_allowlists, tools, self.spec)
 
-    def test_empty_allowlists_pass(self):
+    def test_empty_allowlist_passes(self):
         self.assertEqual(self.check(self.tools), 0)
 
     def test_entry_no_tool_calls_fails(self):
         self.assertGreater(self.check(self.tools, non_spec={("GET", "/demo/gone")}), 0)
-
-    def test_code_only_op_that_the_spec_now_defines_fails(self):
-        """The entry's whole justification was "ahead of the pinned spec". The pin
-        advanced, so it belongs in the manifest now — exactly the moment an
-        allowlist would otherwise become a permanent hole."""
-        self.assertGreater(
-            self.check(self.tools, code_only={("DELETE", "/api/v1/things")}), 0
-        )
 
     def test_non_spec_target_that_the_spec_now_defines_fails(self):
         self.assertGreater(
             self.check(self.tools, non_spec={("DELETE", "/api/v1/things")}), 0
         )
 
-    def test_code_only_op_ahead_of_spec_passes(self):
-        # Called by a tool, absent from the pinned spec: the case the allowlist
-        # exists for. It must NOT be an error, and must stay out of the manifest.
+
+class TestNoParkedOps(unittest.TestCase):
+    """CODE_ONLY_OPS must be empty and any entry must fail (ENG-8619).
+
+    This inverts a case this file used to assert the other way round: an
+    operation "called by a tool, absent from the pinned spec" was the case the
+    allowlist existed FOR, and the old test pinned it as green. Under the policy
+    (ENG-8616) there is no such case — an operation the contract does not define
+    is deleted, not parked — so the test that guarded the mechanism is the test
+    that has to change with it. Left as it was, it would have held the hole open
+    against anyone trying to close it."""
+
+    def test_the_real_allowlist_is_empty(self):
+        """The shipped constant, not a fixture. Re-verified here because this
+        suite runs BEFORE the checker in CI (spec-drift.yml), so the policy is
+        already asserted by the time anything downstream is measured."""
+        self.assertEqual(csd.CODE_ONLY_OPS, set())
+
+    def test_empty_passes(self):
+        with patched("CODE_ONLY_OPS", set()):
+            _quiet(csd.enforce_no_parked_ops)  # must not raise
+
+    def test_any_entry_aborts(self):
+        with patched("CODE_ONLY_OPS", {("POST", "/account/leverage")}):
+            with expect_abort(self):
+                csd.enforce_no_parked_ops()
+
+    def test_an_entry_a_tool_actually_calls_aborts(self):
+        """The old allowlist's whole justification, now refused. No spec defines
+        the operation and a tool does call it — which used to be green, and is
+        exactly the shape the fleet's four phantoms had."""
         tools = parse(
             tool_source(
                 (
@@ -405,11 +430,66 @@ class TestAllowlistStaleness(unittest.TestCase):
             )
         )
         ahead = {("POST", "/api/v1/unreleased")}
-        self.assertEqual(self.check(tools, code_only=ahead), 0)
         with patched("CODE_ONLY_OPS", ahead):
-            self.assertNotIn(
+            with expect_abort(self):
+                csd.enforce_no_parked_ops()
+            # And with no subtraction left, the operation reaches the manifest
+            # set instead of being laundered out of it. This is the belt to the
+            # tripwire's braces: if enforce_no_parked_ops() were ever deleted,
+            # invariant 1 would still fail this operation against the spec.
+            self.assertIn(
                 ("POST", "/api/v1/unreleased"), csd.declared_manifest_ops(tools)
             )
+
+    def test_an_entry_the_spec_defines_also_aborts(self):
+        """No "it landed, so it is fine now" reading: the entry is wrong because
+        it exists, whatever the spec says. Keeps the failure from being mistaken
+        for the old staleness check, which only fired on a change."""
+        with patched("CODE_ONLY_OPS", {("DELETE", "/api/v1/things")}):
+            with expect_abort(self):
+                csd.enforce_no_parked_ops()
+
+
+class TestWriteModeIsGated(unittest.TestCase):
+    """`--write` is the mode that could commit the lie, so it is gated too.
+
+    It emits endpoints.txt from the declarations and never consults the spec, so
+    a parked operation would be silently omitted from a file the author then
+    commits — the verify pass that would object runs later, if at all."""
+
+    def _run_main(self, argv_extra, code_only):
+        """Run main() with the real tool source, a throwaway spec and a throwaway
+        manifest path, so nothing here can touch the committed endpoints.txt."""
+        spec = spec_with("GET /api/v1/things")
+        with tempfile.TemporaryDirectory() as d:
+            spec_path = os.path.join(d, "spec.json")
+            manifest_path = os.path.join(d, "endpoints.txt")
+            with open(spec_path, "w") as fh:
+                json.dump(spec, fh)
+            argv = ["check_spec_drift.py", spec_path] + argv_extra
+            with patched("MANIFEST", manifest_path), patched(
+                "CODE_ONLY_OPS", set(code_only)
+            ):
+                with unittest.mock.patch.object(sys, "argv", argv):
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        with contextlib.redirect_stderr(io.StringIO()):
+                            try:
+                                csd.main()
+                                raised = None
+                            except SystemExit as e:
+                                raised = e
+            return raised, os.path.exists(manifest_path)
+
+    def test_write_emits_the_manifest_when_nothing_is_parked(self):
+        raised, written = self._run_main(["--write"], set())
+        self.assertIsNone(raised)
+        self.assertTrue(written, "--write must emit the manifest")
+
+    def test_write_is_refused_and_emits_nothing_when_an_op_is_parked(self):
+        raised, written = self._run_main(["--write"], {("POST", "/account/leverage")})
+        self.assertIsNotNone(raised, "--write must abort on a parked operation")
+        self.assertNotEqual(raised.code, 0)
+        self.assertFalse(written, "a refused --write must not leave a manifest behind")
 
 
 class TestParsersFailClosed(unittest.TestCase):

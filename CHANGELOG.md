@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.2.0...v0.3.0) (2026-08-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* compose the v1 surface under the deployment base, not the host root ([#69](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/69))
+
+### Bug Fixes
+
+* compose the v1 surface under the deployment base, not the host root ([#69](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/69)) ([ba49b1e](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/ba49b1e6f3880438120aebf741de599b57ba7970))
+
 ## [0.2.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.1.0...v0.2.0) (2026-08-14)
 
 

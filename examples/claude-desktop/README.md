@@ -55,8 +55,10 @@ Two things to know:
 
 - `NEXUS_EXCHANGE_NETWORK` names the network that URL belongs to. Without it the
   target has not declared whose money is behind it, and the tools that cannot be
-  undone refuse to run (top-level README, "Undeclared funds"). It also tells the
-  server that a local indexer serves the legacy routes at its root.
+  undone refuse to run (top-level README, "Undeclared funds"). It also carries
+  the deployment shape: it is what tells the server that a local indexer serves
+  BOTH surfaces at its origin, rather than assuming the public-gateway shape and
+  sending every `/api/v1` route under `/api/exchange` (ENG-6221).
 - `NEXUS_EXCHANGE_API_URL` must point at a **direct** indexer gateway that
   verifies client HMAC. The public production host proxies authenticated
   requests under the site's own key, so per-caller credentials are not honored

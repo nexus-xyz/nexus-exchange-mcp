@@ -104,7 +104,9 @@ test("a custom bundle from env resolves to one descriptor, frozen", () => {
 
 test("the custom bundle drives transport the same way a network does", () => {
   const cfg = loadConfig(env(BUNDLE));
-  assert.equal(cfg.directBaseUrl, HOST);
+  // Both surfaces hang off the declared deployment shape: this bundle leaves
+  // gatewayPath at /api/exchange, so v1 sits under it too.
+  assert.equal(cfg.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.gatewayBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.wsUrl, "wss://exchange.example.invalid/api/exchange");
   assert.equal(
@@ -273,15 +275,22 @@ test("a rejected label cannot forge a log line through the error message", () =>
   );
 });
 
-// ── The legacy path stays exactly as it was ──────────────────────────────────
+// ── The legacy path keeps its identity, and its shape is declared ───────────
 
-test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", () => {
-  // The sugar path. Deprecated as of ENG-10957 but NOT changed: what it reports
-  // is what it always reported — a `custom` label with funds it does not know —
-  // and the deprecation adds a stderr notice and nothing else. Captured here so
-  // the suite's own output stays clean.
+test("NEXUS_EXCHANGE_API_URL alone: undeclared funds, public-gateway shape", () => {
+  // The sugar path. Deprecated as of ENG-10957, which changed nothing about it:
+  // what it REPORTS is what it always reported — a `custom` label with funds it
+  // does not know — and that deprecation added a stderr notice and nothing else.
+  //
+  // ENG-6221 did change one thing here, and it is the reason this test says
+  // "public-gateway shape" rather than "same URLs": the v1 base used to be the
+  // bare origin and is now the deployment base, so a bare URL resolves
+  // `/api/v1/*` under `/api/exchange`. With no network named there is no
+  // descriptor to read a shape from, so the convention is assumed rather than
+  // guessed at from the hostname, and the notice says so. Captured here so the
+  // suite's own output stays clean.
   const cfg = quietly(() => loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })));
-  assert.equal(cfg.directBaseUrl, HOST);
+  assert.equal(cfg.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.gatewayBaseUrl, `${HOST}/api/exchange`);
   assert.equal(cfg.target?.id, "custom");
   assert.equal(cfg.target?.label, "custom");
@@ -296,7 +305,7 @@ test("NEXUS_EXCHANGE_API_URL alone is unchanged: same URLs, undeclared funds", (
   const suffixed = quietly(() =>
     loadConfig(env({ NEXUS_EXCHANGE_API_URL: `${HOST}/api/exchange` })),
   );
-  assert.equal(suffixed.directBaseUrl, HOST);
+  assert.equal(suffixed.directBaseUrl, `${HOST}/api/exchange`);
   assert.equal(suffixed.gatewayBaseUrl, `${HOST}/api/exchange`);
 });
 
@@ -315,6 +324,55 @@ test("the bare override prints one deprecation notice, and only that", () => {
   // Nothing from the environment is interpolated, so a private stage's hostname
   // cannot reach a log — or a bug report — through this notice.
   assert.ok(!notice.includes(HOST), "the notice must not echo the URL");
+});
+
+test("every remedy the bare-URL notice names actually works", () => {
+  // The notice used to read "add NEXUS_EXCHANGE_NETWORK=local or the bundle's
+  // NEXUS_EXCHANGE_GATEWAY_PATH=/", and the second half THREW: GATEWAY_PATH is
+  // bundle-only, so following the printed advice produced the next error. An
+  // operator who is already confused must not be sent into one, so both
+  // remedies are executed here rather than proof-read — a notice that names a
+  // config this loader refuses fails `npm test`.
+  const notice = captureStderr(() =>
+    loadConfig(env({ NEXUS_EXCHANGE_API_URL: HOST })),
+  );
+
+  // Remedy A: name the network. Both surfaces then sit at the origin.
+  assert.match(notice, /NEXUS_EXCHANGE_NETWORK=local/);
+  const viaNetwork = loadConfig(
+    env({ NEXUS_EXCHANGE_NETWORK: "local", NEXUS_EXCHANGE_API_URL: HOST }),
+  );
+  assert.equal(viaNetwork.directBaseUrl, HOST);
+  assert.equal(viaNetwork.gatewayBaseUrl, HOST);
+
+  // Remedy B: the FULL bundle. The notice has to name every variable that
+  // bundle requires, or it is again advice that ends in an error.
+  for (const required of [
+    "NEXUS_EXCHANGE_NETWORK=custom",
+    "NEXUS_EXCHANGE_NETWORK_LABEL",
+    "NEXUS_EXCHANGE_FUNDS",
+    "NEXUS_EXCHANGE_GATEWAY_PATH=/",
+  ]) {
+    assert.ok(notice.includes(required), `the notice must name ${required}`);
+  }
+  const viaBundle = loadConfig(
+    env({ ...BUNDLE, NEXUS_EXCHANGE_GATEWAY_PATH: "/" }),
+  );
+  assert.equal(viaBundle.directBaseUrl, HOST);
+  assert.equal(viaBundle.gatewayBaseUrl, HOST);
+
+  // And the half-remedy stays refused — this is why the notice may never
+  // shorten back to naming GATEWAY_PATH on its own.
+  assert.throws(
+    () =>
+      loadConfig(
+        env({
+          NEXUS_EXCHANGE_API_URL: HOST,
+          NEXUS_EXCHANGE_GATEWAY_PATH: "/",
+        }),
+      ),
+    /only read when NEXUS_EXCHANGE_NETWORK=custom/,
+  );
 });
 
 test("the deprecation notice never reaches stdout", () => {

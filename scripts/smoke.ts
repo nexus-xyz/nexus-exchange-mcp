@@ -5,11 +5,15 @@
  * Prints the market count or the error.
  *
  * Run: NEXUS_EXCHANGE_API_URL=… npm run smoke   (uses tsx, no build needed)
+ *      NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
  *
  * There is deliberately NO default target (ENG-8092). This script used to fall
- * back to the public site root, which serves the Next.js marketing app and not
- * the `/api/v1` surface, so every run reported a 404 whose body was a page of
- * script tags. Worse, a wrong-but-reachable target answering HTML with a 2xx
+ * back to the public site root with the `/api/v1` surface composed AT that root,
+ * which is where the Next.js marketing app is served — so every run reported a
+ * 404 whose body was a page of script tags. ENG-6221 fixed the composition (the
+ * v1 surface hangs off the deployment's gateway path, so the public host is now
+ * a working target), but the missing default stays missing: naming the target is
+ * the caller's job. Worse, a wrong-but-reachable target answering HTML with a 2xx
  * would have been reported as a PASS, because the check only tried to count
  * array entries and shrugged off a parse failure. A smoke check that cannot
  * tell the API from a web page is worse than one that refuses to run, so this
@@ -45,16 +49,23 @@ export class SmokeResponseError extends Error {
  * Resolve the target to smoke against. Unset, blank, or non-HTTP(S) values are
  * a hard stop naming the variable — never a silent fallback to a host that may
  * not serve the API.
+ *
+ * Only the HOST is read here. Where `/api/v1` hangs off it is the deployment's
+ * gateway path, which `loadConfig` takes from the network (ENG-6221) — so a
+ * bare-origin indexer needs `NEXUS_EXCHANGE_NETWORK=local` alongside this
+ * variable, not this variable alone.
  */
 export function resolveTarget(env: NodeJS.ProcessEnv): string {
   const raw = (env[BASE_URL_ENV] ?? "").trim();
   if (!raw) {
     throw new SmokeConfigError(
-      `${BASE_URL_ENV} is not set. The smoke check has no default target: the ` +
-        `public site root serves the marketing app, not the /api/v1 surface, ` +
-        `so defaulting to it produced a run that could only fail (ENG-8092). ` +
-        `Point it at a host that serves the Exchange API, e.g.\n` +
-        `  ${BASE_URL_ENV}=http://localhost:9090 npm run smoke`,
+      `${BASE_URL_ENV} is not set. The smoke check has no default target: ` +
+        `naming the deployment to call is the caller's job, not this script's ` +
+        `(ENG-8092). Point it at a host that serves the Exchange API, e.g.\n` +
+        `  ${BASE_URL_ENV}=https://exchange.nexus.xyz npm run smoke\n` +
+        `or, for a local indexer serving at its root, name the network too so ` +
+        `/api/v1 is not composed under /api/exchange:\n` +
+        `  NEXUS_EXCHANGE_NETWORK=local ${BASE_URL_ENV}=http://localhost:9090 npm run smoke`,
     );
   }
   let parsed: URL;

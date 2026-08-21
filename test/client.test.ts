@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash, createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import {
   API_VERSION_HEADER,
   ExchangeApiError,
@@ -83,6 +83,9 @@ test("signs requests with the indexer's canonical HMAC scheme", async () => {
   try {
     await client.request({
       method: "POST",
+      // A legacy-surface route, so it declares that: since ENG-6221 a non-v1
+      // path without `surface: "gateway"` is rejected as a call-site bug.
+      surface: "gateway",
       path: "/orders",
       body: {
         market_id: "BTC-USDX-PERP",
@@ -190,9 +193,56 @@ test("signed tool without credentials throws MissingCredentialsError", async () 
     gatewayBaseUrl: "http://example.test",
   });
   await assert.rejects(
-    () => client.request({ path: "/account", signed: true }),
+    () => client.request({ path: "/api/v1/account", signed: true }),
     MissingCredentialsError,
   );
+  // A legacy route reports the same operator error, not the surface one: the
+  // undeclared-surface guard runs first, so a route that DOES declare its
+  // surface still reaches the credential check.
+  await assert.rejects(
+    () =>
+      client.request({
+        path: "/withdrawals",
+        surface: "gateway",
+        signed: true,
+      }),
+    MissingCredentialsError,
+  );
+});
+
+test("the undeclared-surface guard runs before credentials and before signing", async () => {
+  // Ordering, not just presence. Behind the credential block the same mistake
+  // reported MissingCredentialsError on an unconfigured machine and the
+  // programming error on a configured one — and signed the wrong-surface path
+  // before throwing. Both configurations must now report the same thing, and
+  // nothing may reach the network.
+  const unconfigured = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+  });
+  const configured = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00".repeat(32),
+  });
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async () => {
+    fetched++;
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    for (const client of [unconfigured, configured]) {
+      await assert.rejects(
+        () => client.request({ path: "/account", signed: true }),
+        /must declare surface: "gateway"/,
+      );
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(fetched, 0, "an undeclared surface never reaches the network");
 });
 
 test("place_order maps friendly args to the engine wire shape", async () => {
@@ -378,7 +428,7 @@ test("ExchangeApiError carries the sanitized, bounded body", async () => {
     })) as typeof fetch;
   try {
     await assert.rejects(
-      () => client.request({ path: "/markets/summary" }),
+      () => client.request({ path: "/api/v1/markets/summary" }),
       (err: unknown) => {
         assert.ok(err instanceof ExchangeApiError);
         assert.equal(err.status, 401);
@@ -719,21 +769,31 @@ test("every tool advertises a name, description, and object input schema", () =>
   }
 });
 
-test("deriveBases splits an origin into direct (/api/v1) and gateway bases", () => {
-  // Bare origin (the new default form).
+test("deriveBases hangs both surfaces off one deployment base", () => {
+  // Premise inverted deliberately. This used to assert that the v1 base is the
+  // bare origin, which pinned the bug: `…/api/v1/*` at the public root is the
+  // marketing app's 404 HTML, and only `…/api/exchange/api/v1/*` reaches the
+  // API. The base names the deployment; the path names the surface.
   assert.deepEqual(deriveBases("https://exchange.nexus.xyz"), {
-    directBaseUrl: "https://exchange.nexus.xyz",
+    directBaseUrl: "https://exchange.nexus.xyz/api/exchange",
     gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
   });
-  // Legacy value that still carries the /api/exchange suffix is normalized so
-  // /api/v1 does not resolve to …/api/exchange/api/v1/… .
+  // A value that already carries the suffix normalizes to the same thing —
+  // applying gatewayPath cannot double it up.
   assert.deepEqual(deriveBases("https://exchange.nexus.xyz/api/exchange"), {
-    directBaseUrl: "https://exchange.nexus.xyz",
+    directBaseUrl: "https://exchange.nexus.xyz/api/exchange",
     gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
+  });
+  // The bare-indexer shape: gatewayPath "" means the deployment base IS the
+  // origin, so /api/v1 resolves at the root. This is the case ENG-4740
+  // generalized from, and it still holds — as data now, not as an assumption.
+  assert.deepEqual(deriveBases("http://localhost:9090/", ""), {
+    directBaseUrl: "http://localhost:9090",
+    gatewayBaseUrl: "http://localhost:9090",
   });
   // Trailing slashes are trimmed before deriving.
   assert.deepEqual(deriveBases("http://localhost:9090/"), {
-    directBaseUrl: "http://localhost:9090",
+    directBaseUrl: "http://localhost:9090/api/exchange",
     gatewayBaseUrl: "http://localhost:9090/api/exchange",
   });
 });
@@ -751,8 +811,205 @@ test("loadConfig derives both bases from NEXUS_EXCHANGE_API_URL", () => {
   } finally {
     console.error = stderr;
   }
-  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz");
+  assert.equal(cfg.directBaseUrl, "https://exchange.nexus.xyz/api/exchange");
   assert.equal(cfg.gatewayBaseUrl, "https://exchange.nexus.xyz/api/exchange");
+});
+
+test("a named network keeps its gateway path when the URL redirects the host", () => {
+  // The regression this guards: `gatewayPath` used to be hardcoded to
+  // `/api/exchange` for every NEXUS_EXCHANGE_API_URL override. That was
+  // invisible while the field moved only the LEGACY base, but ENG-6221 hangs
+  // BOTH surfaces off it — so a hardcode sent `/api/v1/*` to
+  // `…/api/exchange/api/v1/*` on a bare indexer that serves nothing there,
+  // silently 404ing every v1 tool. `local` declares `gatewayPath: ""`; naming
+  // the network must keep that shape while the URL redirects only the host.
+  const cfg = loadConfig({
+    NEXUS_EXCHANGE_NETWORK: "local",
+    NEXUS_EXCHANGE_API_URL: "http://127.0.0.1:9090",
+  } as NodeJS.ProcessEnv);
+  assert.equal(cfg.directBaseUrl, "http://127.0.0.1:9090");
+  assert.equal(cfg.gatewayBaseUrl, "http://127.0.0.1:9090");
+
+  // A gatewayed network keeps ITS shape on the same path through the code.
+  const testnet = loadConfig({
+    NEXUS_EXCHANGE_NETWORK: "testnet",
+    NEXUS_EXCHANGE_API_URL: "https://stage.example",
+  } as NodeJS.ProcessEnv);
+  assert.equal(testnet.directBaseUrl, "https://stage.example/api/exchange");
+
+  // With no network named there is no descriptor to read a shape from, so the
+  // deprecated bare-URL form keeps the public-gateway convention. Asserted so
+  // that this stays a decision rather than an accident.
+  const stderr = console.error;
+  console.error = () => {};
+  let bare!: ReturnType<typeof loadConfig>;
+  try {
+    bare = loadConfig({
+      NEXUS_EXCHANGE_API_URL: "http://localhost:9090",
+    } as NodeJS.ProcessEnv);
+  } finally {
+    console.error = stderr;
+  }
+  assert.equal(bare.directBaseUrl, "http://localhost:9090/api/exchange");
+});
+
+test("a non-v1 route must declare surface: gateway", async () => {
+  // The fail-safe ENG-6221 removed, restored explicitly. Both bases are now the
+  // same deployment base, so an undeclared bare route no longer 404s at a bare
+  // root — it composes the live legacy route, and on the public host that proxy
+  // signs with the site's own key. Silently resolving against the site identity
+  // is the failure this refuses.
+  const client = new ExchangeClient({
+    directBaseUrl: "http://example.test/api/exchange",
+    gatewayBaseUrl: "http://example.test/api/exchange",
+  });
+  await assert.rejects(
+    () => client.request({ path: "/agents" }),
+    /must declare surface: "gateway"/,
+  );
+  // The same path with the declaration is fine, and a v1 path needs none.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response("[]", { status: 200 })) as typeof fetch;
+  try {
+    await client.request({ path: "/agents", surface: "gateway" });
+    await client.request({ path: "/api/v1/markets/summary" });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("every non-v1 request call site in src/ declares surface: gateway", () => {
+  // The runtime guard above only fires on a path that actually executes, so it
+  // cannot prove the 60-odd existing call sites are right. This reads the source
+  // and checks them all, the same way the pinned-version lockstep above reads
+  // files rather than trusting a constant. A new legacy tool that forgets the
+  // declaration fails here, in `npm test`, rather than at a customer's HMAC.
+  //
+  // Keyed on the `path:` LITERAL, not on the function receiving it. Matching
+  // call sites instead (`/\.(?:request|requestPage)\(/`) silently skipped the
+  // five routes that reach the client through `fetchPage(client, cursor, {…})`,
+  // because that helper is not a method call and the `client.requestPage(opts)`
+  // inside it forwards an opts object with no literal path — so a paginated
+  // legacy route added through it would have shipped undeclared, which is the
+  // guard failing exactly where it promised it could not. Every options object
+  // carrying a request path is now in scope regardless of who receives it,
+  // including through a wrapper that does not exist yet.
+  //
+  // `scripts/check_spec_drift.py` learned this same lesson at ENG-7424 and had
+  // to name `fetchPage(client,` explicitly, because it reads `method:` too and
+  // so must sit at the call site. This scan needs only the path, so it can key
+  // on the thing it is actually checking and stop maintaining a list of
+  // wrappers. What would still evade it is a COMPUTED path with no literal
+  // prefix at all; that is separately refused for the call sites the drift
+  // scanner knows, which require an inline string or template literal.
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(new URL(dir, import.meta.url), {
+      withFileTypes: true,
+    })) {
+      if (entry.isDirectory()) walk(`${dir}${entry.name}/`);
+      else if (entry.name.endsWith(".ts") && entry.name !== "client.ts")
+        files.push(`${dir}${entry.name}`);
+    }
+  };
+  walk("../src/");
+  assert.ok(files.length > 0, "found source files to scan");
+
+  let scanned = 0;
+  for (const rel of files) {
+    const src = readFileSync(new URL(rel, import.meta.url), "utf8");
+    // A quoted value only: `path: ["price"]` is a zod issue path, not a route.
+    for (const m of src.matchAll(/path:\s*[`"']([^`"'$]*)/g)) {
+      // Walk back to the `{` that opens the object literal holding this key,
+      // then forward to its match, so `surface` is looked for in the SAME
+      // object. A `path:` nested one level deeper than its `surface:` would
+      // fail this rather than pass it — the safe direction for a guard.
+      let depth = 0;
+      let open = -1;
+      for (let i = m.index! - 1; i >= 0; i--) {
+        const ch = src[i];
+        if (ch === ")" || ch === "]" || ch === "}") depth++;
+        else if (ch === "(" || ch === "[") depth--;
+        else if (ch === "{") {
+          if (depth === 0) {
+            open = i;
+            break;
+          }
+          depth--;
+        }
+      }
+      assert.ok(open >= 0, `${rel}: no object literal encloses "${m[1]}"`);
+      depth = 0;
+      let end = open;
+      for (let i = open; i < src.length; i++) {
+        const ch = src[i];
+        if (ch === "(" || ch === "[" || ch === "{") depth++;
+        else if (ch === ")" || ch === "]" || ch === "}") {
+          depth--;
+          if (depth === 0) {
+            end = i;
+            break;
+          }
+        }
+      }
+      const arg = src.slice(open, end + 1);
+      scanned++;
+      if (/^\/api\/v1(?:\/|$)/.test(m[1])) continue;
+      assert.match(
+        arg,
+        /surface:\s*"gateway"/,
+        `${rel}: request to non-v1 path "${m[1]}" must declare ` +
+          `surface: "gateway" — see RequestOptions.surface`,
+      );
+    }
+  }
+  // A scan that silently matched nothing would pass vacuously. The count is
+  // also the anti-vacuity check for the delivery mechanism: every literal
+  // request path in `src/` is one of these, so a route that reaches the client
+  // by some route this scan cannot see would have to have no literal path at
+  // all.
+  assert.ok(scanned > 60, `scanned ${scanned} literal-path call sites`);
+});
+
+test("the call-site scan covers routes delivered through fetchPage", () => {
+  // The regression that motivated the rewrite above, pinned directly: the five
+  // paginated tools whose options object is handed to `fetchPage` rather than
+  // to `client.request`. Mutating one of their paths to a bare route must fail
+  // the scan; under the old call-site-keyed regex it stayed green.
+  const src = readFileSync(
+    new URL("../src/tools/index.ts", import.meta.url),
+    "utf8",
+  );
+  const viaFetchPage = [...src.matchAll(/\bfetchPage\s*\(/g)].map((m) => {
+    let depth = 0;
+    for (let i = m.index! + m[0].length - 1; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") {
+        depth--;
+        if (depth === 0) return src.slice(m.index!, i + 1);
+      }
+    }
+    return "";
+  });
+  const withLiteralPath = viaFetchPage.filter((call) =>
+    /path:\s*[`"']/.test(call),
+  );
+  assert.ok(
+    withLiteralPath.length >= 5,
+    `expected the fetchPage call sites to carry literal paths, found ` +
+      `${withLiteralPath.length} of ${viaFetchPage.length}`,
+  );
+  // And each of them is a path the scan above would classify, i.e. the object
+  // literal it lives in is reachable by walking back from the key.
+  for (const call of withLiteralPath) {
+    assert.match(
+      call,
+      /\{[\s\S]*path:\s*[`"']/,
+      "the literal path sits inside an object literal the scan can bound",
+    );
+  }
 });
 
 test("client routes surface to the right base and signs the exact path sent", async () => {
@@ -777,7 +1034,7 @@ test("client routes surface to the right base and signs the exact path sent", as
     return new Response("{}", { status: 200 });
   }) as typeof fetch;
   try {
-    // Default surface ("v1") hits the direct host root and signs the /api/v1 path.
+    // Default surface ("v1") hits the v1 base and signs the /api/v1 path.
     await client.request({ path: "/api/v1/account", signed: true });
     // Explicit "gateway" surface hits the /api/exchange proxy and signs the bare path.
     await client.request({

@@ -36,17 +36,23 @@ the environment by the server itself; see [`.env.example`](../.env.example).
 - **Public** — works with zero configuration. Point-and-run.
 - **HMAC key** — set `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`,
   and point `NEXUS_EXCHANGE_API_URL` at a **direct** indexer gateway that
-  verifies client HMAC (e.g. a local `http://localhost:9090` from the exchange
-  `docker-compose`). The public production host fronts authenticated requests
-  with a proxy that signs with the site's own key, so per-caller credentials
-  are not honored there — see the top-level README "Authentication" section.
+  verifies client HMAC, naming the network it belongs to alongside it (e.g.
+  `NEXUS_EXCHANGE_NETWORK=local` with the `http://localhost:9090` from the
+  exchange `docker-compose`). The public production host fronts authenticated
+  requests with a proxy that signs with the site's own key, so per-caller
+  credentials are not honored there — see the top-level README
+  "Authentication" section.
+- **Name the network, not just the URL.** The network carries the deployment
+  shape: a local indexer serves both surfaces at its origin, while a bare
+  `NEXUS_EXCHANGE_API_URL` assumes the public-gateway shape and puts every
+  `/api/v1` route under `/api/exchange`, where that indexer serves nothing
+  (ENG-6221). It is also what declares whose money is behind the URL, so
+  without it the tools that cannot be undone refuse rather than assume play
+  funds — see the top-level README "Undeclared funds" section.
 - Examples marked **trades** submit real (testnet) orders with your key.
   They are written to be safe by default — resting far-from-market limit
   orders that are cancelled at the end, or tiny sizes — but read them before
-  running. They also need `NEXUS_EXCHANGE_NETWORK` set (e.g. `local` alongside a
-  local indexer URL): a target that has not declared whose money is behind it
-  refuses the tools that cannot be undone, rather than assuming play funds. See
-  the top-level README "Undeclared funds" section.
+  running.
 
 ## `list-markets.mjs`
 

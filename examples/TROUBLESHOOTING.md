@@ -14,9 +14,23 @@ A 404 whose body is HTML (not JSON) means the request reached a web app, not
 the exchange API — the host you're pointing at doesn't serve the direct
 `/api/v1` surface. Check `NEXUS_EXCHANGE_API_URL`:
 
-- It must be the API **host root** (e.g. `https://exchange.nexus.xyz` or
+- It must be the deployment's **host** (e.g. `https://exchange.nexus.xyz` or
   `http://localhost:9090`) — not a path like `…/api/v1`. A legacy value ending
   in `/api/exchange` is accepted and normalized.
+- **Check the gateway path, which is where `/api/v1` hangs off that host.** It
+  comes from the network, not the URL (ENG-6221): the public host serves
+  `…/api/exchange/api/v1/…`, while an indexer serving at its root needs
+  `NEXUS_EXCHANGE_NETWORK=local` alongside the URL (or, for a stage that is not
+  a named network, the full `custom` bundle — `NEXUS_EXCHANGE_NETWORK=custom`
+  plus `NEXUS_EXCHANGE_NETWORK_LABEL`, `NEXUS_EXCHANGE_FUNDS` and
+  `NEXUS_EXCHANGE_GATEWAY_PATH=/`; that last variable is refused on its own). A
+  bare `NEXUS_EXCHANGE_API_URL` assumes the public-gateway shape, so pointing it
+  alone at a bare indexer sends `/api/v1/*` under `/api/exchange`, where that
+  indexer serves nothing.
+- Pointing at the **bare public root** used to be the documented advice and was
+  the cause of this exact 404: `https://exchange.nexus.xyz/api/v1/*` is the
+  marketing app. Composing the v1 surface under the gateway path is what
+  ENG-6221 fixed.
 - Legacy-gateway tools (marked "(legacy)" in the top-level README table) can
   work while `/api/v1` tools 404 on the same host — that's the dual-stack
   migration (ENG-4740/ENG-4751), not a bug in your config.
@@ -33,9 +47,18 @@ for the examples: your shell). Public and `demo_*` tools never need this.
 You're going through the public production proxy, which re-signs requests with
 the site's own frontend key — your per-caller HMAC headers are not honored, so
 reads resolve to the site account. Point `NEXUS_EXCHANGE_API_URL` at a
-**direct** indexer gateway that verifies client HMAC (e.g. a local
-`http://localhost:9090` from the exchange `docker-compose`). See
-"Authentication" in the top-level README.
+**direct** indexer gateway that verifies client HMAC, and **name the network it
+belongs to**:
+
+```bash
+NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090
+```
+
+The network is what carries the deployment shape (ENG-6221): a bare URL assumes
+the public-gateway one and sends every `/api/v1` route under `/api/exchange`,
+where a local indexer serves nothing — trading the wrong-account failure for a 404. For an indexer that is not one of the named networks, describe it with the
+full `custom` bundle and `NEXUS_EXCHANGE_GATEWAY_PATH=/`. See "Authentication"
+in the top-level README.
 
 ## `Exchange API 401` on signed calls
 
@@ -45,6 +68,13 @@ reads resolve to the site account. Point `NEXUS_EXCHANGE_API_URL` at a
   machine clock minutes off will fail verification.
 - The key was deleted (`delete_api_key`) or the agent registration expired
   (`list_agents` shows expiries).
+- On a **gatewayed** deployment the signature covers the _logical_ route
+  (`/api/v1/orders`), not the wire path (`/api/exchange/api/v1/orders`) — the
+  deployment's gateway path belongs to the base and is not signed over, so
+  verification depends on the gateway stripping its own prefix before the
+  indexer checks. If signed calls 401 there while the same key works against a
+  bare indexer (`NEXUS_EXCHANGE_NETWORK=local`), that stripping is the thing to
+  check, not your canonical string.
 
 ## `Exchange API 429` / rate limits
 

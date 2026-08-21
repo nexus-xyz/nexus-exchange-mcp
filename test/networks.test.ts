@@ -149,11 +149,36 @@ test("a URL override wins for transport and carries the declared network", () =>
       NEXUS_EXCHANGE_API_URL: "https://api.nexus.xyz",
     }),
   );
+  // `mainnet.gatewayPath` is NOT dead code just because `baseUrl` is null: this
+  // is the path that reaches real money, and since ENG-6221 the field places
+  // BOTH surfaces, so it decides where every /api/v1 call lands here. The value
+  // is a convention, not a measurement — nothing is mapped onto api.nexus.xyz
+  // and its durable base is /v1-rooted — and the convention it follows is the
+  // one every other undeclared shape in this package resolves to. Pinned so
+  // that stays a decision rather than a leftover.
   assert.equal(cfg.directBaseUrl, "https://api.nexus.xyz/api/exchange");
+  assert.equal(cfg.gatewayBaseUrl, "https://api.nexus.xyz/api/exchange");
   assert.equal(cfg.target?.id, "mainnet");
   assert.equal(cfg.target?.funds, "real");
   // The network's own metadata rides along, so a faucet call still refuses here.
   assert.equal(cfg.target?.faucet, false);
+
+  // The other half: a real-funds deployment that serves at its ROOT is not
+  // stuck with that convention. It declares the shape through the full bundle,
+  // which is what makes the default above safe to keep — the escape hatch is
+  // tested, not just documented.
+  const bareRoot = loadConfig(
+    env({
+      NEXUS_EXCHANGE_NETWORK: "custom",
+      NEXUS_EXCHANGE_API_URL: "https://api.nexus.xyz",
+      NEXUS_EXCHANGE_NETWORK_LABEL: "mainnet-direct",
+      NEXUS_EXCHANGE_FUNDS: "real",
+      NEXUS_EXCHANGE_GATEWAY_PATH: "/",
+    }),
+  );
+  assert.equal(bareRoot.directBaseUrl, "https://api.nexus.xyz");
+  assert.equal(bareRoot.gatewayBaseUrl, "https://api.nexus.xyz");
+  assert.equal(bareRoot.target?.funds, "real");
 });
 
 test("an override with no network is custom/unknown funds, never play", () => {

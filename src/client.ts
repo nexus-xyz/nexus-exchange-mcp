@@ -205,9 +205,17 @@ interface RequestOptions {
    * Full path from the chosen base's origin, leading slash, no query.
    * For the direct v1 surface this INCLUDES the version prefix, e.g.
    * "/api/v1/orders"; for the legacy gateway it is the bare route, e.g.
-   * "/orders". Whatever is passed here is exactly what gets HMAC-signed, so it
-   * must match what the server verifies over (nexus-exchange-api#41: "the
-   * caller signs the full request path, not the stripped path").
+   * "/orders".
+   *
+   * This LOGICAL path is what gets HMAC-signed; the deployment's gateway path
+   * belongs to the base and is not signed over. So on a gatewayed deployment
+   * the wire path (`/api/exchange/api/v1/orders`) and the signed path
+   * (`/api/v1/orders`) differ, and verification rests on the gateway stripping
+   * its own prefix before the indexer checks. On a bare indexer
+   * (`gatewayPath: ""`) the two coincide — the shape nexus-exchange-api#41
+   * describes ("the caller signs the full request path, not the stripped
+   * path") — and what is passed here must match what that indexer verifies
+   * over.
    */
   path: string;
   /** Query string without the leading "?". e.g. "limit=50" */
@@ -238,8 +246,12 @@ interface RequestOptions {
    * /api/exchange/agents` answers `200` unauthenticated), so a misrouted
    * *signed* call would resolve against the site identity rather than fail. The
    * guard is therefore explicit: `send` rejects a non-v1 path that does not
-   * declare `"gateway"`, and `test/client.test.ts` scans the source so a call
-   * site that omits it fails `npm test` rather than at runtime.
+   * declare `"gateway"` — as its first statement, before anything is signed —
+   * and `test/client.test.ts` scans the source so a call site that omits it
+   * fails `npm test` rather than at runtime. That scan keys on the `path:`
+   * literal in the options object, not on the function that receives it, so a
+   * route reaching `send` through a helper (`fetchPage`) or through some future
+   * wrapper is checked exactly like a direct `client.request`.
    */
   surface?: "v1" | "gateway";
 }
@@ -400,6 +412,31 @@ export class ExchangeClient {
 
   private async send<T>(opts: RequestOptions): Promise<Page<T>> {
     const method = opts.method ?? "GET";
+
+    // Restores the fail-safe ENG-6221 removed. Both bases are now the same
+    // deployment base, so an undeclared bare route no longer 404s at a bare
+    // root — it composes the live legacy route, which on the public host is a
+    // proxy signing with the site's own key. That must be loud rather than
+    // silent. This is a programming error, not an operator one: every call site
+    // is in this repo and all of them declare it today, which
+    // `test/client.test.ts` pins by scanning the source.
+    //
+    // FIRST statement in `send`, before credentials are looked up and before
+    // anything is signed. Behind the credential block it was reachable only
+    // after `MissingCredentialsError`, so the same mistake reported an operator
+    // problem on an unconfigured machine and a programming problem on a
+    // configured one — and it computed an HMAC over the wrong-surface path
+    // before throwing. Ordering it first makes the diagnostic deterministic.
+    if (opts.surface !== "gateway" && !/^\/api\/v1(?:\/|$)/.test(opts.path)) {
+      throw new Error(
+        `client: ${method} ${opts.path} is not an /api/v1 route, so it must ` +
+          `declare surface: "gateway". Both surfaces hang off one deployment ` +
+          `base (ENG-6221), so an undeclared bare route is sent to the legacy ` +
+          `gateway proxy instead of failing — and that proxy signs with the ` +
+          `site's own key on the public host.`,
+      );
+    }
+
     const query = opts.query ?? "";
     const bodyBytes =
       opts.body === undefined
@@ -446,23 +483,6 @@ export class ExchangeClient {
         throw new MissingAdminSecretError(where);
       }
       headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
-    }
-
-    // Restores the fail-safe ENG-6221 removed. Both bases are now the same
-    // deployment base, so an undeclared bare route no longer 404s at a bare
-    // root — it composes the live legacy route, which on the public host is a
-    // proxy signing with the site's own key. That must be loud rather than
-    // silent. This is a programming error, not an operator one: every call site
-    // is in this repo and all of them declare it today, which
-    // `test/client.test.ts` pins by scanning the source.
-    if (opts.surface !== "gateway" && !/^\/api\/v1(?:\/|$)/.test(opts.path)) {
-      throw new Error(
-        `client: ${method} ${opts.path} is not an /api/v1 route, so it must ` +
-          `declare surface: "gateway". Both surfaces hang off one deployment ` +
-          `base (ENG-6221), so an undeclared bare route is sent to the legacy ` +
-          `gateway proxy instead of failing — and that proxy signs with the ` +
-          `site's own key on the public host.`,
-      );
     }
 
     const base =

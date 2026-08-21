@@ -62,10 +62,10 @@ export interface ExchangeConfig {
    * site account, not yours. To act as a specific account against a legacy
    * route, target a direct indexer gateway that verifies client HMAC
    * (auth.rs::verify_hmac): `NEXUS_EXCHANGE_NETWORK=local` for the
-   * `http://localhost:9090` from the exchange `docker-compose`, or the `custom`
-   * bundle with `NEXUS_EXCHANGE_GATEWAY_PATH=/`. Naming the network is what
-   * carries the bare-origin shape — a bare `NEXUS_EXCHANGE_API_URL` assumes the
-   * public-gateway path. See the README "Authentication" section.
+   * `http://localhost:9090` from the exchange `docker-compose`, or the full
+   * `custom` bundle with `NEXUS_EXCHANGE_GATEWAY_PATH=/`. Naming the network is
+   * what carries the bare-origin shape — a bare `NEXUS_EXCHANGE_API_URL` assumes
+   * the public-gateway path. See the README "Authentication" section.
    */
   gatewayBaseUrl: string;
   /** HMAC API key id (header `x-api-key`). Optional — only needed for private tools. */
@@ -326,11 +326,13 @@ const BARE_URL_DEPRECATION_NOTICE =
   "nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated " +
   "and still works. On its own it also assumes the PUBLIC-GATEWAY shape, so " +
   "/api/v1 resolves under /api/exchange; for an indexer that serves at its " +
-  "root, add NEXUS_EXCHANGE_NETWORK=local or the bundle's " +
-  "NEXUS_EXCHANGE_GATEWAY_PATH=/. Prefer NEXUS_EXCHANGE_NETWORK=custom with " +
-  "NEXUS_EXCHANGE_NETWORK_LABEL and NEXUS_EXCHANGE_FUNDS: the bundle declares " +
-  "whose money is behind the URL, which a bare URL cannot — so the tools that " +
-  'cannot be undone refuse on it. See the README "A custom stage".';
+  "root, add NEXUS_EXCHANGE_NETWORK=local, or describe the deployment with the " +
+  "full custom bundle — NEXUS_EXCHANGE_NETWORK=custom plus " +
+  "NEXUS_EXCHANGE_NETWORK_LABEL, NEXUS_EXCHANGE_FUNDS and " +
+  "NEXUS_EXCHANGE_GATEWAY_PATH=/ (that variable is part of the bundle and is " +
+  "refused on its own). The bundle is also the better answer generally: it " +
+  "declares whose money is behind the URL, which a bare URL cannot — so the " +
+  'tools that cannot be undone refuse on it. See the README "A custom stage".';
 
 /**
  * Every environment variable that carries part of a custom bundle. Read ONLY
@@ -382,16 +384,17 @@ function resolveDeclaredFunds(raw: string): DeclaredFunds {
 }
 
 /**
- * Parse `NEXUS_EXCHANGE_GATEWAY_PATH` — where the legacy gateway surface hangs
- * off the custom stage's host root. Blank (or unset) means the
- * `/api/exchange` default; see {@link resolveTarget}.
+ * Parse `NEXUS_EXCHANGE_GATEWAY_PATH` — where the custom stage's DEPLOYMENT
+ * hangs off its origin. Blank (or unset) means the `/api/exchange` default; see
+ * {@link resolveTarget}.
  *
  * A closed set of the only two real deployment shapes (mirroring
  * `NetworkDescriptor.gatewayPath`): `/api/exchange` for a host behind the public
- * gateway convention, and `/` for a bare indexer that serves the legacy routes
- * at its root — the `local` shape, and the one a private stage is most likely to
- * be. Getting it wrong 404s every legacy route and hands `get_ws_token` a
- * `ws_endpoint` nothing listens on, so it is a declared value, never a guess.
+ * gateway convention, and `/` for a bare indexer that serves at its root — the
+ * `local` shape, and the one a private stage is most likely to be. Since
+ * ENG-6221 this places BOTH surfaces, not only the legacy routes, so getting it
+ * wrong 404s every tool and hands `get_ws_token` a `ws_endpoint` nothing listens
+ * on. It is a declared value, never a guess.
  *
  * The bare-origin shape is spelled `/` rather than the empty string on purpose:
  * everywhere else here a set-but-blank variable means "unset" (a shell exports
@@ -534,7 +537,9 @@ function resolveTarget(env: NodeJS.ProcessEnv): TargetSelection {
       // descriptor to read a shape from, so the public-gateway convention
       // stands: that is what every existing config already resolves to. A bare
       // indexer declares itself with `NEXUS_EXCHANGE_NETWORK=local` (host
-      // included) or the custom bundle's `NEXUS_EXCHANGE_GATEWAY_PATH=/`.
+      // included), or through the FULL custom bundle, which is the only place
+      // `NEXUS_EXCHANGE_GATEWAY_PATH=/` is read — that variable is refused on
+      // its own, so the deprecation notice names the whole bundle with it.
       gatewayPath: desc?.gatewayPath ?? "/api/exchange",
     });
     // The deprecated form is the URL SELECTING the target. With a network also

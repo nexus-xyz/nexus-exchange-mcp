@@ -193,9 +193,56 @@ test("signed tool without credentials throws MissingCredentialsError", async () 
     gatewayBaseUrl: "http://example.test",
   });
   await assert.rejects(
-    () => client.request({ path: "/account", signed: true }),
+    () => client.request({ path: "/api/v1/account", signed: true }),
     MissingCredentialsError,
   );
+  // A legacy route reports the same operator error, not the surface one: the
+  // undeclared-surface guard runs first, so a route that DOES declare its
+  // surface still reaches the credential check.
+  await assert.rejects(
+    () =>
+      client.request({
+        path: "/withdrawals",
+        surface: "gateway",
+        signed: true,
+      }),
+    MissingCredentialsError,
+  );
+});
+
+test("the undeclared-surface guard runs before credentials and before signing", async () => {
+  // Ordering, not just presence. Behind the credential block the same mistake
+  // reported MissingCredentialsError on an unconfigured machine and the
+  // programming error on a configured one — and signed the wrong-surface path
+  // before throwing. Both configurations must now report the same thing, and
+  // nothing may reach the network.
+  const unconfigured = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+  });
+  const configured = new ExchangeClient({
+    directBaseUrl: "http://example.test",
+    gatewayBaseUrl: "http://example.test",
+    apiKey: "nx_test",
+    apiSecret: "00".repeat(32),
+  });
+  const realFetch = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async () => {
+    fetched++;
+    return new Response("{}", { status: 200 });
+  }) as typeof fetch;
+  try {
+    for (const client of [unconfigured, configured]) {
+      await assert.rejects(
+        () => client.request({ path: "/account", signed: true }),
+        /must declare surface: "gateway"/,
+      );
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(fetched, 0, "an undeclared surface never reaches the network");
 });
 
 test("place_order maps friendly args to the engine wire shape", async () => {
@@ -838,6 +885,24 @@ test("every non-v1 request call site in src/ declares surface: gateway", () => {
   // and checks them all, the same way the pinned-version lockstep above reads
   // files rather than trusting a constant. A new legacy tool that forgets the
   // declaration fails here, in `npm test`, rather than at a customer's HMAC.
+  //
+  // Keyed on the `path:` LITERAL, not on the function receiving it. Matching
+  // call sites instead (`/\.(?:request|requestPage)\(/`) silently skipped the
+  // five routes that reach the client through `fetchPage(client, cursor, {…})`,
+  // because that helper is not a method call and the `client.requestPage(opts)`
+  // inside it forwards an opts object with no literal path — so a paginated
+  // legacy route added through it would have shipped undeclared, which is the
+  // guard failing exactly where it promised it could not. Every options object
+  // carrying a request path is now in scope regardless of who receives it,
+  // including through a wrapper that does not exist yet.
+  //
+  // `scripts/check_spec_drift.py` learned this same lesson at ENG-7424 and had
+  // to name `fetchPage(client,` explicitly, because it reads `method:` too and
+  // so must sit at the call site. This scan needs only the path, so it can key
+  // on the thing it is actually checking and stop maintaining a list of
+  // wrappers. What would still evade it is a COMPUTED path with no literal
+  // prefix at all; that is separately refused for the call sites the drift
+  // scanner knows, which require an inline string or template literal.
   const files: string[] = [];
   const walk = (dir: string) => {
     for (const entry of readdirSync(new URL(dir, import.meta.url), {
@@ -854,12 +919,30 @@ test("every non-v1 request call site in src/ declares surface: gateway", () => {
   let scanned = 0;
   for (const rel of files) {
     const src = readFileSync(new URL(rel, import.meta.url), "utf8");
-    for (const m of src.matchAll(/\.(?:request|requestPage)\s*\(/g)) {
-      // Balanced-paren slice of the single options-object argument.
+    // A quoted value only: `path: ["price"]` is a zod issue path, not a route.
+    for (const m of src.matchAll(/path:\s*[`"']([^`"'$]*)/g)) {
+      // Walk back to the `{` that opens the object literal holding this key,
+      // then forward to its match, so `surface` is looked for in the SAME
+      // object. A `path:` nested one level deeper than its `surface:` would
+      // fail this rather than pass it — the safe direction for a guard.
       let depth = 0;
-      const start = m.index! + m[0].length - 1;
-      let end = start;
-      for (let i = start; i < src.length; i++) {
+      let open = -1;
+      for (let i = m.index! - 1; i >= 0; i--) {
+        const ch = src[i];
+        if (ch === ")" || ch === "]" || ch === "}") depth++;
+        else if (ch === "(" || ch === "[") depth--;
+        else if (ch === "{") {
+          if (depth === 0) {
+            open = i;
+            break;
+          }
+          depth--;
+        }
+      }
+      assert.ok(open >= 0, `${rel}: no object literal encloses "${m[1]}"`);
+      depth = 0;
+      let end = open;
+      for (let i = open; i < src.length; i++) {
         const ch = src[i];
         if (ch === "(" || ch === "[" || ch === "{") depth++;
         else if (ch === ")" || ch === "]" || ch === "}") {
@@ -870,23 +953,63 @@ test("every non-v1 request call site in src/ declares surface: gateway", () => {
           }
         }
       }
-      const arg = src.slice(start, end + 1);
-      const pathMatch = /path:\s*[`"']([^`"'$]*)/.exec(arg);
-      // A call that forwards an opts object it was handed (fetchPage) declares
-      // nothing itself — its callers are the real sites and are scanned above.
-      if (!pathMatch) continue;
+      const arg = src.slice(open, end + 1);
       scanned++;
-      if (/^\/api\/v1(?:\/|$)/.test(pathMatch[1])) continue;
+      if (/^\/api\/v1(?:\/|$)/.test(m[1])) continue;
       assert.match(
         arg,
         /surface:\s*"gateway"/,
-        `${rel}: request to non-v1 path "${pathMatch[1]}" must declare ` +
+        `${rel}: request to non-v1 path "${m[1]}" must declare ` +
           `surface: "gateway" — see RequestOptions.surface`,
       );
     }
   }
-  // A scan that silently matched nothing would pass vacuously.
-  assert.ok(scanned > 50, `scanned ${scanned} literal-path call sites`);
+  // A scan that silently matched nothing would pass vacuously. The count is
+  // also the anti-vacuity check for the delivery mechanism: every literal
+  // request path in `src/` is one of these, so a route that reaches the client
+  // by some route this scan cannot see would have to have no literal path at
+  // all.
+  assert.ok(scanned > 60, `scanned ${scanned} literal-path call sites`);
+});
+
+test("the call-site scan covers routes delivered through fetchPage", () => {
+  // The regression that motivated the rewrite above, pinned directly: the five
+  // paginated tools whose options object is handed to `fetchPage` rather than
+  // to `client.request`. Mutating one of their paths to a bare route must fail
+  // the scan; under the old call-site-keyed regex it stayed green.
+  const src = readFileSync(
+    new URL("../src/tools/index.ts", import.meta.url),
+    "utf8",
+  );
+  const viaFetchPage = [...src.matchAll(/\bfetchPage\s*\(/g)].map((m) => {
+    let depth = 0;
+    for (let i = m.index! + m[0].length - 1; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === "(" || ch === "[" || ch === "{") depth++;
+      else if (ch === ")" || ch === "]" || ch === "}") {
+        depth--;
+        if (depth === 0) return src.slice(m.index!, i + 1);
+      }
+    }
+    return "";
+  });
+  const withLiteralPath = viaFetchPage.filter((call) =>
+    /path:\s*[`"']/.test(call),
+  );
+  assert.ok(
+    withLiteralPath.length >= 5,
+    `expected the fetchPage call sites to carry literal paths, found ` +
+      `${withLiteralPath.length} of ${viaFetchPage.length}`,
+  );
+  // And each of them is a path the scan above would classify, i.e. the object
+  // literal it lives in is reachable by walking back from the key.
+  for (const call of withLiteralPath) {
+    assert.match(
+      call,
+      /\{[\s\S]*path:\s*[`"']/,
+      "the literal path sits inside an object literal the scan can bound",
+    );
+  }
 });
 
 test("client routes surface to the right base and signs the exact path sent", async () => {

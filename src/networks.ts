@@ -78,16 +78,22 @@ export interface NetworkDescriptor {
    */
   readonly baseUrl: string | null;
   /**
-   * Where the legacy gateway surface hangs off {@link baseUrl} — the routes with
-   * no per-path `servers` override in the spec (`/orders`, `/ws`, `/stream`,
-   * `/ws/token`, `/ws-tokens`).
+   * Where this network's DEPLOYMENT hangs off {@link baseUrl}. The name is
+   * historical: it came from the legacy gateway surface (the routes with no
+   * per-path `servers` override in the spec — `/orders`, `/ws`, `/stream`,
+   * `/ws/token`, `/ws-tokens`), but since ENG-6221 it places BOTH surfaces, so
+   * `/api/v1/*` moves with it too.
    *
    * Per-network because the spec's ROOT `servers` list is NOT uniform: the
    * public host is `https://exchange.nexus.xyz/api/exchange`, but local
    * development is the BARE origin `http://localhost:9090` — the indexer serves
-   * those routes at its root. Appending `/api/exchange` there would 404 every
-   * legacy call and hand `get_ws_token` a `ws_endpoint` nothing listens on,
-   * which is worse than no endpoint at all.
+   * at its root. Appending `/api/exchange` there would 404 every call and hand
+   * `get_ws_token` a `ws_endpoint` nothing listens on, which is worse than no
+   * endpoint at all.
+   *
+   * Load-bearing on a URL override too: `resolveTarget` reads it from the named
+   * network rather than hardcoding the public convention, so a URL redirects the
+   * HOST and the network keeps its SHAPE.
    */
   readonly gatewayPath: "" | "/api/exchange";
   /**
@@ -138,10 +144,26 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // emitting a plausible-looking wrong URL. Point NEXUS_EXCHANGE_API_URL at
       // it deliberately once it is live.
       baseUrl: null,
-      // Unused while `baseUrl` is null (selecting mainnet throws before any URL
-      // is built). Carries the public-host convention so that whoever wires up
-      // the durable host has to make a deliberate choice here, not inherit a
-      // silent default.
+      // NOT unused, despite `baseUrl` being null. Selecting mainnet alone throws
+      // before any URL is built, but `NEXUS_EXCHANGE_NETWORK=mainnet` alongside
+      // an explicit URL is the sanctioned way to reach real funds today — and
+      // since ENG-6221 this field places BOTH surfaces on that path, so it
+      // decides where every `/api/v1` call lands on the one network that moves
+      // real money.
+      //
+      // It stays the public-gateway convention rather than the bare origin, on
+      // purpose. Neither value is a measurement: no operation is mapped onto
+      // `api.nexus.xyz` and its durable base is `/v1`-rooted (see
+      // `durableRestBase`) where this server's paths are `/api/v1`-rooted, so
+      // that host cannot be served by either shape as things stand. What is left
+      // is a convention, and the one to pick is the one every other undeclared
+      // shape in this package already resolves to (`resolveGatewayPath`'s
+      // default, and the bare-URL form's assumption) — a second, different
+      // default for one network would be a guess wearing a disguise. An operator
+      // whose mainnet deployment serves at its root says so the documented way:
+      // the full `custom` bundle with `NEXUS_EXCHANGE_FUNDS=real` and
+      // `NEXUS_EXCHANGE_GATEWAY_PATH=/`, which declares the shape instead of
+      // inheriting it. `test/networks.test.ts` pins both halves of that.
       gatewayPath: "/api/exchange",
       durableRestBase: "https://api.nexus.xyz/v1",
       durableWsUrl: "wss://api.nexus.xyz",
@@ -158,8 +180,10 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       baseUrl: "http://localhost:9090",
       // No `/api/exchange` prefix: the spec's local `servers` entry is the bare
       // origin (the public one carries the gateway path), because the indexer
-      // serves the legacy routes directly. `deriveBases` appends the prefix by
-      // default, so local has to say otherwise explicitly.
+      // serves both surfaces directly. `deriveBases` appends the prefix by
+      // default, so local has to say otherwise explicitly — and since ENG-6221
+      // this is also what keeps `/api/v1/*` at the origin here, which is why
+      // `local` came through that change byte-for-byte unchanged.
       gatewayPath: "",
       durableRestBase: "http://localhost:9090",
       durableWsUrl: "ws://localhost:9090",

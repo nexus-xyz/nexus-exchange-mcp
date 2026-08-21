@@ -20,10 +20,14 @@
 #   meant to, so a raw covered/total ratio understates coverage for every surface
 #   equally. The checker prints the split.
 #
-# Two documented allowlists in scripts/check_spec_drift.py hold operations a tool
-# calls that are deliberately absent here — NON_SPEC_TARGETS (outside the OpenAPI
-# contract, e.g. the `/demo/*` sample routes) and CODE_ONLY_OPS (ahead of the
-# pinned spec). Adding either to this file would fail the manifest -> spec check.
+# One documented allowlist in scripts/check_spec_drift.py holds operations a tool
+# calls that are deliberately absent here — NON_SPEC_TARGETS, for routes outside
+# the OpenAPI contract that nobody intends to document (the `/demo/*` fixtures).
+# Adding one to this file would fail the manifest -> spec check.
+#
+# There is no "ahead of the pinned spec" exception: an operation the contract does
+# not define is not implemented at all, so it never reaches this file
+# (ENG-8616/ENG-8619).
 #
 # Format: METHOD /path, one per line, path spelled exactly as the spec spells it.
 

@@ -128,8 +128,10 @@ operations it exposes as tools (see
   conflict — they name different surfaces of the same deployment, and this
   server holds both at once. If you are comparing configs across the SDKs,
   compare the surface, not the string.
-- **HMAC signs the full path** the server verifies — e.g. `/api/v1/orders` for
-  v1 routes, the bare route (`/orders`) for legacy ones.
+- **HMAC signs the logical route** — e.g. `/api/v1/orders` for v1 routes, the
+  bare route (`/orders`) for legacy ones. The gateway path is part of the base
+  and is not signed over, so on a gatewayed deployment the signed path and the
+  wire path differ; see [Authentication](#authentication).
 - **`cancel_order` requires `market_id`** when cancelling a single order (the
   v1 route marks it required); `market_id` is optional with `cancel_all` to
   scope a mass-cancel to one market.
@@ -348,19 +350,19 @@ Prefer to run from a checkout — for development, or to use the smoke check? Se
 Copy `.env.example` and set as needed. Only trading/account tools need
 credentials — never commit real secrets.
 
-| Variable                            | Required                | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| ----------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, `mainnet`, or `custom`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                                                                                                                                                                                                                |
-| `NEXUS_EXCHANGE_API_URL`            | With `custom`           | Explicit host-root override (serves `/api/v1`); wins over `NEXUS_EXCHANGE_NETWORK`. Defaults to the selected network's host. A legacy value ending in `/api/exchange` is accepted and normalized. **On its own it is deprecated** — it names a host without declaring whose money is behind it; use `NEXUS_EXCHANGE_NETWORK=custom` with the bundle below. Alongside a named network it is not deprecated: that target already declared its funds. |
-| `NEXUS_EXCHANGE_NETWORK_LABEL`      | With `custom`           | Name for a custom stage. Restricted to `[A-Za-z0-9._-]`, max 64 — the Nexus clients namespace stored credentials by it. See [A custom stage](#a-custom-stage).                                                                                                                                                                                                                                                                                     |
-| `NEXUS_EXCHANGE_FUNDS`              | With `custom`           | Whose money is behind the URL: `real`, `play` or `unknown`. **No default.** Until it is declared, the tools that cannot be undone refuse to run.                                                                                                                                                                                                                                                                                                   |
-| `NEXUS_EXCHANGE_FAUCET`             | No                      | Set to `1` if a custom stage has a faucet. Separate from funds and absent until declared: `claim_faucet` / `claim_credit` need play funds **and** a faucet.                                                                                                                                                                                                                                                                                        |
-| `NEXUS_EXCHANGE_GATEWAY_PATH`       | No                      | Where a custom stage serves the legacy routes: `/api/exchange` (default) or `/` for a bare indexer serving them at its root.                                                                                                                                                                                                                                                                                                                       |
-| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                                                                                                                                                                                                            |
-| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                                                                                                                                                                                                                  |
-| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                                                                                                                                                                                                       |
+| Variable                            | Required                | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ----------------------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NEXUS_EXCHANGE_NETWORK`            | No                      | Network to target: `testnet` (default, play funds), `local`, `mainnet`, or `custom`. See [Networks](#networks). An unrecognized value is an error, never a default.                                                                                                                                                                                                                                                                                                                                                   |
+| `NEXUS_EXCHANGE_API_URL`            | With `custom`           | Explicit **origin** override — scheme + host, not a surface path; both surfaces hang off it plus the gateway path. Wins over `NEXUS_EXCHANGE_NETWORK`. Defaults to the selected network's host. A legacy value ending in `/api/exchange` is accepted and normalized. **On its own it is deprecated** — it names a host without declaring whose money is behind it; use `NEXUS_EXCHANGE_NETWORK=custom` with the bundle below. Alongside a named network it is not deprecated: that target already declared its funds. |
+| `NEXUS_EXCHANGE_NETWORK_LABEL`      | With `custom`           | Name for a custom stage. Restricted to `[A-Za-z0-9._-]`, max 64 — the Nexus clients namespace stored credentials by it. See [A custom stage](#a-custom-stage).                                                                                                                                                                                                                                                                                                                                                        |
+| `NEXUS_EXCHANGE_FUNDS`              | With `custom`           | Whose money is behind the URL: `real`, `play` or `unknown`. **No default.** Until it is declared, the tools that cannot be undone refuse to run.                                                                                                                                                                                                                                                                                                                                                                      |
+| `NEXUS_EXCHANGE_FAUCET`             | No                      | Set to `1` if a custom stage has a faucet. Separate from funds and absent until declared: `claim_faucet` / `claim_credit` need play funds **and** a faucet.                                                                                                                                                                                                                                                                                                                                                           |
+| `NEXUS_EXCHANGE_GATEWAY_PATH`       | No                      | Where a custom stage hangs off its host: `/api/exchange` (default) or `/` for a bare indexer serving at its root. Places **both** surfaces since ENG-6221, so a wrong value 404s every tool, not only the legacy ones. Read only with `NEXUS_EXCHANGE_NETWORK=custom` — refused on its own.                                                                                                                                                                                                                           |
+| `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Networks
 
@@ -411,7 +413,7 @@ this package ships no hostname for any of them. You supply it.
 
 ```bash
 NEXUS_EXCHANGE_NETWORK=custom
-NEXUS_EXCHANGE_API_URL=https://exchange.example.com   # the stage's host root
+NEXUS_EXCHANGE_API_URL=https://exchange.example.com   # the stage's origin
 NEXUS_EXCHANGE_NETWORK_LABEL=dev                      # a name for it
 NEXUS_EXCHANGE_FUNDS=play                             # real | play | unknown
 NEXUS_EXCHANGE_FAUCET=1                               # only if it has one
@@ -438,9 +440,13 @@ appear in the spec's `x-nexus-networks`.
 ### Undeclared funds refuse the tools that cannot be undone
 
 `NEXUS_EXCHANGE_API_URL` on its own is the **deprecated** legacy shortcut. It
-still works exactly as it always has — same URLs, no bundle required, legacy
-`/api/exchange` suffix still normalized — and it resolves to a custom target
-whose funds are **undeclared**. That is not the same as play funds, so these
+still works — no bundle required, legacy `/api/exchange` suffix still normalized
+— and it resolves to a custom target whose funds are **undeclared**. It also has
+no deployment shape to read, so it assumes the public-gateway one and the notice
+below says so; ENG-6221 moved the `/api/v1` base under that gateway path, which
+is the one thing about this form that is not byte-identical to what it used to
+resolve to. A bare URL pointed at an indexer that serves at its root wants
+`NEXUS_EXCHANGE_NETWORK=local` alongside it, or the full bundle. That is not the same as play funds, so these
 tools refuse rather than proceed on an assumption:
 
 | Tools                                                                                                                                                 | Need                                |
@@ -463,7 +469,10 @@ one notice on **stderr** naming the declared form, then runs exactly as before
 
 ```
 nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated and
-still works, unchanged. Prefer NEXUS_EXCHANGE_NETWORK=custom …
+still works. On its own it also assumes the PUBLIC-GATEWAY shape, so /api/v1
+resolves under /api/exchange; for an indexer that serves at its root, add
+NEXUS_EXCHANGE_NETWORK=local, or describe the deployment with the full custom
+bundle …
 ```
 
 Nothing is removed, and nothing is written to stdout — that is the JSON-RPC
@@ -476,7 +485,7 @@ are no longer enum values. Describe them as a custom stage instead:
 
 ```bash
 NEXUS_EXCHANGE_NETWORK=custom
-NEXUS_EXCHANGE_API_URL=https://staging.example.com   # the deployment's host root
+NEXUS_EXCHANGE_API_URL=https://staging.example.com   # the deployment's origin
 NEXUS_EXCHANGE_NETWORK_LABEL=staging
 NEXUS_EXCHANGE_FUNDS=play                            # a testnet deployment holds play funds
 ```
@@ -587,8 +596,16 @@ signed with the hex-decoded secret and sent as `x-signature` alongside
 `x-api-key` and `x-timestamp`.
 
 For `/api/v1` routes the signed path includes the prefix (e.g. `/api/v1/orders`);
-for legacy gateway routes it is the bare path (e.g. `/orders`). The client signs
-whatever path it sends, which is exactly what the indexer verifies over.
+for legacy gateway routes it is the bare path (e.g. `/orders`). What is signed is
+the **logical route** — the deployment's gateway path belongs to the base and is
+not signed over. On a bare indexer (`NEXUS_EXCHANGE_NETWORK=local`) the two
+coincide, so the client signs exactly what it sends. On a **gatewayed**
+deployment they differ: the wire path is `/api/exchange/api/v1/orders` while the
+signature covers `/api/v1/orders`, so verification rests on the gateway
+stripping its own prefix before the indexer checks. That assumption is unverified
+against real credentials (ENG-6221) — if signed calls 401 on a gatewayed host
+and the same key works against a bare indexer, that stripping is the thing to
+check.
 
 Important: the public production host still fronts authenticated requests with a
 proxy that signs with the site's own frontend key, so per-caller HMAC headers
@@ -753,7 +770,8 @@ serves both surfaces at the origin and prints no notice — the network declared
 the target, so the URL only redirected the host. Pointing a bare
 `NEXUS_EXCHANGE_API_URL` at an indexer that serves at its root sends
 `/api/v1/*` under `/api/exchange`, where a bare indexer serves nothing; name the
-network, or use the custom bundle's `NEXUS_EXCHANGE_GATEWAY_PATH=/`. If the
+network, or describe the stage with the full `custom` bundle (which is where
+`NEXUS_EXCHANGE_GATEWAY_PATH=/` is read — it is refused on its own). If the
 target answers with HTML rather than JSON, on a 404 or on a 200, the check says
 so by name and exits non-zero; it never reports a passing run for a body it
 could not read as market-summary JSON.

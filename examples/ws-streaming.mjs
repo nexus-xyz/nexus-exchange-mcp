@@ -3,7 +3,10 @@
 //
 // Auth tier: HMAC KEY (for the token mint). Set NEXUS_EXCHANGE_API_KEY /
 // NEXUS_EXCHANGE_API_SECRET, and NEXUS_EXCHANGE_API_URL at a direct
-// HMAC-verifying gateway (see the top-level README, "Authentication").
+// HMAC-verifying gateway (see the top-level README, "Authentication"), plus
+// NEXUS_EXCHANGE_NETWORK naming the network that URL belongs to (`local` for a
+// local indexer) — the network carries the deployment shape, and a bare URL
+// assumes the public-gateway one (ENG-6221).
 //
 // Why the split: an MCP tool is request/response — it cannot hold a socket
 // open. So the server's `get_ws_token` tool mints the single-use 60s token,

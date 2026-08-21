@@ -10,6 +10,13 @@
 //                                production host proxies authenticated calls
 //                                under the site's own key — see the top-level
 //                                README, "Authentication".
+//   NEXUS_EXCHANGE_NETWORK     - the network that URL belongs to (e.g. `local`
+//                                for a local indexer). Required here even though
+//                                this script only READS: the network carries the
+//                                deployment shape, and a bare URL assumes the
+//                                public-gateway one, which puts every /api/v1
+//                                route under /api/exchange where a local indexer
+//                                serves nothing (ENG-6221).
 //
 //   get_account_state      -> summary + open positions in one coherent read
 //   get_account_summary    -> equity / margin / PnL rollup / withdrawable

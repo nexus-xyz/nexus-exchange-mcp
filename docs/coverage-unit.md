@@ -69,9 +69,21 @@ every PR — including a spec-pin bump PR, which is the one that most needs them
    the aggregate set identical, so an aggregate check would stay green while the
    mapping — the whole point — was wrong.
 
-Deliberate exceptions live in three named allowlists in that script
-(`NON_SPEC_TARGETS`, `CODE_ONLY_OPS`, `TOOLS_WITHOUT_OPS`), each with a
-stale-entry check so an exemption cannot quietly become permanent.
+Deliberate exceptions live in two named allowlists in that script
+(`NON_SPEC_TARGETS` for routes outside the contract that nobody intends to
+document, `TOOLS_WITHOUT_OPS` for tools that legitimately call no operation),
+each with a stale-entry check so an exemption cannot quietly become permanent.
+
+There is no exception for an operation that is merely **ahead of** the pinned
+spec. `CODE_ONLY_OPS` is now a tripwire rather than an allowlist: it must be
+empty, and any entry aborts the checker in both verify and `--write` modes
+(ENG-8616 / ENG-8619). The mechanism was removed rather than emptied because its
+two rot checks — the operation stopped being called, or the pin caught up — only
+fire when something changes, so an operation that has never been in any spec
+version satisfies neither and sits green forever. That is not hypothetical: four
+such operations survived several spec generations parked in the sibling SDKs'
+equivalent lists.
+
 `scripts/test_check_spec_drift.py` defeats each invariant in turn and asserts the
 checker goes red, so its green run means something.
 
@@ -121,6 +133,18 @@ reason this file exists.
    ```
 3. Commit the regenerated `endpoints.txt` alongside the tool.
 
-If the operation is not in the pinned spec yet, add it to `CODE_ONLY_OPS` with a
-comment; the stale-entry check will tell you to remove it the moment the pin
-catches up.
+If the operation is not in the pinned spec, **the tool does not call it.** There
+is no parking list — `CODE_ONLY_OPS` must stay empty and any entry fails the
+build. Instead:
+
+- **The route exists but is undocumented.** The fix is upstream: document it in
+  `nexus-exchange-api`, then bump `.api-version` to the release that carries it
+  (`spec-autobump.yml` opens that PR). The operation is implemented here once a
+  _published_ spec version defines it — the cost is one release cycle.
+- **The route does not exist.** Nothing to implement. A tool that signs a request
+  at a path nothing serves reaches an agent as an opaque 404 it cannot tell from
+  bad credentials, and since this package publishes to npm (ENG-6221) it reaches
+  real installs.
+- **It is outside the contract for good** (a demo fixture, an infrastructure
+  route nobody will document). That is a `NON_SPEC_TARGETS` case, argued on its
+  own merits — not a second door into the first.

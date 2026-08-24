@@ -1,10 +1,12 @@
 name: Spec drift
 
 # VERIFICATION half of the spec-pin lifecycle (ENG-7964). Answers: does the tool
-# surface still match the spec it pins? Checks three invariants — endpoints.txt ->
-# pinned spec, endpoints.txt == the per-tool `ops` declarations, and those
-# declarations == what each handler actually requests. See docs/coverage-unit.md
-# and the header of scripts/check_spec_drift.py.
+# surface still match the spec it pins? Checks four invariants — endpoints.txt ->
+# pinned spec, endpoints.txt == the per-tool `ops` declarations, those
+# declarations == what each handler actually requests, and the network map ->
+# the spec's root `servers` — plus the policy gate that no operation may be
+# parked ahead of the spec (ENG-8619). See docs/coverage-unit.md and the header
+# of scripts/check_spec_drift.py.
 #
 # Its forward counterpart is `spec-autobump.yml`, which proposes a NEWER spec.
 # Order matters and this one comes first: an autobump without a drift check

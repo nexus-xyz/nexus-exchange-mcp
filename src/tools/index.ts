@@ -282,6 +282,25 @@ const positiveDecimal = (field: string) =>
     });
 
 /**
+ * A 0x-prefixed 20-byte EVM address, the exact shape the spec requires of the
+ * bridge wallet-registration `address` (`invalid_address` on `400` otherwise).
+ *
+ * Validated here rather than left to the upstream because of what this
+ * particular field decides: the registered wallet is the account's withdrawal
+ * sink, an account holds one in this cut, and registering a second address is
+ * refused with `409 wallet_already_registered` rather than replacing the first.
+ * A truncated or mistyped address is therefore not a retryable mistake, so it
+ * is worth catching before it is signed for. Mixed case passes — an EIP-55
+ * checksummed address is the same 40 hex digits.
+ */
+const evmAddress = z
+  .string()
+  .regex(
+    /^0x[0-9a-fA-F]{40}$/,
+    "address must be a 0x-prefixed 20-byte hex EVM address",
+  );
+
+/**
  * Friendly order args accepted by `place_order` / `place_orders_batch` /
  * `preview_order`.
  */
@@ -2116,6 +2135,162 @@ export const tools: ToolDef[] = [
         signed: true,
       });
     },
+  },
+
+  // ── Bridge: registered withdrawal wallets (ENG-8902) ──────────────────────
+  //
+  // Two-step and stateless: `challenge` mints a message bound to the account and
+  // the address, `register` echoes it back with the wallet's signature over it.
+  // Nothing is stored between the calls — the message carries its own integrity
+  // tag — which is why the challenge is not a nonce and re-submitting it is a
+  // no-op rather than a replay risk.
+  {
+    name: "create_bridge_wallet_challenge",
+    ops: ["POST /api/v1/bridge/wallets/challenge"],
+    description:
+      "Step 1 of registering a withdrawal wallet: returns the exact `message` " +
+      "to sign with that wallet's key (EIP-191 `personal_sign`) and the " +
+      "`expires_at` it is valid until. This server cannot sign for you — sign " +
+      "the message externally (in the wallet), then pass it and the signature " +
+      "to `register_bridge_wallet`. Treat `message` as opaque: echo it back " +
+      "verbatim, never reformat, re-encode or trim it. The `nonce` field is " +
+      "informational — sign `message`, not the nonce, and do not treat the " +
+      "challenge as single-use: until it expires the same signature can be " +
+      "submitted again, which is harmless because the message is bound to your " +
+      "account and to `address`. Mints nothing and changes no state, so it is " +
+      "safe to call before you have decided to register. A `503 " +
+      "wallet_registration_unavailable` means this deployment has no challenge " +
+      "key configured — registration is off there, and retrying will not help. " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        address: {
+          type: "string",
+          description:
+            "EVM address to register as the withdrawal wallet (0x-prefixed, " +
+            "20 bytes). You must control its key — step 2 proves it.",
+        },
+      },
+      ["address"],
+    ),
+    zod: z.object({ address: evmAddress }).strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const { address } = args as { address: string };
+      return client.request({
+        method: "POST",
+        path: "/api/v1/bridge/wallets/challenge",
+        body: { address },
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "register_bridge_wallet",
+    ops: ["POST /api/v1/bridge/wallets"],
+    description:
+      "Step 2 of registering a withdrawal wallet: submit the `address`, the " +
+      "`message` returned by `create_bridge_wallet_challenge` echoed back " +
+      "VERBATIM, and the EIP-191 signature over it. The address recovered from " +
+      "the signature must equal `address`, and the challenge must name the " +
+      "authenticated account. The registered wallet is where withdrawals are " +
+      "paid, so getting it wrong matters: an account holds ONE wallet in this " +
+      "cut and replacement is not supported — registering a different address " +
+      "afterwards is refused with `409 wallet_already_registered` rather than " +
+      "updating the record. Because of that you must pass `confirm: true`. " +
+      "Re-registering the SAME address is idempotent and returns the existing " +
+      "record. Errors: `invalid_address`, `invalid_challenge`, " +
+      "`challenge_expired`, `signature_mismatch`, `account_mismatch` on 400; " +
+      "`wallet_registration_unavailable` on 503 when the deployment has no " +
+      "challenge key (not transient — do not retry). Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        address: {
+          type: "string",
+          description:
+            "EVM address being registered (0x-prefixed, 20 bytes). Must match " +
+            "the address recovered from `signature`.",
+        },
+        message: {
+          type: "string",
+          description:
+            "The `message` from `create_bridge_wallet_challenge`, echoed back " +
+            "byte-for-byte. Do not reformat, re-encode or trim it — the " +
+            "server re-derives the signed bytes and the integrity tag from " +
+            "this exact string.",
+        },
+        signature: {
+          type: "string",
+          description:
+            "0x-prefixed 65-byte EIP-191 `personal_sign` signature over " +
+            "`message`, produced by the key for `address`.",
+        },
+        confirm: {
+          type: "boolean",
+          description:
+            "Must be true to actually register. Guards a permanent choice: " +
+            "the account gets one withdrawal wallet and cannot swap it later.",
+        },
+      },
+      ["address", "message", "signature"],
+    ),
+    zod: z
+      .object({
+        address: evmAddress,
+        message: z.string().min(1),
+        signature: z.string().min(1),
+        confirm: z.boolean().optional(),
+      })
+      .strict(),
+    // Registering the sink withdrawals are paid to is not undoable — there is no
+    // replacement in this cut — so it needs a target that has said whose money
+    // is behind it, exactly like the deposit address funds get sent to.
+    fundsGuard: "declared-funds",
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as {
+        address: string;
+        message: string;
+        signature: string;
+        confirm?: boolean;
+      };
+      if (!a.confirm) {
+        throw new Error(
+          "Refusing to register: pass `confirm: true` to make " +
+            `${a.address} this account's withdrawal wallet. The account holds ` +
+            "one registered wallet and it cannot be replaced afterwards.",
+        );
+      }
+      return client.request({
+        method: "POST",
+        path: "/api/v1/bridge/wallets",
+        body: {
+          address: a.address,
+          message: a.message,
+          signature: a.signature,
+        },
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "list_bridge_wallets",
+    ops: ["GET /api/v1/bridge/wallets"],
+    description:
+      "List the authenticated account's registered withdrawal wallets. " +
+      "Wallets are not chain-scoped: one EVM address is valid on every " +
+      "supported EVM chain, and the chain is chosen per withdrawal. In this " +
+      "cut an account holds at most one wallet and both `verified` and " +
+      "`is_default` are always true on it, so do not branch on either — they " +
+      "start varying only with the wallet-lifecycle follow-up. An empty " +
+      "`wallets` array means nothing is registered yet; use " +
+      "`create_bridge_wallet_challenge` then `register_bridge_wallet`. " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema({}),
+    zod: z.object({}).strict(),
+    requiresAuth: true,
+    handler: (client) =>
+      client.request({ path: "/api/v1/bridge/wallets", signed: true }),
   },
 
   // ── Agent-key management (requires credentials) ───────────────────────────

@@ -485,6 +485,7 @@ const GUARDED = {
   submit_deposit: "declared-funds",
   adjust_isolated_margin: "declared-funds",
   create_bridge_deposit_address: "declared-funds",
+  register_bridge_wallet: "declared-funds",
   claim_credit: "play-funds",
   claim_faucet: "play-funds",
 } as const;

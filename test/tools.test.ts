@@ -848,6 +848,126 @@ test("get_bridge_deposit encodes the id in the path, signed", async () => {
   assert.equal(tool.zod.safeParse({}).success, false, "id required");
 });
 
+const WALLET = "0x3178f4bC9A2B1e0d2Cf5eA1B7C4D6E8F0a2B4C6D";
+
+test("create_bridge_wallet_challenge POSTs {address}, signed", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("create_bridge_wallet_challenge")!.handler(c, { address: WALLET }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/wallets/challenge`);
+  assert.deepEqual(calls[0].body, { address: WALLET });
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("create_bridge_wallet_challenge")!;
+  assert.equal(tool.zod.safeParse({}).success, false, "address required");
+  // Minting a challenge changes nothing server-side, so it is not funds-guarded
+  // the way the registration it precedes is.
+  assert.equal(tool.fundsGuard, undefined);
+});
+
+test("the bridge-wallet address is validated as a 20-byte EVM address", () => {
+  // The registered wallet is the account's withdrawal sink and cannot be
+  // replaced, so a truncated or mistyped address is not a retryable mistake —
+  // it is caught before anything is signed for.
+  for (const tool of [
+    findTool("create_bridge_wallet_challenge")!,
+    findTool("register_bridge_wallet")!,
+  ]) {
+    const rest =
+      tool.name === "register_bridge_wallet"
+        ? { message: "m", signature: "0xsig", confirm: true }
+        : {};
+    const ok = (address: string) =>
+      tool.zod.safeParse({ address, ...rest }).success;
+    assert.equal(ok(WALLET), true, `${tool.name}: checksummed address`);
+    assert.equal(ok(WALLET.toLowerCase()), true, `${tool.name}: lower case`);
+    assert.equal(ok(WALLET.slice(0, -1)), false, `${tool.name}: 19.5 bytes`);
+    assert.equal(ok(`${WALLET}00`), false, `${tool.name}: 21 bytes`);
+    assert.equal(ok(WALLET.slice(2)), false, `${tool.name}: no 0x prefix`);
+    assert.equal(ok("0xZZZ…"), false, `${tool.name}: not hex`);
+    assert.equal(ok("vitalik.eth"), false, `${tool.name}: ENS name`);
+  }
+});
+
+test("register_bridge_wallet refuses without confirm, and sends nothing", async () => {
+  const tool = findTool("register_bridge_wallet")!;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("no request may leave the process for a refused register");
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () =>
+        tool.handler(fullClient(), {
+          address: WALLET,
+          message: "challenge",
+          signature: "0xsig",
+        }) as Promise<unknown>,
+      /confirm: true/,
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("register_bridge_wallet echoes the challenge message verbatim, signed", async () => {
+  // The server re-derives the signed bytes and the integrity tag from this
+  // exact string, so a trimmed or re-encoded message is a `signature_mismatch`
+  // the caller cannot debug. Nothing here may touch it.
+  const message =
+    `Nexus Exchange: register ${WALLET} as the withdrawal wallet\n` +
+    "nonce: 9f2c1d84a6b03e57\nexpires: 1785772800000\ntag: 0x4d3c1a9f  ";
+  const calls = await capture(fullClient(), (c) =>
+    findTool("register_bridge_wallet")!.handler(c, {
+      address: WALLET,
+      message,
+      signature: `0x${"ab".repeat(65)}`,
+      confirm: true,
+    }),
+  );
+  assert.equal(calls[0].method, "POST");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/wallets`);
+  assert.deepEqual(calls[0].body, {
+    address: WALLET,
+    message,
+    signature: `0x${"ab".repeat(65)}`,
+  });
+  assert.equal(
+    (calls[0].body as Record<string, unknown>).confirm,
+    undefined,
+    "`confirm` is a client-side guard, not a wire field",
+  );
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+
+  const tool = findTool("register_bridge_wallet")!;
+  assert.equal(
+    tool.zod.safeParse({ address: WALLET, signature: "0xsig", confirm: true })
+      .success,
+    false,
+    "message required",
+  );
+  assert.equal(
+    tool.zod.safeParse({ address: WALLET, message: "m", confirm: true })
+      .success,
+    false,
+    "signature required",
+  );
+});
+
+test("list_bridge_wallets GETs the signed v1 route", async () => {
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_bridge_wallets")!.handler(c, {}),
+  );
+  assert.equal(calls[0].method, "GET");
+  assert.equal(calls[0].url, `${BASE}/api/v1/bridge/wallets`);
+  assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
+  assert.equal(
+    findTool("list_bridge_wallets")!.zod.safeParse({}).success,
+    true,
+  );
+});
+
 test("place_order maps a trailing_limit order to the wire shape", async () => {
   const calls = await capture(fullClient(), (c) =>
     findTool("place_order")!.handler(c, {
@@ -1420,13 +1540,13 @@ test("the tool -> operation mapping is not 1:1", () => {
   // operation, so the two counts are different quantities and neither may be
   // reported as the other.
   //
-  // Worth knowing while reading this: the totals currently COINCIDE — 66 tools
-  // declaring 66 distinct operations — which is why the test asserts the mapping's
+  // Worth knowing while reading this: the totals currently COINCIDE — 69 tools
+  // declaring 69 distinct operations — which is why the test asserts the mapping's
   // shape rather than an inequality of totals. A coincidence of totals is exactly
   // how the tool count came to be reported as an operation count in the first
-  // place (ENG-7964), and 66 is still not the coverage figure: three of those
+  // place (ENG-7964), and 69 is still not the coverage figure: three of those
   // operations are the non-contract `/demo/*` routes, so endpoints.txt publishes
-  // 63. Asserting `distinct !== tools.length` would be both brittle and, today,
+  // 66. Asserting `distinct !== tools.length` would be both brittle and, today,
   // false — the shape below is the property that actually holds.
   const multi = tools.filter((t) => t.ops.length > 1).map((t) => t.name);
   assert.ok(multi.length > 0, "some tool covers multiple operations");

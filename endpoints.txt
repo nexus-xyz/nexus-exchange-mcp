@@ -55,6 +55,9 @@ GET /api/v1/bridge/deposit-addresses
 POST /api/v1/bridge/deposit-addresses
 GET /api/v1/bridge/deposits
 GET /api/v1/bridge/deposits/{id}
+GET /api/v1/bridge/wallets
+POST /api/v1/bridge/wallets
+POST /api/v1/bridge/wallets/challenge
 GET /api/v1/fills
 GET /api/v1/markets/summary
 GET /api/v1/markets/{market_id}/candles

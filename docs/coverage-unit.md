@@ -15,7 +15,8 @@ The tool count is the headline, because a tool is what MCP actually ships and wh
 an agent actually sees. The operation count is the comparable figure, and it is
 the only one that may appear in a cross-surface coverage table.
 
-Today: **66 tools**, **63 spec operations** of the 98 the pinned spec documents.
+Today: **69 tools**, **66 spec operations** of the 101 the pinned spec documents
+(68 distinct once the dual-stack aliases are collapsed — see below).
 
 ## Why it needed deciding
 
@@ -89,7 +90,7 @@ checker goes red, so its green run means something.
 
 ## Reading the number honestly
 
-**Never rank the tool count against the SDK rows.** 66 tools is not "more
+**Never rank the tool count against the SDK rows.** 69 tools is not "more
 coverage" than rs's 55 operations; they are different quantities. If a table has
 one column, it is the operation count.
 

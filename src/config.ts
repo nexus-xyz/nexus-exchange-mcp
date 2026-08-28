@@ -139,7 +139,7 @@ export interface ExchangeConfig {
  * (wired through `extra-files` in release-please-config.json), so the metered
  * client version can never silently drift from the published package version.
  */
-export const PACKAGE_VERSION = "0.3.0"; // x-release-please-version
+export const PACKAGE_VERSION = "0.3.1"; // x-release-please-version
 
 /**
  * Exchange API spec tag this server is compiled against, sent as

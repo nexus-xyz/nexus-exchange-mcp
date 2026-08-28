@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.0...v0.3.1) (2026-08-28)
+
+
+### Features
+
+* map the three bridge wallet-registration routes (ENG-9202) ([#74](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/74)) ([7ed9583](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/7ed9583644a268fae0dd0d690d7fcf7bd2e24d1f))
+
 ## [0.3.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.2.0...v0.3.0) (2026-08-21)
 
 

@@ -15,7 +15,7 @@ Build once, then register the built entry point:
 npm install && npm run build
 
 claude mcp add nexus-exchange \
-  --env NEXUS_EXCHANGE_API_URL=https://exchange.nexus.xyz \
+  --env NEXUS_EXCHANGE_NETWORK=testnet \
   -- node /ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js
 ```
 

@@ -36,13 +36,15 @@ import {
 export interface ExchangeConfig {
   /**
    * Deployment base for the `/api/v1` surface, no trailing slash (e.g.
-   * `https://exchange.nexus.xyz/api/exchange`, or `http://localhost:9090` for a
+   * `https://api.testnet.nexus.xyz/indexer`, or `http://localhost:9090` for a
    * bare indexer). Tools with a v1 route hit `${directBaseUrl}/api/v1/...`.
    *
-   * NOT the bare host root on a gatewayed deployment. ENG-4740 read the spec's
-   * per-path `servers` override as pinning `/api/v1` to the root; measured, the
-   * public root answers `/api/v1/*` with the marketing app's 404 HTML and only
-   * `…/api/exchange/api/v1/*` reaches the API. See {@link deriveBases}.
+   * NOT the bare host root on a deployment that mounts the API under a route
+   * prefix. ENG-4740 read the spec's per-path `servers` override as pinning
+   * `/api/v1` to the root; measured, the root of a prefixed deployment does not
+   * serve the API at all — that was the legacy gateway's marketing-app 404, and
+   * it is still true of `api.testnet.nexus.xyz`, where only `…/indexer/api/v1/*`
+   * reaches a route. See {@link deriveBases}.
    *
    * Equal to {@link ExchangeConfig.gatewayBaseUrl} by construction — one
    * deployment, two surfaces that differ by path. Kept distinct so a call site
@@ -178,13 +180,24 @@ export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
  * This previously stripped `/api/exchange` when building the v1 base, on the
  * premise (ENG-4740, nexus-exchange-api#41) that the indexer serves `/api/v1`
  * at the host root. That premise was read faithfully off the spec — the
- * per-path `servers` override on `/api/v1/*` really does list the bare
- * `https://exchange.nexus.xyz` — but the SPEC IS WRONG about the public host.
- * That is true of `local` and false of the public host, where the marketing app
- * owns the root. Measured against `exchange.nexus.xyz`:
+ * per-path `servers` override on `/api/v1/*` really does list a bare host — but
+ * the SPEC IS WRONG about the public deployments. It holds for `local` and
+ * fails wherever the API is mounted under a route prefix. Measured against the
+ * legacy gateway, which is what motivated the fix:
  *
  *     /api/v1/account                 404, text/html   (Next.js frontend)
  *     /api/exchange/api/v1/account    401, application/json  (auth reached)
+ *
+ * and still true, in the same shape, of the durable host testnet moved to in
+ * ENG-8869 — `api.testnet.nexus.xyz/api/v1/*` answers `404` (no route) while
+ * `…/indexer/api/v1/*` reaches the indexer. Only the prefix's spelling changed.
+ *
+ * Note what that means for the strip itself: NO BUILT-IN NETWORK EXERCISES IT
+ * ANY MORE. Testnet's prefix is `/indexer` and is carried in its `baseUrl`, so
+ * the `/api/exchange` suffix is now purely backward-compatible normalization
+ * for an operator whose `NEXUS_EXCHANGE_API_URL` still names the retired
+ * gateway. It is deliberately not extended to `/indexer`: stripping that would
+ * break the built-in testnet base, which legitimately ends in it.
  *
  * `local` is unaffected because its `gatewayPath` is `""`, so the deployment
  * base IS the origin and `/api/v1/...` still resolves at the root — the shape
@@ -247,7 +260,7 @@ export function normalizeBaseUrl(raw: string): string {
   } catch {
     throw new Error(
       `NEXUS_EXCHANGE_API_URL is not a valid absolute URL: ${JSON.stringify(raw)}. ` +
-        `Expected something like "https://exchange.nexus.xyz".`,
+        `Expected something like "https://api.testnet.nexus.xyz/indexer".`,
     );
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {

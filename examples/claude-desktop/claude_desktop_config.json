@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["/ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js"],
       "env": {
-        "NEXUS_EXCHANGE_API_URL": "https://exchange.nexus.xyz"
+        "NEXUS_EXCHANGE_NETWORK": "testnet"
       }
     }
   }

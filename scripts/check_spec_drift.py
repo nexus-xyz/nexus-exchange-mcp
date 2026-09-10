@@ -66,6 +66,11 @@ INVARIANTS
    honest. It lives here rather than in the TS unit tests because
    openapi.pinned.json is gitignored and fetched by this job alone.
 
+   Where the map deliberately LEADS the spec, the exact base is recorded in
+   SPEC_LEADING_BASES with the ticket that removes it. That list is stale-checked
+   in both directions: an entry whose base no longer matches stops excusing it,
+   and an entry the spec has since caught up with fails until it is deleted.
+
 ALLOWLISTS
 ----------
 ONE named set holds the deliberate operation exceptions — an operation is only
@@ -677,6 +682,28 @@ def parse_networks():
     return found
 
 
+# Networks whose derived base deliberately LEADS the pinned spec's root
+# `servers` list, mapped to the exact base that is allowed to diverge and why.
+#
+# Not a general escape hatch: an entry only suppresses invariant 4 while the
+# derived base matches the recorded string EXACTLY, so any further drift still
+# fails, and the entry is stale-checked below so it cannot rot into a permanent
+# exemption once the spec catches up. Same philosophy as the operation
+# allowlists above, and the same "reality wins over the contract" precedent
+# `deriveBases` already sets in src/config.ts.
+SPEC_LEADING_BASES = {
+    "testnet": (
+        "https://api.testnet.nexus.xyz/indexer",
+        "ENG-8869: repointed off the decommissioned exchange.nexus.xyz gateway "
+        "(ENG-14039, 500s on every route) onto the durable host. The pinned "
+        "spec publishes '/v1'-rooted durable bases, a layout ENG-9134 settled "
+        "against, and it does not know the '/indexer' route prefix the "
+        "deployment actually mounts the indexer under. Correcting the spec is "
+        "ENG-9962; delete this entry when it lands.",
+    ),
+}
+
+
 def check_network_gateway_bases(spec):
     """Invariant 4: each reachable network's gateway base is a spec root server."""
     servers = spec.get("servers") or []
@@ -696,21 +723,48 @@ def check_network_gateway_bases(spec):
         if base is None:
             continue  # no reachable host yet (mainnet) — nothing is built for it
         derived = re.sub(r"/api/exchange$", "", base.rstrip("/")) + gateway_path
-        if derived not in roots:
-            failures += 1
+        allowed, reason = SPEC_LEADING_BASES.get(nid, (None, None))
+        if derived in roots:
+            # Stale-entry check: once the spec publishes the base, the exemption
+            # is no longer describing a divergence and must go, or it would keep
+            # silently excusing whatever the base drifts to next.
+            if allowed == derived:
+                failures += 1
+                print(
+                    f"FAIL invariant 4: network {nid!r} is listed in "
+                    f"SPEC_LEADING_BASES, but its base {derived!r} IS now a root "
+                    f"server in the pinned spec. The spec caught up — delete the "
+                    f"{nid!r} entry from SPEC_LEADING_BASES.",
+                    file=sys.stderr,
+                )
+            continue
+        if allowed == derived:
             print(
-                f"FAIL invariant 4: network {nid!r} derives gateway base "
-                f"{derived!r}, which is not a root server in the pinned spec.\n"
-                f"  spec root servers: {', '.join(sorted(roots))}\n"
-                f"  Fix `gatewayPath` for {nid} in src/networks.ts (the public "
-                f"host carries /api/exchange; local development is the bare "
-                f"origin), or update the map if the spec moved the host.",
-                file=sys.stderr,
+                f"OK (known divergence): network {nid!r} derives {derived!r}, "
+                f"which the pinned spec does not list.\n  {reason}"
             )
+            continue
+        failures += 1
+        print(
+            f"FAIL invariant 4: network {nid!r} derives gateway base "
+            f"{derived!r}, which is not a root server in the pinned spec.\n"
+            f"  spec root servers: {', '.join(sorted(roots))}\n"
+            + (
+                f"  SPEC_LEADING_BASES allows {allowed!r} for {nid!r}, which is "
+                f"not this value — reconcile the two before exempting it.\n"
+                if allowed
+                else ""
+            )
+            + f"  Fix `gatewayPath` / `baseUrl` for {nid} in src/networks.ts, or "
+            f"update the map if the spec moved the host. If the map is "
+            f"deliberately ahead of the spec, record it in SPEC_LEADING_BASES "
+            f"with the ticket that will remove it again.",
+            file=sys.stderr,
+        )
     if not failures:
         print(
             "OK: every reachable network derives a gateway base that is a root "
-            "server in the pinned spec."
+            "server in the pinned spec, or a recorded deliberate divergence."
         )
     return failures
 

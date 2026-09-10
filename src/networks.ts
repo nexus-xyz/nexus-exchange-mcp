@@ -69,11 +69,18 @@ export interface NetworkDescriptor {
   /** Whether the synthetic-funding operations (faucet / credit) exist here. */
   readonly faucet: boolean;
   /**
-   * The origin this server actually talks to TODAY, or `null` when the network
+   * The base this server actually talks to TODAY, or `null` when the network
    * has no host it can reach yet.
    *
-   * This is deliberately separate from {@link durableRestBase}: the per-network
-   * hosts are published in the contract but are not usable as transport yet, and
+   * Usually an origin, but not necessarily: a deployment that mounts the
+   * indexer under a route prefix carries that prefix here, because the prefix
+   * is part of "where this deployment answers" rather than a surface (testnet's
+   * `…/indexer` — see the entry's comment). What it never carries is a SURFACE
+   * path: `/api/v1` is appended per request, never baked in.
+   *
+   * Still separate from {@link durableRestBase}, even where the two now hold
+   * the same string: one is what transport uses and the other is what the
+   * contract publishes, and mainnet is exactly the case where they differ —
    * a base URL that merely looks right is worse than one that is absent.
    */
   readonly baseUrl: string | null;
@@ -84,12 +91,19 @@ export interface NetworkDescriptor {
    * `/ws/token`, `/ws-tokens`), but since ENG-6221 it places BOTH surfaces, so
    * `/api/v1/*` moves with it too.
    *
-   * Per-network because the spec's ROOT `servers` list is NOT uniform: the
-   * public host is `https://exchange.nexus.xyz/api/exchange`, but local
-   * development is the BARE origin `http://localhost:9090` — the indexer serves
-   * at its root. Appending `/api/exchange` there would 404 every call and hand
-   * `get_ws_token` a `ws_endpoint` nothing listens on, which is worse than no
-   * endpoint at all.
+   * Per-network because deployment shapes are NOT uniform. It was `/api/exchange`
+   * for the public gateway and `""` for a bare indexer serving at its root
+   * (`local`); appending `/api/exchange` to the latter would 404 every call and
+   * hand `get_ws_token` a `ws_endpoint` nothing listens on, which is worse than
+   * no endpoint at all.
+   *
+   * Since ENG-8869 the only non-empty value left is mainnet's, which is a
+   * convention rather than a measurement (see that entry). Testnet moved to a
+   * route-prefixed deployment and folds its prefix into {@link baseUrl}, so it
+   * is now `""` too — that is a modelling choice about WHERE the prefix is
+   * written, not a claim that testnet has no prefix. The field stays because
+   * the closed set is a public contract via `NEXUS_EXCHANGE_GATEWAY_PATH`, and
+   * because a custom stage behind the old gateway convention still needs it.
    *
    * Load-bearing on a URL override too: `resolveTarget` reads it from the named
    * network rather than hardcoding the public convention, so a URL redirects the
@@ -97,11 +111,18 @@ export interface NetworkDescriptor {
    */
   readonly gatewayPath: "" | "/api/exchange";
   /**
-   * The durable per-network REST base from the spec. Informational until the
-   * hosts are live — see each entry's comment for why it is not yet `baseUrl`.
+   * The durable per-network REST base. Live for `testnet` and `local`, where it
+   * is the same string as {@link baseUrl}; still informational for `mainnet`,
+   * whose host has no DNS record at all — see that entry's comment.
+   *
+   * NOT simply "from the spec" any more: the pinned spec publishes `/v1`-rooted
+   * durable bases, which ENG-9134 settled against, and it does not know about
+   * the `/indexer` route prefix testnet actually shipped with. Correcting the
+   * spec is ENG-9962; until it lands, measurement wins over the contract here,
+   * the same way it already does in `deriveBases`.
    */
   readonly durableRestBase: string;
-  /** The durable per-network WebSocket origin from the spec. Informational. */
+  /** The durable per-network WebSocket base. Informational — no WS client ships here. */
   readonly durableWsUrl: string;
 }
 
@@ -118,19 +139,72 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       label: "Testnet",
       funds: "play",
       faucet: true,
-      // Still the legacy host, on purpose. The durable testnet host is not
-      // routable yet (DNS/TLS is ENG-8155) AND, more decisively, the spec has
-      // not mapped a single operation onto it: on nexus-exchange-api `main` the
-      // `/api/v1/*` paths still carry a per-path `servers` override listing only
-      // `exchange.nexus.xyz` and localhost, and the durable base is `/v1`-rooted
-      // where this server's paths are `/api/v1`-rooted. So pointing at it today
-      // would produce a wrong URL against a host that does not answer. This
-      // value is exactly what the server has always used, which is why the
-      // default stays byte-for-byte unchanged.
-      baseUrl: "https://exchange.nexus.xyz",
-      gatewayPath: "/api/exchange",
-      durableRestBase: "https://api.testnet.nexus.xyz/v1",
-      durableWsUrl: "wss://api.testnet.nexus.xyz",
+      // ON THE DURABLE HOST AS OF ENG-8869. `api.testnet.nexus.xyz` resolves
+      // and fronts the `apps-prod-testnet` indexer, so testnet no longer points
+      // at the legacy `exchange.nexus.xyz/api/exchange` gateway. That was not a
+      // tidy-up: the legacy gateway proxies to the Cloud Run indexer
+      // `exchange-indexer-t3jdki3hoa-uc.a.run.app`, which is decommissioned and
+      // answers `500` on every route (ENG-14039). The base this server shipped
+      // was dead, so this is a repair rather than a migration.
+      //
+      // THE BASE CARRIES `/indexer`, AND THAT IS THE PART WORTH READING TWICE.
+      // ENG-8865's target table says the durable base is the bare host; it
+      // predates the route that actually shipped. The indexer's `HTTPRoute`
+      // mounts it under a `/indexer` path prefix on the shared per-env hostname
+      // and strips that prefix before forwarding, so the app still sees bare
+      // spec paths. Authoritative source, in the nexus monorepo:
+      // `eng/apps/exchange/backend/services/indexer/helmchart/values/apps-prod-testnet.yaml`
+      // — `hostnames: [api.testnet.nexus.xyz]`, `pathPrefix: "/indexer"`. Same
+      // convention as every other environment (ENG-10267, ENG-10296).
+      //
+      // WHY THE PREFIX LIVES IN `baseUrl` AND NOT IN `gatewayPath`. Both spell
+      // the same composed URL, so this is a modelling choice, and the deciding
+      // reason is that `gatewayPath` is a CLOSED SET (`"" | "/api/exchange"`)
+      // that `NEXUS_EXCHANGE_GATEWAY_PATH` exposes to operators. Widening that
+      // set is a public-contract change and a separate concern from repointing
+      // a host. It is also fair on the merits: the route strips its prefix
+      // before the indexer sees anything, so from this server's side the
+      // deployment behaves exactly like a bare indexer that happens to answer
+      // at `…/indexer` — which is precisely the `local` shape, hence
+      // `gatewayPath: ""`. Nothing branches on that field beyond composing the
+      // base (see `deriveBases`), so "" costs no meaning here.
+      //
+      // Measured 2026-09-09. The prefix is what makes the difference, and both
+      // of this server's surfaces answer under it:
+      //
+      //   /indexer/api/v1/markets/summary  -> 200 JSON (3 markets)
+      //   /indexer/markets/summary         -> 200 JSON
+      //   /indexer/api/v1/account          -> 401 with junk-but-well-formed
+      //                                       HMAC headers — the request reached
+      //                                       the indexer and the signature was
+      //                                       evaluated, which is the proof that
+      //                                       matters for a signed route
+      //   /api/v1/markets/summary          -> 404 (no route)
+      //   /markets/summary                 -> 404 (no route)
+      //
+      // The WS routes answer under the prefix too: `/indexer/ws` and
+      // `/indexer/stream` return 400 "Connection header did not include
+      // 'upgrade'" over plain HTTP, i.e. the handler responding.
+      //
+      // Worth knowing if you re-run these: the host briefly answered
+      // `503 "no healthy upstream"` earlier the same day. A 503 there is still
+      // the gateway saying it MATCHED the route and could not reach the
+      // backend, so the 503-vs-404 split proves the routing just as the
+      // 200-vs-404 one does — only a 404 means the prefix is wrong.
+      //
+      // Both surfaces answer under that one prefix, exactly as they did under
+      // the `…/api/exchange` gateway prefix, so NOTHING ABOUT PATH COMPOSITION
+      // OR SIGNING CHANGES. HMAC still covers the logical path
+      // (`/api/v1/orders`) and still excludes whatever prefix the base carries.
+      baseUrl: "https://api.testnet.nexus.xyz/indexer",
+      gatewayPath: "",
+      // Now the same string as `baseUrl`: the durable base IS what this server
+      // talks to, so the two no longer disagree. The retired `/v1`-in-base form
+      // this used to carry was settled against by ENG-9134 (the layout is
+      // path-versioned `/api/v1`), and a `/v1` base would have composed
+      // `/v1/api/v1/orders`.
+      durableRestBase: "https://api.testnet.nexus.xyz/indexer",
+      durableWsUrl: "wss://api.testnet.nexus.xyz/indexer",
     }),
     mainnet: Object.freeze({
       id: "mainnet",

@@ -14,23 +14,26 @@ A 404 whose body is HTML (not JSON) means the request reached a web app, not
 the exchange API — the host you're pointing at doesn't serve the direct
 `/api/v1` surface. Check `NEXUS_EXCHANGE_API_URL`:
 
-- It must be the deployment's **host** (e.g. `https://exchange.nexus.xyz` or
-  `http://localhost:9090`) — not a path like `…/api/v1`. A legacy value ending
-  in `/api/exchange` is accepted and normalized.
+- It must be the deployment's **base** (e.g. `https://api.testnet.nexus.xyz/indexer`
+  or `http://localhost:9090`) — not a SURFACE path like `…/api/v1`. A route
+  prefix the deployment mounts the API under, such as testnet's `/indexer`, is
+  part of the base and must be kept. A legacy value ending in `/api/exchange`
+  is accepted and normalized.
 - **Check the gateway path, which is where `/api/v1` hangs off that host.** It
-  comes from the network, not the URL (ENG-6221): the public host serves
-  `…/api/exchange/api/v1/…`, while an indexer serving at its root needs
+  comes from the network, not the URL (ENG-6221): testnet serves
+  `…/indexer/api/v1/…`, while an indexer serving at its root needs
   `NEXUS_EXCHANGE_NETWORK=local` alongside the URL (or, for a stage that is not
   a named network, the full `custom` bundle — `NEXUS_EXCHANGE_NETWORK=custom`
   plus `NEXUS_EXCHANGE_NETWORK_LABEL`, `NEXUS_EXCHANGE_FUNDS` and
   `NEXUS_EXCHANGE_GATEWAY_PATH=/`; that last variable is refused on its own). A
-  bare `NEXUS_EXCHANGE_API_URL` assumes the public-gateway shape, so pointing it
-  alone at a bare indexer sends `/api/v1/*` under `/api/exchange`, where that
-  indexer serves nothing.
-- Pointing at the **bare public root** used to be the documented advice and was
-  the cause of this exact 404: `https://exchange.nexus.xyz/api/v1/*` is the
-  marketing app. Composing the v1 surface under the gateway path is what
-  ENG-6221 fixed.
+  bare `NEXUS_EXCHANGE_API_URL` assumes the retired public-gateway shape, so
+  pointing it alone at a bare indexer — or at testnet's `/indexer` base — sends
+  `/api/v1/*` under `/api/exchange`, where nothing is served. Name the network.
+- Pointing at the **bare host root** used to be the documented advice and was
+  the cause of this exact 404: `https://exchange.nexus.xyz/api/v1/*` was the
+  marketing app, and `https://api.testnet.nexus.xyz/api/v1/*` is a 404 with no
+  route behind it. Composing the v1 surface under the deployment's prefix is
+  what ENG-6221 fixed; ENG-8869 changed which prefix that is.
 - Legacy-gateway tools (marked "(legacy)" in the top-level README table) can
   work while `/api/v1` tools 404 on the same host — that's the dual-stack
   migration (ENG-4740/ENG-4751), not a bug in your config.

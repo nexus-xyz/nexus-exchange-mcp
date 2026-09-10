@@ -685,6 +685,43 @@ class TestInvariant4NetworkGatewayBases(unittest.TestCase):
         with expect_abort(self):
             self.check(source, spec_with("GET /api/v1/things"))
 
+    def test_a_recorded_divergence_passes(self):
+        """SPEC_LEADING_BASES: the map may deliberately lead the spec, but only
+        at the exact base that was recorded, with a ticket to remove it."""
+        durable = "https://api.example.invalid/indexer"
+        source = networks_source(("testnet", durable, ""))
+        spec = spec_with_servers(f"{PUBLIC}/api/exchange", LOCAL)
+        with unittest.mock.patch.dict(
+            csd.SPEC_LEADING_BASES, {"testnet": (durable, "because")}, clear=True
+        ):
+            self.assertEqual(self.check(source, spec), 0)
+
+    def test_a_divergence_at_a_different_base_still_fails(self):
+        """The entry is not a blanket exemption for the network: drift away from
+        the recorded string has to fail, or the record stops meaning anything."""
+        source = networks_source(("testnet", "https://typo.example.invalid/indexer", ""))
+        spec = spec_with_servers(f"{PUBLIC}/api/exchange", LOCAL)
+        with unittest.mock.patch.dict(
+            csd.SPEC_LEADING_BASES,
+            {"testnet": ("https://api.example.invalid/indexer", "because")},
+            clear=True,
+        ):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(self.check(source, spec), 1)
+
+    def test_a_divergence_the_spec_caught_up_with_fails_as_stale(self):
+        """The stale-entry half: once the spec publishes the base there is no
+        divergence left to excuse, and the entry must be deleted rather than
+        linger and silently excuse whatever the base drifts to next."""
+        durable = "https://api.example.invalid/indexer"
+        source = networks_source(("testnet", durable, ""))
+        spec = spec_with_servers(durable, LOCAL)
+        with unittest.mock.patch.dict(
+            csd.SPEC_LEADING_BASES, {"testnet": (durable, "because")}, clear=True
+        ):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(self.check(source, spec), 1)
+
     def test_missing_gateway_path_aborts(self):
         """A network that does not say which surface it uses must not be guessed
         at — that guess is the bug."""
@@ -755,9 +792,21 @@ class TestAgainstRealSource(unittest.TestCase):
             with self.subTest(network=nid):
                 self.assertIn(gateway, ("", "/api/exchange"))
                 self.assertTrue(base is None or base.startswith("http"))
-        # The asymmetry itself, asserted where the real file is read.
+        # The asymmetry itself, asserted where the real file is read: the parser
+        # must come back with genuinely different values per network, or a
+        # reformat that broke it could return one constant and still pass.
+        #
+        # It used to be read off local ("") versus testnet ("/api/exchange").
+        # ENG-8869 moved testnet to a route-prefixed deployment and folded the
+        # prefix into its `baseUrl`, so testnet is "" too and mainnet is now the
+        # only non-empty entry — the asymmetry is intact, it just sits on a
+        # different pair.
         self.assertEqual(found["local"][1], "")
-        self.assertEqual(found["testnet"][1], "/api/exchange")
+        self.assertEqual(found["testnet"][1], "")
+        self.assertEqual(found["mainnet"][1], "/api/exchange")
+        # Testnet's prefix did not vanish, it moved fields. Pin that, so folding
+        # it into `baseUrl` cannot later be undone by half.
+        self.assertEqual(found["testnet"][0], "https://api.testnet.nexus.xyz/indexer")
 
     def test_generated_manifest_is_committed(self):
         with open(csd.MANIFEST) as f:

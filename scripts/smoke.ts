@@ -50,10 +50,12 @@ export class SmokeResponseError extends Error {
  * a hard stop naming the variable — never a silent fallback to a host that may
  * not serve the API.
  *
- * Only the HOST is read here. Where `/api/v1` hangs off it is the deployment's
- * gateway path, which `loadConfig` takes from the network (ENG-6221) — so a
- * bare-origin indexer needs `NEXUS_EXCHANGE_NETWORK=local` alongside this
- * variable, not this variable alone.
+ * Only the TARGET BASE is read here. Where `/api/v1` hangs off it is the
+ * deployment's gateway path, which `loadConfig` takes from the network
+ * (ENG-6221) — so this variable wants `NEXUS_EXCHANGE_NETWORK` alongside it,
+ * not to be used alone. Alone it assumes the retired public-gateway shape and
+ * appends `/api/exchange`, which is wrong for a bare indexer AND, since
+ * ENG-8869, wrong for testnet's route-prefixed durable host too.
  */
 export function resolveTarget(env: NodeJS.ProcessEnv): string {
   const raw = (env[BASE_URL_ENV] ?? "").trim();
@@ -61,11 +63,13 @@ export function resolveTarget(env: NodeJS.ProcessEnv): string {
     throw new SmokeConfigError(
       `${BASE_URL_ENV} is not set. The smoke check has no default target: ` +
         `naming the deployment to call is the caller's job, not this script's ` +
-        `(ENG-8092). Point it at a host that serves the Exchange API, e.g.\n` +
-        `  ${BASE_URL_ENV}=https://exchange.nexus.xyz npm run smoke\n` +
-        `or, for a local indexer serving at its root, name the network too so ` +
-        `/api/v1 is not composed under /api/exchange:\n` +
-        `  NEXUS_EXCHANGE_NETWORK=local ${BASE_URL_ENV}=http://localhost:9090 npm run smoke`,
+        `(ENG-8092). Point it at a host that serves the Exchange API, and name ` +
+        `the network alongside it so /api/v1 is composed the way that ` +
+        `deployment serves it:\n` +
+        `  NEXUS_EXCHANGE_NETWORK=testnet ${BASE_URL_ENV}=https://api.testnet.nexus.xyz/indexer npm run smoke\n` +
+        `  NEXUS_EXCHANGE_NETWORK=local ${BASE_URL_ENV}=http://localhost:9090 npm run smoke\n` +
+        `This variable ALONE assumes the retired public-gateway shape and ` +
+        `appends /api/exchange, which is wrong for both of the above.`,
     );
   }
   let parsed: URL;

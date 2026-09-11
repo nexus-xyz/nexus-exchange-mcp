@@ -771,9 +771,15 @@ test("every tool advertises a name, description, and object input schema", () =>
 
 test("deriveBases hangs both surfaces off one deployment base", () => {
   // Premise inverted deliberately. This used to assert that the v1 base is the
-  // bare origin, which pinned the bug: `…/api/v1/*` at the public root is the
-  // marketing app's 404 HTML, and only `…/api/exchange/api/v1/*` reaches the
-  // API. The base names the deployment; the path names the surface.
+  // bare origin, which pinned the bug: `…/api/v1/*` at a host root reaches no
+  // API, and only `…/<prefix>/api/v1/*` does. The base names the deployment;
+  // the path names the surface.
+  //
+  // The `exchange.nexus.xyz` values below are testing the FUNCTION, not the
+  // default: since ENG-8869 no built-in network passes that host in. What they
+  // still pin is the backward-compatible normalization of a retired-gateway
+  // `NEXUS_EXCHANGE_API_URL`, which is deliberately kept so an operator whose
+  // env var still names it does not get a doubled prefix.
   assert.deepEqual(deriveBases("https://exchange.nexus.xyz"), {
     directBaseUrl: "https://exchange.nexus.xyz/api/exchange",
     gatewayBaseUrl: "https://exchange.nexus.xyz/api/exchange",
@@ -830,12 +836,26 @@ test("a named network keeps its gateway path when the URL redirects the host", (
   assert.equal(cfg.directBaseUrl, "http://127.0.0.1:9090");
   assert.equal(cfg.gatewayBaseUrl, "http://127.0.0.1:9090");
 
-  // A gatewayed network keeps ITS shape on the same path through the code.
+  // A network with a NON-EMPTY shape keeps it on the same path through the
+  // code. This used to read testnet, which carried `/api/exchange`; ENG-8869
+  // moved testnet to a route-prefixed deployment whose prefix lives in its
+  // `baseUrl`, so its `gatewayPath` is now "" and mainnet is the only non-empty
+  // entry left. Naming mainnet alongside an explicit URL is the sanctioned way
+  // to target real funds, so it is a real path through this code, not a
+  // contrivance.
+  const mainnet = loadConfig({
+    NEXUS_EXCHANGE_NETWORK: "mainnet",
+    NEXUS_EXCHANGE_API_URL: "https://stage.example",
+  } as NodeJS.ProcessEnv);
+  assert.equal(mainnet.directBaseUrl, "https://stage.example/api/exchange");
+
+  // And testnet keeps ITS shape, which is now the bare one: an override
+  // redirects the host and must not re-append a prefix the base no longer has.
   const testnet = loadConfig({
     NEXUS_EXCHANGE_NETWORK: "testnet",
     NEXUS_EXCHANGE_API_URL: "https://stage.example",
   } as NodeJS.ProcessEnv);
-  assert.equal(testnet.directBaseUrl, "https://stage.example/api/exchange");
+  assert.equal(testnet.directBaseUrl, "https://stage.example");
 
   // With no network named there is no descriptor to read a shape from, so the
   // deprecated bare-URL form keeps the public-gateway convention. Asserted so

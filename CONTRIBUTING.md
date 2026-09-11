@@ -38,8 +38,9 @@ indexer serving at its root wants the network named alongside the URL:
 
 ```bash
 NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090 npm run smoke
-# or, against the public host, where the bare-URL default shape is the right one:
-NEXUS_EXCHANGE_API_URL=https://exchange.nexus.xyz npm run smoke
+# or, against the public testnet host — name the network there too, since that
+# deployment mounts the indexer under a /indexer route prefix (ENG-8869):
+NEXUS_EXCHANGE_NETWORK=testnet NEXUS_EXCHANGE_API_URL=https://api.testnet.nexus.xyz/indexer npm run smoke
 ```
 
 Unset, the check stops before calling anything and names the variable. Pointed

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.1...v0.3.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* **networks:** point testnet at its durable host, api.testnet.nexus.xyz/indexer (ENG-8869) ([#78](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/78)) ([d6e5538](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/d6e553807b636cfaff9e9b4283407ae0ff641b63))
+
 ## [0.3.1](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.0...v0.3.1) (2026-08-28)
 
 

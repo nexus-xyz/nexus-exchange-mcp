@@ -112,14 +112,22 @@ operations it exposes as tools (see
   an indexer that serves at its root, like `local`. So `/api/v1/*` resolves at
   `…/indexer/api/v1/*` on testnet and at the origin on `local`. Note the
   `/indexer`: it is the **route prefix the deployment mounts the service
-  under**, not part of the API contract — the bare host answers 404, so copy
-  the base whole rather than trimming it to the hostname (ENG-8869).
+  under**, not part of the API contract, so copy the base whole rather than
+  trimming it to the hostname (ENG-8869). Trimming does *not* fail cleanly:
+  the host serves `/api/v1/*` unprefixed as well, so a trimmed base keeps every
+  `/api/v1` tool working while the tools on the v1-less routes 404, and the
+  signature (which covers the logical path, not the base) verifies either way.
   **ENG-6221 corrected this**: the v1 base used to be composed at the bare host
   root, where the public site serves its marketing app, so every `/api/v1` tool
-  answered 404 with a page of HTML. This deliberately diverges from the pinned
-  spec, whose per-path `servers` override still lists the bare root for
-  `/api/v1/*` — measured, only the gateway path answers, so reality wins and the
-  upstream fix belongs in `nexus-exchange-api`. A `NEXUS_EXCHANGE_API_URL` that
+  answered 404 with a page of HTML. That was `exchange.nexus.xyz`, and it is no
+  longer where testnet lives. On `api.testnet.nexus.xyz` the pinned spec's
+  per-path `servers` override, which lists the bare root for `/api/v1/*`, is
+  **correct**, measured 2026-09-11: the route contract mounts `/indexer`, `/v1`
+  and `/api/v1` on the public host, the first two rewriting to `/` and the last
+  passing through intact (ENG-14693). So there is no upstream defect in
+  `nexus-exchange-api` to fix here; this server prefers the prefixed base
+  because it is the one that reaches *both* surfaces, not because the bare root
+  is dead. A `NEXUS_EXCHANGE_API_URL` that
   still ends in `/api/exchange` is accepted and normalized, so it cannot double
   up. Which host that is comes from the [network axis](#networks) — and a named
   network keeps its own gateway path when `NEXUS_EXCHANGE_API_URL` only

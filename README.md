@@ -113,7 +113,7 @@ operations it exposes as tools (see
   `…/indexer/api/v1/*` on testnet and at the origin on `local`. Note the
   `/indexer`: it is the **route prefix the deployment mounts the service
   under**, not part of the API contract, so copy the base whole rather than
-  trimming it to the hostname (ENG-8869). Trimming does *not* fail cleanly:
+  trimming it to the hostname (ENG-8869). Trimming does _not_ fail cleanly:
   the host serves `/api/v1/*` unprefixed as well, so a trimmed base keeps every
   `/api/v1` tool working while the tools on the v1-less routes 404, and the
   signature (which covers the logical path, not the base) verifies either way.
@@ -126,7 +126,7 @@ operations it exposes as tools (see
   and `/api/v1` on the public host, the first two rewriting to `/` and the last
   passing through intact (ENG-14693). So there is no upstream defect in
   `nexus-exchange-api` to fix here; this server prefers the prefixed base
-  because it is the one that reaches *both* surfaces, not because the bare root
+  because it is the one that reaches _both_ surfaces, not because the bare root
   is dead. A `NEXUS_EXCHANGE_API_URL` that
   still ends in `/api/exchange` is accepted and normalized, so it cannot double
   up. Which host that is comes from the [network axis](#networks) — and a named

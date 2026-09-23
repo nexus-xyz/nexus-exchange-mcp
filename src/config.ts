@@ -117,10 +117,12 @@ export interface ExchangeConfig {
    */
   target?: ResolvedTarget;
   /**
-   * WebSocket origin for this target, scheme-swapped from
-   * {@link ExchangeConfig.gatewayBaseUrl} — `/ws`, `/stream`, `/ws/token` and
-   * `/ws-tokens` all resolve against the gateway base in the spec, not the
-   * direct `/api/v1` host.
+   * WebSocket base for this target. For a named network with no URL override
+   * this is the network's published `durableWsUrl` (the spec's `ws_url` —
+   * `wss://<host>/v1` on the public hosts, ENG-17132), so the socket URL is
+   * written in exactly one place. For an explicit `NEXUS_EXCHANGE_API_URL` or a
+   * custom stage it is scheme-swapped from {@link ExchangeConfig.gatewayBaseUrl},
+   * since the caller declared the host and nothing else knows its socket path.
    *
    * Before this existed the server could mint a WebSocket token but never told
    * the caller where to connect, which is the gap the network axis closes
@@ -440,6 +442,13 @@ interface TargetSelection {
    * notice cannot drift out of step with the branch it describes.
    */
   viaBareUrl: boolean;
+  /**
+   * The WebSocket base the named network publishes, when a named network alone
+   * selected the target. Absent whenever a URL was supplied: that URL
+   * redirected the host, and a socket URL for a different host would carry a
+   * token to a host that did not mint it.
+   */
+  wsUrl?: string;
 }
 
 /**
@@ -573,13 +582,13 @@ function resolveTarget(env: NodeJS.ProcessEnv): TargetSelection {
     restBase: desc.baseUrl,
     gatewayPath: desc.gatewayPath,
   });
-  return { target, viaBareUrl: false };
+  return { target, viaBareUrl: false, wsUrl: desc.durableWsUrl };
 }
 
 export function loadConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): ExchangeConfig {
-  const { target, viaBareUrl } = resolveTarget(env);
+  const { target, viaBareUrl, wsUrl: publishedWsUrl } = resolveTarget(env);
 
   // Printed after resolution, so a config that fails validation throws instead
   // of first advertising a replacement for a target it never built. Once per
@@ -595,10 +604,14 @@ export function loadConfig(
     target.restBase,
     target.gatewayPath,
   );
-  // `/ws`, `/stream`, `/ws/token` and `/ws-tokens` carry no per-path `servers`
-  // override in the spec, so they resolve against the ROOT server — the gateway
-  // base — not the direct `/api/v1` host.
-  const wsUrl = gatewayBaseUrl.replace(/^http/, "ws");
+  // A named network publishes its socket base (`durableWsUrl`), and that string
+  // is used verbatim so the durable and derived values cannot disagree — on
+  // testnet it is `/v1` while the REST base is still `/indexer`, both stripped
+  // to `/` at the edge (ENG-17132). With a URL override there is no published
+  // value for that host, so `/ws`, `/stream`, `/ws/token` and `/ws-tokens`
+  // resolve against the gateway base, which the spec puts them on (no per-path
+  // `servers` override), with the scheme swapped.
+  const wsUrl = publishedWsUrl ?? gatewayBaseUrl.replace(/^http/, "ws");
 
   // Frozen: a tool handler receives this object, and a base URL that can be
   // rewritten at runtime is a redirect for every signed request that follows.

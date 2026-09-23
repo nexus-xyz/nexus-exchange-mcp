@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.2](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.1...v0.3.2) (2026-09-23)
+
+
+### Bug Fixes
+
+* **networks:** point testnet at its durable host, api.testnet.nexus.xyz/indexer (ENG-8869) ([#78](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/78)) ([d6e5538](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/d6e553807b636cfaff9e9b4283407ae0ff641b63))
+* publish WebSocket URLs on the /v1 prefix (ENG-17132) ([#83](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/83)) ([aa847b1](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/aa847b10a63f6a18cff0b4cb9ca3382f007a7294))
+
 ## [0.3.1](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.0...v0.3.1) (2026-08-28)
 
 

@@ -267,27 +267,17 @@ test("base URL normalization trims trailing slashes and keeps the path", () => {
   );
 });
 
-test("ws endpoints hang off the gateway base with the scheme swapped", () => {
-  // /ws, /stream, /ws/token and /ws-tokens carry no per-path servers override in
-  // the spec, so they resolve against the ROOT (gateway) server — not the direct
-  // /api/v1 host. Getting this wrong points the caller at a host that 404s.
-  //
-  // Since ENG-8869 the deployment base is the durable host plus its `/indexer`
-  // route prefix, and the WS routes sit under that prefix exactly as the REST
-  // ones do — a host-root WS URL would not reach the handler either.
+test("ws endpoints are the published /v1 socket base, not the bare host", () => {
+  // ENG-17132: the public edge routes no WebSocket path at a host's root
+  // (`wss://api.testnet.nexus.xyz/stream` is a 404); `/v1/stream` upgrades
+  // (101) and `/v1/ws?token=x` reaches the handler (401), measured 2026-09-23.
+  // `/v1` is the published prefix (spec `ws_url`, nexus#12253).
   const cfg = loadConfig(env());
-  assert.equal(cfg.wsUrl, "wss://api.testnet.nexus.xyz/indexer");
-  assert.equal(
-    cfg.wsAuthenticatedUrl,
-    "wss://api.testnet.nexus.xyz/indexer/ws",
-  );
-  assert.equal(
-    cfg.wsMarketDataUrl,
-    "wss://api.testnet.nexus.xyz/indexer/stream",
-  );
-  // The published durable WS base and the one actually composed agree now that
-  // REST and WS share an origin. They did not under the legacy gateway, which
-  // is the mismatch ENG-3398 was about.
+  assert.equal(cfg.wsUrl, "wss://api.testnet.nexus.xyz/v1");
+  assert.equal(cfg.wsAuthenticatedUrl, "wss://api.testnet.nexus.xyz/v1/ws");
+  assert.equal(cfg.wsMarketDataUrl, "wss://api.testnet.nexus.xyz/v1/stream");
+  // The durable value and the one a config actually hands `get_ws_token` are
+  // the same string by construction, so they cannot drift apart again.
   assert.equal(NETWORKS.testnet.durableWsUrl, cfg.wsUrl);
 
   // Local is NOT `…/api/exchange`: the indexer serves the legacy routes at its
@@ -452,4 +442,84 @@ test("an upstream ws_endpoint wins over the locally derived one", async () => {
     .handler(stub, {})) as Record<string, unknown>;
   assert.equal(out.ws_endpoint, "wss://upstream.example/ws");
   assert.ok(!("ws_endpoint_note" in out), "no note contradicting the upstream");
+});
+
+test("each network's socket base resolves to the published URL", () => {
+  // Per-network literals, so a change to any of them is a deliberate edit here.
+  // Mainnet's host has no DNS yet (ENG-15183): the value is the shape it will
+  // serve, not a URL that answers today.
+  assert.equal(NETWORKS.testnet.durableWsUrl, "wss://api.testnet.nexus.xyz/v1");
+  assert.equal(NETWORKS.mainnet.durableWsUrl, "wss://api.nexus.xyz/v1");
+  assert.equal(NETWORKS.local.durableWsUrl, "ws://localhost:9090");
+
+  // Mainnet with an explicit host is the sanctioned way to reach it today; the
+  // URL redirected the host, so the socket derives from THAT host rather than
+  // from the published one — a token must be spent where it was minted.
+  const mainnet = loadConfig(
+    env({
+      NEXUS_EXCHANGE_NETWORK: "mainnet",
+      NEXUS_EXCHANGE_API_URL: "https://mainnet.example.invalid",
+    }),
+  );
+  assert.equal(mainnet.wsUrl, "wss://mainnet.example.invalid/api/exchange");
+
+  // The same holds for testnet with an override: overrides still win.
+  const redirected = loadConfig(
+    env({
+      NEXUS_EXCHANGE_NETWORK: "testnet",
+      NEXUS_EXCHANGE_API_URL: "https://testnet.example.invalid/indexer",
+    }),
+  );
+  assert.equal(redirected.wsUrl, "wss://testnet.example.invalid/indexer");
+  assert.equal(
+    redirected.wsAuthenticatedUrl,
+    "wss://testnet.example.invalid/indexer/ws",
+  );
+});
+
+test("the socket base is the REST base with the scheme swapped", () => {
+  // `POST /ws/token` binds a token to the host that minted it, so the socket
+  // URL has to be the REST base with `http` -> `ws` and nothing else changed.
+  const swap = (rest: string) => rest.replace(/^http/, "ws");
+  const specRestBase: Record<string, string> = {
+    // The spec's `x-nexus-networks` `rest_base` values (nexus#12253).
+    testnet: "https://api.testnet.nexus.xyz/v1",
+    mainnet: "https://api.nexus.xyz/v1",
+    local: "http://localhost:9090",
+  };
+  for (const id of NETWORK_IDS) {
+    assert.equal(
+      NETWORKS[id].durableWsUrl,
+      swap(specRestBase[id]),
+      `${id}: durableWsUrl is not the spec REST base with the scheme swapped`,
+    );
+  }
+  // Against THIS file's REST base it holds exactly for mainnet and local.
+  assert.equal(
+    NETWORKS.mainnet.durableWsUrl,
+    swap(NETWORKS.mainnet.durableRestBase),
+  );
+  assert.equal(
+    NETWORKS.local.durableWsUrl,
+    swap(NETWORKS.local.durableRestBase),
+  );
+
+  // Testnet is the recorded exception: its REST base is still `/indexer`
+  // (moving REST to `/v1` is a separate change). Both prefixes are stripped to
+  // `/` at the edge on the same host, so the token binding still holds — the
+  // origin must match exactly. When REST moves, the first assertion flips and
+  // this block should collapse into the exact equality above.
+  assert.equal(
+    NETWORKS.testnet.durableRestBase,
+    "https://api.testnet.nexus.xyz/indexer",
+  );
+  const origin = (u: string) => new URL(u).host;
+  assert.equal(
+    origin(NETWORKS.testnet.durableWsUrl),
+    origin(NETWORKS.testnet.durableRestBase),
+  );
+  assert.equal(
+    origin(loadConfig(env()).wsUrl!),
+    origin(loadConfig(env()).gatewayBaseUrl),
+  );
 });

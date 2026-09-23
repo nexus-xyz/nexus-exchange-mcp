@@ -529,18 +529,22 @@ it. Both are documented in [A custom stage](#a-custom-stage).
 
 `get_ws_token` and `get_ws_token_legacy` now return `ws_endpoint` alongside the
 token, so a caller is no longer handed a 60-second credential with no address to
-spend it at. The endpoints derive from the gateway base (`/ws`, `/stream`,
-`/ws/token`, `/ws-tokens` carry no per-path `servers` override in the spec):
+spend it at. For a named network the endpoints are the spec's published
+`ws_url` for that network (`x-nexus-networks`, copied into `src/networks.ts`),
+which is the spec's REST base with the scheme swapped:
 
 ```
-wss://api.testnet.nexus.xyz/indexer/ws      # authenticated, connect with ?token=…
-wss://api.testnet.nexus.xyz/indexer/stream  # public market data
+wss://api.testnet.nexus.xyz/v1/ws      # authenticated, connect with ?token=…
+wss://api.testnet.nexus.xyz/v1/stream  # public market data
 ```
 
-On `local` the gateway path is absent — `ws://localhost:9090/ws` — because the
-indexer serves those routes at its root. The prefix is a per-network value,
-never appended unconditionally: testnet carries `/indexer` in its `baseUrl` and
-`local` has none at all (`src/networks.ts`).
+The `/v1` prefix is required: the bare host routes no WebSocket path and answers
+`404` (ENG-17132). Mainnet has the same shape on `api.nexus.xyz`, which does not
+resolve yet (no DNS, ENG-15183). With an explicit `NEXUS_EXCHANGE_API_URL` (or a
+custom stage) the endpoints derive from that gateway base instead, since `/ws`,
+`/stream`, `/ws/token` and `/ws-tokens` carry no per-path `servers` override in
+the spec. On `local` there is no prefix at all — `ws://localhost:9090/ws` —
+because the indexer serves those routes at its root.
 
 ## API version
 

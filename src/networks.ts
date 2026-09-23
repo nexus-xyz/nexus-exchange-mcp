@@ -122,7 +122,23 @@ export interface NetworkDescriptor {
    * the same way it already does in `deriveBases`.
    */
   readonly durableRestBase: string;
-  /** The durable per-network WebSocket base. Informational — no WS client ships here. */
+  /**
+   * The per-network WebSocket base, as the spec's `x-nexus-networks` `ws_url`
+   * publishes it: `<ws_url>/ws` is the authenticated socket, `<ws_url>/stream`
+   * the public one.
+   *
+   * LIVE for every network with a {@link baseUrl}: `loadConfig` hands this
+   * string to `get_ws_token` as `ws_endpoint`'s base whenever a named network
+   * selects the target, so there is one place the socket URL is written and the
+   * durable and derived values cannot disagree. An explicit
+   * `NEXUS_EXCHANGE_API_URL` still derives its own (scheme-swapped gateway base).
+   *
+   * On the public hosts it carries the `/v1` prefix, NOT the bare origin: the
+   * edge routes no WebSocket path at a host's root (`wss://<host>/stream` is a
+   * 404), and `/v1` is the published prefix (nexus#12253, ENG-17132). The rule
+   * it follows is "the spec's REST base with the scheme swapped", because
+   * `POST /ws/token` binds a token to the host that minted it.
+   */
   readonly durableWsUrl: string;
 }
 
@@ -204,7 +220,24 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // path-versioned `/api/v1`), and a `/v1` base would have composed
       // `/v1/api/v1/orders`.
       durableRestBase: "https://api.testnet.nexus.xyz/indexer",
-      durableWsUrl: "wss://api.testnet.nexus.xyz/indexer",
+      // `/v1`, not `/indexer`, and deliberately not derived from the base above
+      // (ENG-17132). Measured 2026-09-23 with an RFC 6455 upgrade:
+      //
+      //   wss://api.testnet.nexus.xyz/v1/stream        -> 101
+      //   wss://api.testnet.nexus.xyz/v1/ws?token=x    -> 401 (handler reached)
+      //   wss://api.testnet.nexus.xyz/stream, /ws      -> 404 (no route)
+      //
+      // `/indexer` routes too, but it is the prefix kept for existing
+      // first-party consumers; `/v1` is the published one (spec `ws_url`,
+      // nexus#12253). Both are stripped to `/` at the edge, so the socket lands
+      // on the same indexer, and the token `get_ws_token` mints on this host is
+      // valid on it: `/ws/token` binds to the HOST, which both prefixes share.
+      //
+      // The REST base above is still `/indexer` — the spec's `rest_base` is
+      // `/v1` too, so this is the one entry where WS is the spec's REST base
+      // with the scheme swapped but not this file's. Moving REST is a separate
+      // change; `test/networks.test.ts` pins the divergence so it is visible.
+      durableWsUrl: "wss://api.testnet.nexus.xyz/v1",
     }),
     mainnet: Object.freeze({
       id: "mainnet",
@@ -240,7 +273,12 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // inheriting it. `test/networks.test.ts` pins both halves of that.
       gatewayPath: "/api/exchange",
       durableRestBase: "https://api.nexus.xyz/v1",
-      durableWsUrl: "wss://api.nexus.xyz",
+      // The REST base with the scheme swapped, `/v1` included: the same shape as
+      // testnet (spec `ws_url`, nexus#12253). The bare origin this used to carry
+      // is the shape that 404s on testnet. Like everything else in this entry it
+      // DOES NOT RESOLVE YET — `api.nexus.xyz` has no DNS (ENG-15183) — so it is
+      // the URL mainnet will serve, not one that answers today.
+      durableWsUrl: "wss://api.nexus.xyz/v1",
     }),
     local: Object.freeze({
       id: "local",

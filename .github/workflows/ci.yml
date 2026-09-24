@@ -123,3 +123,12 @@ jobs:
             exit 1
           fi
           echo "No drift: pinned to the latest API spec (${pinned})."
+
+  # Builds the hosted HTTP server's image (never pushed from a PR) and checks
+  # the running container answers /healthz and an MCP initialize on /mcp.
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t nexus-exchange-mcp:ci .
+      - run: scripts/container-smoke.sh nexus-exchange-mcp:ci

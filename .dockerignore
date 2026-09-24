@@ -1,0 +1,15 @@
+# Only package.json, package-lock.json, tsconfig.json and src/ are copied in.
+# Keep everything else, local secrets especially, out of the build context.
+.git
+.github
+node_modules
+dist
+coverage
+.env
+.env.*
+*.log
+docs
+examples
+test
+scripts
+openapi.pinned.json

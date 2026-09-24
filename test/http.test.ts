@@ -351,6 +351,58 @@ test("Streamable HTTP: /mcp returns 429 with Retry-After after the burst from on
   }
 });
 
+test("Streamable HTTP: an oversized new-session body gets 413 before it is buffered", async () => {
+  const server = createHttpMcpServer({
+    config: {
+      directBaseUrl: "http://gateway.test",
+      gatewayBaseUrl: "http://gateway.test",
+      enableAdminTools: false,
+    },
+    maxBodyBytes: 1024,
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const { port } = server.address() as AddressInfo;
+  try {
+    const big = JSON.stringify({
+      jsonrpc: "2.0",
+      method: "initialize",
+      pad: "x".repeat(4096),
+    });
+    // Declared too large: refused from Content-Length alone.
+    const declared = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: big,
+    });
+    assert.equal(declared.status, 413);
+    await declared.body?.cancel();
+    // Chunked, no Content-Length: refused once the streamed bytes pass the cap.
+    const streamed = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(big));
+          c.close();
+        },
+      }),
+      duplex: "half",
+    } as RequestInit);
+    assert.equal(streamed.status, 413);
+    await streamed.body?.cancel();
+    // Under the cap still parses (400: not an initialize, no session).
+    const small = await fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(small.status, 400);
+    await small.body?.cancel();
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("clientIp ignores X-Forwarded-For unless proxy hops are trusted", () => {
   const req = {
     socket: { remoteAddress: "10.0.0.9" },

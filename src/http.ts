@@ -37,7 +37,9 @@
  * is rate limited per client IP with a token bucket
  * (`MCP_HTTP_RATE_LIMIT_BURST` / `MCP_HTTP_RATE_LIMIT_PER_SEC`). The client
  * IP is the socket peer unless `MCP_HTTP_TRUSTED_PROXY_HOPS` says how many
- * proxies in front of us append to `X-Forwarded-For`.
+ * proxies in front of us append to `X-Forwarded-For`. A new-session POST body
+ * is capped at `MCP_HTTP_MAX_BODY_BYTES` while it streams and answered `413`
+ * past it: the request-count limiter does not bound bytes.
  */
 
 import { randomUUID } from "node:crypto";
@@ -128,6 +130,8 @@ export function formatRequestError(req: IncomingMessage, err: unknown): string {
 }
 
 /** Positive number from env, or the default. Throws on a bad value. */
+class BodyTooLargeError extends Error {}
+
 function envNumber(name: string, fallback: number, min = 1): number {
   const raw = process.env[name];
   if (raw === undefined || raw === "") return fallback;
@@ -161,6 +165,8 @@ export interface HttpServerOptions {
   rateLimitPerSec?: number;
   /** Proxies trusted to append X-Forwarded-For. Default `MCP_HTTP_TRUSTED_PROXY_HOPS` or 0. */
   trustedProxyHops?: number;
+  /** Largest new-session POST body read, in bytes. Default `MCP_HTTP_MAX_BODY_BYTES` or 1 MiB. */
+  maxBodyBytes?: number;
   /** Clock in ms, injectable for tests. Defaults to `Date.now`. */
   now?: () => number;
 }
@@ -182,6 +188,8 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
     opts.rateLimitPerSec ?? envNumber("MCP_HTTP_RATE_LIMIT_PER_SEC", 2);
   const trustedProxyHops =
     opts.trustedProxyHops ?? envNumber("MCP_HTTP_TRUSTED_PROXY_HOPS", 0, 0);
+  const maxBodyBytes =
+    opts.maxBodyBytes ?? envNumber("MCP_HTTP_MAX_BODY_BYTES", 1024 * 1024);
   const now = opts.now ?? Date.now;
   const sessions = new Map<string, Session>();
   // ponytail: in-memory, per-process limiter. The ceiling is per replica, not
@@ -218,13 +226,40 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
     }
   }
 
-  async function readBody(req: IncomingMessage): Promise<unknown> {
-    const chunks: Buffer[] = [];
-    for await (const chunk of req) chunks.push(chunk as Buffer);
-    if (chunks.length === 0) return undefined;
-    const raw = Buffer.concat(chunks).toString("utf8");
-    if (!raw) return undefined;
-    return JSON.parse(raw);
+  /**
+   * Reads and parses the body, holding at most `maxBodyBytes`. Listeners rather
+   * than `for await`: leaving that loop early destroys the socket, and the 413
+   * could not be sent.
+   */
+  function readBody(req: IncomingMessage): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      if (Number(req.headers["content-length"]) > maxBodyBytes) {
+        reject(new BodyTooLargeError());
+        return;
+      }
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const onData = (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > maxBodyBytes) {
+          req.off("data", onData);
+          req.pause();
+          reject(new BodyTooLargeError());
+          return;
+        }
+        chunks.push(chunk);
+      };
+      req.on("data", onData);
+      req.on("error", reject);
+      req.on("end", () => {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        try {
+          resolve(raw ? JSON.parse(raw) : undefined);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
   }
 
   function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -262,7 +297,14 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
       let body: unknown;
       try {
         body = await readBody(req);
-      } catch {
+      } catch (err) {
+        if (err instanceof BodyTooLargeError) {
+          // Close rather than drain the rest of an oversized upload.
+          res.setHeader("connection", "close");
+          res.on("finish", () => req.destroy());
+          rpcError(res, 413, `Request body exceeds ${maxBodyBytes} bytes`);
+          return;
+        }
         rpcError(res, 400, "Invalid JSON body");
         return;
       }

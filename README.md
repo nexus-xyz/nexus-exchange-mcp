@@ -765,6 +765,7 @@ version.
 | `MCP_HTTP_RATE_LIMIT_BURST`    | `60`      | Token-bucket size per client IP on `/mcp`.                                         |
 | `MCP_HTTP_RATE_LIMIT_PER_SEC`  | `2`       | Tokens refilled per second per client IP.                                          |
 | `MCP_HTTP_TRUSTED_PROXY_HOPS`  | `0`       | How many proxies in front of the server append to `X-Forwarded-For`.               |
+| `MCP_HTTP_MAX_BODY_BYTES`      | `1048576` | Largest `initialize` POST body read; past it the server answers `413` (1 MiB).     |
 
 An evicted session answers `400` on its next request, and the client
 reconnects with a fresh `initialize`. Only requests count as activity: an open

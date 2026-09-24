@@ -27,8 +27,17 @@
  * These are deliberately NOT named `x-api-key` / `x-signature` (the upstream
  * gateway's own header names) to avoid confusion with what we forward. If the
  * caller sends no credentials, the session still works for public market-data
- * tools and falls back to any server-env credentials. See the README "Hosted
- * HTTP server" section and the open question flagged on the PR.
+ * tools, and every authenticated tool refuses. Server-env credentials (API
+ * key/secret, session token, admin secret) are NEVER used in HTTP mode: a
+ * header-less caller must not be able to trade as the server's account
+ * (ENG-4359). See the README "Hosted HTTP server" section.
+ *
+ * ── Hardening (ENG-4359) ──────────────────────────────────────────────────
+ * Idle sessions are evicted after `MCP_HTTP_SESSION_IDLE_TTL_MS`, and `/mcp`
+ * is rate limited per client IP with a token bucket
+ * (`MCP_HTTP_RATE_LIMIT_BURST` / `MCP_HTTP_RATE_LIMIT_PER_SEC`). The client
+ * IP is the socket peer unless `MCP_HTTP_TRUSTED_PROXY_HOPS` says how many
+ * proxies in front of us append to `X-Forwarded-For`.
  */
 
 import { randomUUID } from "node:crypto";
@@ -64,34 +73,96 @@ function header(req: IncomingMessage, name: string): string | undefined {
 }
 
 /**
- * Build the per-session config: start from the server's base config, then
- * overlay the caller's HMAC credential from request headers (if present) and
- * tag traffic with the hosted-MCP User-Agent. Header credentials win over any
- * server-env credentials so each session trades as its own account.
+ * Build the per-session config: take the server's target (base URLs, network)
+ * from the base config, but credentials ONLY from the caller's request
+ * headers. Every server-env credential is dropped, so a session that sends no
+ * headers can use public tools and nothing else (ENG-4359). Admin tools are
+ * hidden too, since the admin secret they need is a server credential.
  */
 export function configForRequest(
   base: ExchangeConfig,
   req: IncomingMessage,
 ): ExchangeConfig {
-  const apiKey = header(req, API_KEY_HEADER);
-  const apiSecret = header(req, API_SECRET_HEADER);
   return {
     ...base,
     userAgent: HTTP_USER_AGENT,
-    apiKey: apiKey || base.apiKey,
-    apiSecret: apiSecret || base.apiSecret,
+    apiKey: header(req, API_KEY_HEADER) || undefined,
+    apiSecret: header(req, API_SECRET_HEADER) || undefined,
+    sessionToken: undefined,
+    adminSecret: undefined,
+    enableAdminTools: false,
+    credentialSource: "headers",
   };
+}
+
+/**
+ * The client IP the rate limiter keys on. `X-Forwarded-For` is caller-supplied
+ * and trivially spoofed, so it is ignored unless `trustedProxyHops` > 0. With N
+ * trusted hops, each of which appends the peer it saw, the real client is the
+ * Nth entry from the right; anything left of it is whatever the client sent.
+ */
+export function clientIp(
+  req: IncomingMessage,
+  trustedProxyHops: number,
+): string {
+  const peer = req.socket.remoteAddress ?? "unknown";
+  if (trustedProxyHops <= 0) return peer;
+  const xff = header(req, "x-forwarded-for");
+  if (!xff) return peer;
+  const hops = xff
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return hops[Math.max(0, hops.length - trustedProxyHops)] ?? peer;
+}
+
+/**
+ * Error log line for a failed request. Never logs headers, and scrubs the
+ * caller's secret from the error text in case anything upstream echoed it.
+ */
+export function formatRequestError(req: IncomingMessage, err: unknown): string {
+  let detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+  const secret = header(req, API_SECRET_HEADER);
+  if (secret) detail = detail.split(secret).join("[redacted]");
+  return `nexus-exchange-mcp-http: request failed ${detail}`;
+}
+
+/** Positive number from env, or the default. Throws on a bad value. */
+function envNumber(name: string, fallback: number, min = 1): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min) {
+    throw new Error(`${name} must be a number >= ${min}, got "${raw}"`);
+  }
+  return n;
 }
 
 interface Session {
   transport: StreamableHTTPServerTransport;
+  lastSeen: number;
+}
+
+interface Bucket {
+  tokens: number;
+  updated: number;
 }
 
 export interface HttpServerOptions {
-  /** Base config (base URL + optional fallback creds). Defaults to env. */
+  /** Base config (base URL + network). Defaults to env. Its credentials are ignored. */
   config?: ExchangeConfig;
   /** Path the MCP endpoint is mounted at. Defaults to "/mcp". */
   path?: string;
+  /** Idle session TTL. Default `MCP_HTTP_SESSION_IDLE_TTL_MS` or 30 min. */
+  sessionIdleTtlMs?: number;
+  /** Token bucket size per IP. Default `MCP_HTTP_RATE_LIMIT_BURST` or 60. */
+  rateLimitBurst?: number;
+  /** Token refill per second per IP. Default `MCP_HTTP_RATE_LIMIT_PER_SEC` or 2. */
+  rateLimitPerSec?: number;
+  /** Proxies trusted to append X-Forwarded-For. Default `MCP_HTTP_TRUSTED_PROXY_HOPS` or 0. */
+  trustedProxyHops?: number;
+  /** Clock in ms, injectable for tests. Defaults to `Date.now`. */
+  now?: () => number;
 }
 
 /**
@@ -102,7 +173,50 @@ export interface HttpServerOptions {
 export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
   const baseConfig = opts.config ?? loadConfig();
   const mcpPath = opts.path ?? "/mcp";
+  const idleTtlMs =
+    opts.sessionIdleTtlMs ??
+    envNumber("MCP_HTTP_SESSION_IDLE_TTL_MS", 30 * 60_000);
+  const burst =
+    opts.rateLimitBurst ?? envNumber("MCP_HTTP_RATE_LIMIT_BURST", 60);
+  const perSec =
+    opts.rateLimitPerSec ?? envNumber("MCP_HTTP_RATE_LIMIT_PER_SEC", 2);
+  const trustedProxyHops =
+    opts.trustedProxyHops ?? envNumber("MCP_HTTP_TRUSTED_PROXY_HOPS", 0, 0);
+  const now = opts.now ?? Date.now;
   const sessions = new Map<string, Session>();
+  // ponytail: in-memory, per-process limiter. The ceiling is per replica, not
+  // global: N replicas allow N x the configured rate. Move to the ingress or a
+  // shared store if that matters.
+  const buckets = new Map<string, Bucket>();
+
+  /** Take one token for `ip`; returns seconds to wait if none is left. */
+  function takeToken(ip: string): number {
+    const t = now();
+    const b = buckets.get(ip) ?? { tokens: burst, updated: t };
+    b.tokens = Math.min(burst, b.tokens + ((t - b.updated) / 1000) * perSec);
+    b.updated = t;
+    buckets.set(ip, b);
+    if (b.tokens >= 1) {
+      b.tokens -= 1;
+      return 0;
+    }
+    return Math.ceil((1 - b.tokens) / perSec);
+  }
+
+  /** Close idle sessions (dropping their ExchangeClient) and full buckets. */
+  function sweep(): void {
+    const t = now();
+    for (const [id, s] of sessions) {
+      if (t - s.lastSeen >= idleTtlMs) {
+        sessions.delete(id);
+        void s.transport.close();
+      }
+    }
+    const refillMs = (burst / perSec) * 1000;
+    for (const [ip, b] of buckets) {
+      if (t - b.updated >= refillMs) buckets.delete(ip);
+    }
+  }
 
   async function readBody(req: IncomingMessage): Promise<unknown> {
     const chunks: Buffer[] = [];
@@ -135,9 +249,10 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
     const sessionId = header(req, "mcp-session-id");
 
     // Reuse the transport for an established session.
-    if (sessionId && sessions.has(sessionId)) {
-      const { transport } = sessions.get(sessionId)!;
-      await transport.handleRequest(req, res);
+    const existing = sessionId ? sessions.get(sessionId) : undefined;
+    if (existing) {
+      existing.lastSeen = now();
+      await existing.transport.handleRequest(req, res);
       return;
     }
 
@@ -160,7 +275,7 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (id) => {
-            sessions.set(id, { transport });
+            sessions.set(id, { transport, lastSeen: now() });
           },
           onsessionclosed: (id) => {
             sessions.delete(id);
@@ -188,7 +303,7 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
     rpcError(res, 400, "Bad Request: missing or unknown mcp-session-id.");
   }
 
-  return createHttpServer((req, res) => {
+  const httpServer = createHttpServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
 
     if (url.pathname === "/healthz") {
@@ -197,15 +312,27 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
     }
 
     if (url.pathname === mcpPath) {
+      const retryAfter = takeToken(clientIp(req, trustedProxyHops));
+      if (retryAfter > 0) {
+        res.setHeader("retry-after", String(retryAfter));
+        rpcError(res, 429, "Too Many Requests");
+        return;
+      }
       handleMcp(req, res).catch((err) => {
         if (!res.headersSent) {
           rpcError(res, 500, "Internal server error");
         }
-        console.error("nexus-exchange-mcp-http: request failed", err);
+        console.error(formatRequestError(req, err));
       });
       return;
     }
 
     rpcError(res, 404, "Not Found");
   });
+
+  // unref: the sweep must never keep the process alive on its own.
+  const timer = setInterval(sweep, Math.min(idleTtlMs, 60_000));
+  timer.unref?.();
+  httpServer.on("close", () => clearInterval(timer));
+  return httpServer;
 }

@@ -743,11 +743,48 @@ version.
 >
 > These are deliberately **not** named `x-api-key` / `x-signature` (the
 > upstream gateway's own headers) to avoid confusion. With no credential
-> headers a session still serves public market-data tools and falls back to any
-> server-env credentials. **Open question for review:** header passthrough is
-> the simplest defensible MVP, but the long-term answer is OAuth-minted scoped
-> (trade-not-withdraw) keys so the caller never hands us a raw secret — see
-> ENG-3598 / ENG-3486.
+> headers a session still serves public market-data tools, and every
+> authenticated tool refuses with an error naming the two headers.
+>
+> **The hosted server never uses server-env credentials** (ENG-4359).
+> `NEXUS_EXCHANGE_API_KEY`, `NEXUS_EXCHANGE_API_SECRET`,
+> `NEXUS_EXCHANGE_SESSION_TOKEN` and `NEXUS_EXCHANGE_ADMIN_SECRET` are ignored
+> in HTTP mode, so a caller that sends no headers can never trade as the
+> server's account. Admin tools are never exposed over HTTP. The stdio server
+> still reads them from the environment as before.
+>
+> Header passthrough is the simplest defensible MVP, but the long-term answer
+> is OAuth-minted scoped (trade-not-withdraw) keys so the caller never hands us
+> a raw secret. See ENG-3598 / ENG-3486.
+
+### Limits and session lifetime
+
+| Variable                       | Default   | Meaning                                                                            |
+| ------------------------------ | --------- | ---------------------------------------------------------------------------------- |
+| `MCP_HTTP_SESSION_IDLE_TTL_MS` | `1800000` | A session with no request for this long is closed and its client dropped (30 min). |
+| `MCP_HTTP_RATE_LIMIT_BURST`    | `60`      | Token-bucket size per client IP on `/mcp`.                                         |
+| `MCP_HTTP_RATE_LIMIT_PER_SEC`  | `2`       | Tokens refilled per second per client IP.                                          |
+| `MCP_HTTP_TRUSTED_PROXY_HOPS`  | `0`       | How many proxies in front of the server append to `X-Forwarded-For`.               |
+| `MCP_HTTP_MAX_BODY_BYTES`      | `1048576` | Largest `initialize` POST body read; past it the server answers `413` (1 MiB).     |
+
+An evicted session answers `400` on its next request, and the client
+reconnects with a fresh `initialize`. Only requests count as activity: an open
+SSE `GET` stream does not keep a session alive. A client over the limit gets
+`429` with a `Retry-After` header (seconds). `/healthz` is not limited.
+
+The limiter is in memory and per process, so the effective ceiling is per
+replica: N replicas allow N times the configured rate. An ingress-level limit
+is the global answer.
+
+**Client IP.** With `MCP_HTTP_TRUSTED_PROXY_HOPS=0` (the default) the limiter
+keys on the TCP peer and ignores `X-Forwarded-For`, because a client can set
+that header to anything and would otherwise dodge the limit. Behind an ingress
+the peer is the ingress itself, so every caller shares one bucket: set the
+variable to the number of proxies that append to `X-Forwarded-For` (1 for a
+single reverse proxy, 2 for a Google Cloud load balancer, which appends both
+the client and its own address). The limiter then takes the Nth entry from the
+right, the one the outermost trusted proxy saw. Setting it higher than the
+real hop count lets a client spoof its IP again.
 
 ## Development
 

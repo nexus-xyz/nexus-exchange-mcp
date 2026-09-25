@@ -18,6 +18,7 @@ import {
   hasAdminSecret,
   hasCredentials,
   hasSessionToken,
+  type CredentialSource,
   type ExchangeConfig,
 } from "./config.js";
 import {
@@ -113,21 +114,29 @@ export class NonJsonResponseError extends Error {
 }
 
 export class MissingCredentialsError extends Error {
-  constructor(tool: string) {
+  constructor(tool: string, source: CredentialSource = "env") {
     super(
-      `Tool "${tool}" requires API credentials. Set NEXUS_EXCHANGE_API_KEY and ` +
-        `NEXUS_EXCHANGE_API_SECRET in the environment. See the package README.`,
+      source === "headers"
+        ? `Tool "${tool}" requires API credentials. The hosted MCP server never ` +
+            `uses server-side credentials: send both X-Nexus-Api-Key and ` +
+            `X-Nexus-Api-Secret headers on the initialize request (reconnect ` +
+            `to start a new session). Public market-data tools work without them.`
+        : `Tool "${tool}" requires API credentials. Set NEXUS_EXCHANGE_API_KEY and ` +
+            `NEXUS_EXCHANGE_API_SECRET in the environment. See the package README.`,
     );
     this.name = "MissingCredentialsError";
   }
 }
 
 export class MissingSessionTokenError extends Error {
-  constructor(tool: string) {
+  constructor(tool: string, source: CredentialSource = "env") {
     super(
-      `Tool "${tool}" requires a session token. Sign in with the \`login\` tool ` +
-        `(or POST /auth/login) and set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
-        `environment. See the package README.`,
+      source === "headers"
+        ? `Tool "${tool}" requires a session token, which the hosted MCP server ` +
+            `does not accept. Run the stdio server locally for this tool.`
+        : `Tool "${tool}" requires a session token. Sign in with the \`login\` tool ` +
+            `(or POST /auth/login) and set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
+            `environment. See the package README.`,
     );
     this.name = "MissingSessionTokenError";
   }
@@ -462,7 +471,7 @@ export class ExchangeClient {
 
     if (authMode === "hmac") {
       if (!this.hasCredentials()) {
-        throw new MissingCredentialsError(where);
+        throw new MissingCredentialsError(where, this.cfg.credentialSource);
       }
       const { timestamp, signature, apiKey } = this.sign(
         method,
@@ -475,7 +484,7 @@ export class ExchangeClient {
       headers["x-signature"] = signature;
     } else if (authMode === "bearer") {
       if (!this.hasSessionToken()) {
-        throw new MissingSessionTokenError(where);
+        throw new MissingSessionTokenError(where, this.cfg.credentialSource);
       }
       headers["authorization"] = `Bearer ${this.cfg.sessionToken}`;
     } else if (authMode === "admin") {

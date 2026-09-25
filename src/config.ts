@@ -33,6 +33,8 @@ import {
   type ResolvedTarget,
 } from "./networks.js";
 
+export type CredentialSource = "env" | "headers";
+
 export interface ExchangeConfig {
   /**
    * Deployment base for the `/api/v1` surface, no trailing slash (e.g.
@@ -101,6 +103,13 @@ export interface ExchangeConfig {
    * exchange dashboard. Optional; defaults to {@link DEFAULT_USER_AGENT}.
    */
   userAgent?: string;
+  /**
+   * Where this config's credentials came from, so a missing-credential error
+   * can tell the caller how to supply them. `"headers"` is the hosted HTTP
+   * server, which never uses server-env credentials (ENG-4359). Defaults to
+   * `"env"`.
+   */
+  credentialSource?: CredentialSource;
   /**
    * The resolved target: which deployment this config points at, whose money is
    * behind it, and whether it has a faucet. Built once by `loadConfig` and

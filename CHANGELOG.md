@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.2...v0.4.0) (2026-09-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** cancel_order no longer accepts `cancel_all` and now requires both `order_id` and `market_id`. Use cancel_all_orders with `confirm: true` to cancel every open order.
+* **http:** the hosted HTTP server ignores NEXUS_EXCHANGE_API_KEY, NEXUS_EXCHANGE_API_SECRET, NEXUS_EXCHANGE_SESSION_TOKEN and NEXUS_EXCHANGE_ADMIN_SECRET, and never exposes admin tools. Stdio is unchanged.
+
+### Features
+
+* **tools:** name tools snake_case(operationId), keep old names as deprecated aliases (ENG-17742) ([#88](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/88)) ([218afa8](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/218afa89fe1f847fc9caf3c128839dbaad4113de))
+
+
+### Bug Fixes
+
+* **http:** never use server-env creds, add session TTL and per-IP rate limit (ENG-4359) ([#85](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/85)) ([a44ac8a](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/a44ac8a8cc0b31d3bcba52b5f47f4344cc58c27c))
+
 ## [0.3.2](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.1...v0.3.2) (2026-09-23)
 
 

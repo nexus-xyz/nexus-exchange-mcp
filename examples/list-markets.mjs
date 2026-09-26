@@ -2,7 +2,7 @@
 //
 // It spawns the built server (dist/index.js) over stdio — exactly how a real
 // MCP client like Claude Desktop launches it — then lists the available tools
-// and calls `list_markets`, printing the results.
+// and calls `fetch_markets_summary`, printing the results.
 //
 // Run `npm run build` first, then: node examples/list-markets.mjs
 //
@@ -42,15 +42,15 @@ async function main() {
       console.log(`  - ${tool.name}`);
     }
 
-    console.log("\nCalling list_markets...");
+    console.log("\nCalling fetch_markets_summary...");
     const res = await client.callTool({
-      name: "list_markets",
+      name: "fetch_markets_summary",
       arguments: {},
     });
 
     const text = res.content?.[0]?.text ?? "";
     if (res.isError) {
-      console.error("list_markets failed:");
+      console.error("fetch_markets_summary failed:");
       console.error(text);
       process.exitCode = 1;
       return;

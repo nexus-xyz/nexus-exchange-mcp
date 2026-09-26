@@ -14,7 +14,7 @@ import {
  * Guards for the `npm run smoke` target resolution and payload validation
  * (ENG-8092). The script previously defaulted to the public site root, which
  * serves the Next.js marketing app rather than the `/api/v1` surface, and it
- * treated an unparseable body as a pass (`list_markets OK -> ? markets`). Both
+ * treated an unparseable body as a pass (`fetch_markets_summary OK -> ? markets`). Both
  * are asserted against here: there is no default target, and a markup body is
  * a hard failure.
  */
@@ -94,7 +94,7 @@ test("looksLikeMarkup: recognizes the marketing page and other markup", () => {
 test("containsMarkup: finds markup wrapped in the client's error message", () => {
   // This is the shape the failing default produced: the marketing page arrives
   // embedded in `Exchange API 404: …`, so it is not at offset zero.
-  const wrapped = `Error calling list_markets: Exchange API 404: ${MARKETING_HTML}`;
+  const wrapped = `Error calling fetch_markets_summary: Exchange API 404: ${MARKETING_HTML}`;
   assert.equal(looksLikeMarkup(wrapped), false, "not markup at offset zero");
   assert.equal(containsMarkup(wrapped), true, "but markup is embedded");
   // A genuine JSON API error must not be misreported as a wrong target.

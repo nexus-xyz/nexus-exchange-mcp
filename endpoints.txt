@@ -9,8 +9,8 @@
 # THE UNIT (read this before comparing the number to anything)
 #   MCP's own unit of work is a registered TOOL; this file counts spec
 #   OPERATIONS. They are different numbers and neither substitutes for the other:
-#   one tool can call several operations (`cancel_order` calls two), and one calls
-#   none. The operation count below is the figure that is comparable with the
+#   a deprecated alias calls the same operation as its canonical tool, and one
+#   tool calls none. The operation count below is the figure that is comparable with the
 #   rs / py / cli manifests. The tool count is not, and must never be reported as
 #   a coverage figure. See docs/coverage-unit.md.
 #

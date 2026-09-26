@@ -28,20 +28,20 @@ const BASE = "http://example.test";
 
 /** The five tools that carry v0.7.2 cursor pagination. */
 const PAGINATED_TOOLS = [
-  "get_trades",
-  "get_fills",
-  "get_order_history",
-  "get_closed_positions",
-  "get_equity_history",
+  "fetch_trades",
+  "fetch_my_trades",
+  "fetch_orders",
+  "fetch_positions_history",
+  "fetch_equity_history",
 ] as const;
 
 /** Minimal args to invoke each paginated tool (only trades needs a market). */
 const BASE_ARGS: Record<string, Record<string, unknown>> = {
-  get_trades: { market_id: "BTC-USDX-PERP" },
-  get_fills: {},
-  get_order_history: {},
-  get_closed_positions: {},
-  get_equity_history: {},
+  fetch_trades: { market_id: "BTC-USDX-PERP" },
+  fetch_my_trades: {},
+  fetch_orders: {},
+  fetch_positions_history: {},
+  fetch_equity_history: {},
 };
 
 interface PagedResult {
@@ -106,7 +106,7 @@ test("a paginated tool returns items plus the X-Next-Cursor value", async () => 
   const { result, calls } = await withReplies(
     [{ body: [{ id: "f1" }], nextCursor: "cur-2" }],
     () =>
-      findTool("get_fills")!.handler(fullClient(), {
+      findTool("fetch_my_trades")!.handler(fullClient(), {
         limit: 2,
       }) as Promise<PagedResult>,
   );
@@ -123,7 +123,7 @@ test("the cursor is forwarded verbatim and included in the signature", async () 
   const { result, calls } = await withReplies(
     [{ body: [{ id: "f2" }] }],
     () =>
-      findTool("get_fills")!.handler(fullClient(), {
+      findTool("fetch_my_trades")!.handler(fullClient(), {
         limit: 2,
         cursor: opaque,
       }) as Promise<PagedResult>,
@@ -153,7 +153,7 @@ test("a full agent-driven walk reaches the last page", async () => {
   await withReplies(script, async () => {
     let cursor: string | undefined;
     for (let guard = 0; guard < 10; guard += 1) {
-      const page = (await findTool("get_order_history")!.handler(client, {
+      const page = (await findTool("fetch_orders")!.handler(client, {
         limit: 1,
         ...(cursor === undefined ? {} : { cursor }),
       })) as PagedResult;
@@ -194,7 +194,7 @@ test("an empty first page terminates cleanly", async () => {
   const { result } = await withReplies(
     [{ body: [] }],
     () =>
-      findTool("get_closed_positions")!.handler(
+      findTool("fetch_positions_history")!.handler(
         fullClient(),
         {},
       ) as Promise<PagedResult>,
@@ -210,7 +210,7 @@ test("an empty page that still carries a cursor is not the end", async () => {
   const { result } = await withReplies(
     [{ body: [], nextCursor: "cur-9" }],
     () =>
-      findTool("get_equity_history")!.handler(
+      findTool("fetch_equity_history")!.handler(
         fullClient(),
         {},
       ) as Promise<PagedResult>,
@@ -226,7 +226,7 @@ test("a present-but-empty cursor header is treated as absent", async () => {
     const { result } = await withReplies(
       [{ body: [{ id: "x" }], nextCursor: value }],
       () =>
-        findTool("get_fills")!.handler(
+        findTool("fetch_my_trades")!.handler(
           fullClient(),
           {},
         ) as Promise<PagedResult>,
@@ -241,7 +241,7 @@ test("a repeated cursor stops the walk and flags the truncation", async () => {
   const { result, calls } = await withReplies(
     [{ body: [{ id: "f2" }], nextCursor: "stuck" }],
     () =>
-      findTool("get_fills")!.handler(fullClient(), {
+      findTool("fetch_my_trades")!.handler(fullClient(), {
         cursor: "stuck",
       }) as Promise<PagedResult>,
   );
@@ -275,7 +275,7 @@ test("an agent loop terminates against a permanently stuck upstream", async () =
     let pages = 0;
     let stalled: string | undefined;
     for (;;) {
-      const page = (await findTool("get_fills")!.handler(client, {
+      const page = (await findTool("fetch_my_trades")!.handler(client, {
         ...(cursor === undefined ? {} : { cursor }),
       })) as PagedResult;
       pages += 1;
@@ -300,7 +300,10 @@ test("a first page whose cursor equals nothing is not mistaken for a repeat", as
   const { result } = await withReplies(
     [{ body: [{ id: 1 }], nextCursor: "abc" }],
     () =>
-      findTool("get_fills")!.handler(fullClient(), {}) as Promise<PagedResult>,
+      findTool("fetch_my_trades")!.handler(
+        fullClient(),
+        {},
+      ) as Promise<PagedResult>,
   );
   assert.equal(result.next_cursor, "abc");
   assert.equal(result.pagination_error, undefined);
@@ -345,11 +348,11 @@ test("paginated tools keep their own per-endpoint limit maximum", () => {
   // these is 366: that bound belongs to /account/portfolio-history, which has
   // no cursor at all, and is below equity-history's own default of 720.
   const caps: Array<[string, number]> = [
-    ["get_trades", 1000],
-    ["get_fills", 1000],
-    ["get_order_history", 500],
-    ["get_closed_positions", 200],
-    ["get_equity_history", 720],
+    ["fetch_trades", 1000],
+    ["fetch_my_trades", 1000],
+    ["fetch_orders", 500],
+    ["fetch_positions_history", 200],
+    ["fetch_equity_history", 720],
   ];
   for (const [name, cap] of caps) {
     const tool = findTool(name)!;
@@ -377,7 +380,7 @@ test("paginated tools keep their own per-endpoint limit maximum", () => {
   }
   // Sanity: the two 1000-cap tools would previously have accepted anything.
   assert.equal(
-    findTool("get_trades")!.zod.safeParse({
+    findTool("fetch_trades")!.zod.safeParse({
       market_id: "BTC-USDX-PERP",
       limit: 5000,
     }).success,
@@ -391,13 +394,13 @@ test("only the five cursor-paginated endpoints take a cursor", () => {
   // wait for a `next_cursor` that never comes.
   const paginated = new Set<string>(PAGINATED_TOOLS);
   for (const tool of [
-    "get_portfolio_history",
-    "get_positions",
-    "get_open_orders",
-    "get_account_state",
-    "get_funding_payments",
-    "list_deposits",
-    "get_market_adl_events",
+    "fetch_portfolio_history",
+    "fetch_positions",
+    "fetch_open_orders",
+    "fetch_account_state",
+    "fetch_funding_history",
+    "fetch_deposits",
+    "fetch_adl_events",
   ]) {
     const def = findTool(tool);
     if (!def || paginated.has(tool)) continue;

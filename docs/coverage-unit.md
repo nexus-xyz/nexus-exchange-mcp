@@ -15,7 +15,7 @@ The tool count is the headline, because a tool is what MCP actually ships and wh
 an agent actually sees. The operation count is the comparable figure, and it is
 the only one that may appear in a cross-surface coverage table.
 
-Today: **69 tools**, **66 spec operations** of the 101 the pinned spec documents
+Today: **70 tools** (plus 48 deprecated aliases, ENG-17742), **66 spec operations** of the 101 the pinned spec documents
 (68 distinct once the dual-stack aliases are collapsed — see below).
 
 ## Why it needed deciding
@@ -23,9 +23,10 @@ Today: **69 tools**, **66 spec operations** of the 101 the pinned spec documents
 Every other client surface has one obvious unit: a method wraps an operation, so
 counting either gives the same answer. MCP does not.
 
-- `cancel_order` calls **two** operations — `DELETE /api/v1/orders` (cancel-all)
-  and `DELETE /api/v1/orders/{order_id}` — behind one tool, because an agent
-  should not have to pick.
+- A deprecated alias (ENG-17742) is a second registered name for a tool and
+  calls the same operation. Until that change `cancel_order` also called two
+  operations; it was split, because a tool is now named for the one operation it
+  calls.
 - `get_deposit_target` calls **none**. The endpoint does not exist server-side
   yet; the tool is registered so the agent flow is complete and returns an honest
   `not_yet_available` payload.
@@ -47,7 +48,7 @@ carries an `ops` field naming the spec operations that tool calls:
 ```ts
 {
   name: "cancel_order",
-  ops: ["DELETE /api/v1/orders", "DELETE /api/v1/orders/{order_id}"],
+  ops: ["DELETE /api/v1/orders/{order_id}"],
   ...
 }
 ```

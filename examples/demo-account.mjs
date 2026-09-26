@@ -59,8 +59,8 @@ async function main() {
 
     console.log(
       "\nSame flow with YOUR account: set NEXUS_EXCHANGE_API_KEY / " +
-        "NEXUS_EXCHANGE_API_SECRET and use get_balance / get_positions / " +
-        "get_open_orders — see examples/account-health.mjs.",
+        "NEXUS_EXCHANGE_API_SECRET and use fetch_balance / fetch_positions / " +
+        "fetch_open_orders — see examples/account-health.mjs.",
     );
   } finally {
     await client.close();

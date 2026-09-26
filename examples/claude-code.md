@@ -74,4 +74,4 @@ claude mcp list          # shows nexus-exchange / nexus as connected
 ```
 
 Then in a Claude Code session: _"Using the Nexus tools, what's the BTC-USDX-PERP
-mark price?"_ — Claude should call `get_mark_price`.
+mark price?"_ — Claude should call `fetch_mark_price`.

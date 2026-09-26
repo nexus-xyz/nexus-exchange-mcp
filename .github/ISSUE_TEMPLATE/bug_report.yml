@@ -11,7 +11,7 @@ body:
     attributes:
       label: What happened?
       description: A clear description of the bug, including what you expected instead.
-      placeholder: Calling the `list_markets` tool returned … but I expected …
+      placeholder: Calling the `fetch_markets_summary` tool returned … but I expected …
     validations:
       required: true
   - type: input
@@ -19,7 +19,7 @@ body:
     attributes:
       label: Which tool?
       description: The MCP tool involved, if applicable.
-      placeholder: "place_order"
+      placeholder: "create_order"
     validations:
       required: false
   - type: textarea

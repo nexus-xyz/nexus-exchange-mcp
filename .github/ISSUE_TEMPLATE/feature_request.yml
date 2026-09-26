@@ -31,7 +31,7 @@ body:
     attributes:
       label: Which tool?
       description: New tool name, or an existing tool you'd extend.
-      placeholder: "get_funding_history"
+      placeholder: "fetch_funding_rate_history"
     validations:
       required: false
   - type: input

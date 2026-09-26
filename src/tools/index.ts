@@ -12,6 +12,11 @@
  * ENG-7964). `scripts/check_spec_drift.py` verifies each declaration against the
  * handler it sits next to and emits endpoints.txt from the union — see
  * docs/coverage-unit.md.
+ *
+ * Each tool is named `snake_case(operationId)` of the operation it calls, with
+ * the direct-indexer `V1` suffix dropped (R2.25, ENG-17742), and the drift check
+ * enforces it. The pre-R2.25 names stay registered as deprecated aliases for one
+ * minor — see `DEPRECATED_ALIASES`.
  */
 
 import { z } from "zod";
@@ -25,8 +30,8 @@ export interface ToolDef {
    * placeholder names (`{market_id}`, not `{id}` or the local variable name).
    *
    * This is the **tool → spec-operation mapping** (ENG-7788). It exists because
-   * a tool is not one operation: `cancel_order` calls two (bulk and by-id),
-   * convenience tools can call several, and `get_deposit_target` calls none.
+   * a tool is not one operation: a deprecated alias calls the same operation
+   * as the tool it forwards to, and `get_deposit_target` calls none.
    * Without a declared mapping, "how many spec operations does MCP cover" has no
    * answer, and the registered-tool count gets reported as an operation count —
    * which is not the same number and is not comparable to the SDK rows. See
@@ -85,7 +90,7 @@ function jsonSchema(
 }
 
 /**
- * Maximum number of orders accepted in a single `place_orders_batch` call.
+ * Maximum number of orders accepted in a single `create_orders` call.
  * The gateway does not document a batch cap in this repo, so this is a
  * defensive client-side bound to prevent accidental flood submissions
  * (e.g. an agent looping). 100 is a generous ceiling for interactive use;
@@ -94,7 +99,7 @@ function jsonSchema(
 const MAX_BATCH_ORDERS = 100;
 
 /**
- * Windows accepted by `get_portfolio_history` (spec `PortfolioWindow`). Each
+ * Windows accepted by `fetch_portfolio_history` (spec `PortfolioWindow`). Each
  * selects a server-side downsample cadence and point capacity: day 5m/288,
  * week 1h/168, month 6h/120, all 1d/366. A value outside this set is rejected
  * upstream with `400 invalid_window`, so we validate it as a closed enum here
@@ -131,8 +136,8 @@ const MAX_EQUITY_POINTS = 720;
 
 /**
  * The `cursor` input advertised by the five cursor-paginated list tools
- * (`get_trades`, `get_fills`, `get_order_history`, `get_closed_positions`,
- * `get_equity_history`) — spec v0.7.2 (ENG-5506).
+ * (`fetch_trades`, `fetch_my_trades`, `fetch_orders`, `fetch_positions_history`,
+ * `fetch_equity_history`) — spec v0.7.2 (ENG-5506).
  *
  * The agent drives the loop: call once without `cursor`, then pass the previous
  * response's `next_cursor` back here. Written for an agent reader, so it states
@@ -235,8 +240,8 @@ function pagedQuery(
 }
 
 /**
- * Shared wording for every tool that returns `Position` objects (`get_balance`,
- * `get_positions`, `get_account_state`), describing the enriched per-position
+ * Shared wording for every tool that returns `Position` objects (`fetch_balance`,
+ * `fetch_positions`, `fetch_account_state`), describing the enriched per-position
  * risk fields added in spec v0.7.2 (ENG-6445).
  *
  * The nullable enrichment is derived strictly from indexer-mirrored state, so a
@@ -301,7 +306,7 @@ const evmAddress = z
   );
 
 /**
- * Friendly order args accepted by `place_order` / `place_orders_batch` /
+ * Friendly order args accepted by `create_order` / `create_orders` /
  * `preview_order`.
  */
 type FriendlyOrderType =
@@ -620,7 +625,7 @@ function withWsEndpoint(
 export const tools: ToolDef[] = [
   // ── Public market data (no credentials) ──────────────────────────────────
   {
-    name: "list_markets",
+    name: "fetch_markets_summary",
     ops: ["GET /api/v1/markets/summary"],
     description:
       "List all tradable markets with their current summary (mark price, 24h " +
@@ -631,7 +636,7 @@ export const tools: ToolDef[] = [
     handler: (client) => client.request({ path: "/api/v1/markets/summary" }),
   },
   {
-    name: "get_ticker",
+    name: "fetch_ticker",
     ops: ["GET /api/v1/markets/{market_id}/ticker"],
     description:
       "Get the ticker (last price, bid/ask, 24h stats) for one market, e.g. " +
@@ -655,7 +660,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_orderbook",
+    name: "fetch_order_book",
     ops: ["GET /api/v1/markets/{market_id}/orderbook"],
     description:
       "Get the current order book (bids/asks with price + size) for one market. " +
@@ -680,12 +685,12 @@ export const tools: ToolDef[] = [
   },
 
   {
-    name: "list_market_specs",
+    name: "fetch_markets",
     ops: ["GET /markets"],
     description:
       "List all markets with their static specs (tick size, lot size, leverage, " +
       "contract details) — the raw market definitions without live summary " +
-      "stats. Public — no credentials needed. (Use `list_markets` for live " +
+      "stats. Public — no credentials needed. (Use `fetch_markets_summary` for live " +
       "mark price / volume / funding.)",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
@@ -694,7 +699,7 @@ export const tools: ToolDef[] = [
       client.request({ surface: "gateway", path: "/markets" }),
   },
   {
-    name: "get_tickers",
+    name: "fetch_tickers",
     ops: ["GET /api/v1/tickers"],
     description:
       "Get tickers (last price, bid/ask, 24h stats) for ALL markets in one " +
@@ -705,7 +710,7 @@ export const tools: ToolDef[] = [
     handler: (client) => client.request({ path: "/api/v1/tickers" }),
   },
   {
-    name: "get_mark_price",
+    name: "fetch_mark_price",
     ops: ["GET /api/v1/markets/{market_id}/mark-price"],
     description:
       "Get the current mark price for one market. Public — no credentials needed.",
@@ -728,7 +733,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_market_status",
+    name: "fetch_market_status",
     ops: ["GET /api/v1/markets/{market_id}/status"],
     description:
       "Get a market's trading status and halt info (whether trading is open, " +
@@ -752,7 +757,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_trades",
+    name: "fetch_trades",
     ops: ["GET /api/v1/markets/{market_id}/trades"],
     description:
       "Get recent public trades (prints) for one market, newest first. " +
@@ -788,7 +793,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_candles",
+    name: "fetch_ohlcv",
     ops: ["GET /api/v1/markets/{market_id}/candles"],
     description:
       "Get OHLCV candles for one market. Public — no credentials needed. " +
@@ -835,7 +840,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_funding_history",
+    name: "fetch_funding_rate_history",
     ops: ["GET /api/v1/markets/{market_id}/funding"],
     description:
       "Get the funding-rate history for one perpetual market. Public — no " +
@@ -874,12 +879,12 @@ export const tools: ToolDef[] = [
   },
 
   {
-    name: "get_funding_samples",
+    name: "fetch_funding_samples",
     ops: ["GET /api/v1/markets/{market_id}/funding-samples"],
     description:
       "Get the dense per-tick funding premium-index samples for one perpetual " +
       "market (60s cadence, up to 480 points = 8h). Finer-grained than " +
-      "`get_funding_history`, which returns the settled hourly rates. Public — " +
+      "`fetch_funding_rate_history`, which returns the settled hourly rates. Public — " +
       "no credentials needed.",
     inputSchema: jsonSchema(
       {
@@ -912,7 +917,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_market_risk_params",
+    name: "fetch_market_risk_params",
     ops: ["GET /markets/{market_id}/risk-params"],
     description:
       "Get one market's risk parameters: margin requirements and maximum " +
@@ -940,7 +945,7 @@ export const tools: ToolDef[] = [
 
   // ── Public venue statistics (no credentials) ──────────────────────────────
   {
-    name: "get_stats",
+    name: "fetch_stats",
     ops: ["GET /api/v1/stats"],
     description:
       "Get aggregate venue statistics (volume, trades, throughput) plus " +
@@ -951,7 +956,7 @@ export const tools: ToolDef[] = [
     handler: (client) => client.request({ path: "/api/v1/stats" }),
   },
   {
-    name: "get_stats_history",
+    name: "fetch_stats_history",
     ops: ["GET /api/v1/stats/history"],
     description:
       "Get the venue's per-second throughput history (ring buffer, up to 3600 " +
@@ -1004,7 +1009,7 @@ export const tools: ToolDef[] = [
 
   // ── Account reads (require credentials) ───────────────────────────────────
   {
-    name: "get_balance",
+    name: "fetch_balance",
     ops: ["GET /api/v1/account"],
     description:
       "Get the authenticated account snapshot: collateral balance, equity, and " +
@@ -1016,11 +1021,11 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account", signed: true }),
   },
   {
-    name: "get_account_summary",
+    name: "fetch_account_summary",
     ops: ["GET /api/v1/account/summary"],
     description:
       "Get the authenticated account's portfolio summary (equity, margin " +
-      "usage, PnL rollup) — a richer view than `get_balance`. Includes " +
+      "usage, PnL rollup) — a richer view than `fetch_balance`. Includes " +
       "`withdrawable`: the engine-authoritative free margin floored at zero, " +
       "i.e. exactly what can leave the account (never negative). Because " +
       "`withdrawable` comes from that authoritative margin view, this call " +
@@ -1035,12 +1040,12 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account/summary", signed: true }),
   },
   {
-    name: "get_account_state",
+    name: "fetch_account_state",
     ops: ["GET /api/v1/account/state"],
     description:
       "Get the authenticated account's full state in ONE call: the portfolio " +
       "summary aggregates plus every open position (`{ summary, positions }`). " +
-      "Prefer this over pairing `get_account_summary` with `get_positions` — " +
+      "Prefer this over pairing `fetch_account_summary` with `fetch_positions` — " +
       "both parts come from one coherent read, so `summary." +
       "open_positions_count` always matches the `positions` length. If the " +
       "engine-authoritative margin view is unavailable this fails closed with " +
@@ -1054,7 +1059,7 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account/state", signed: true }),
   },
   {
-    name: "get_account_fees",
+    name: "fetch_trading_fees",
     ops: ["GET /api/v1/account/fees"],
     description:
       "Get the authenticated account's effective fee schedule: maker/taker " +
@@ -1084,12 +1089,12 @@ export const tools: ToolDef[] = [
   // by ~5" rather than "costs 5 units". Re-check `rate_limit.rs` before
   // changing the number an agent is told to budget against.
   {
-    name: "get_portfolio_history",
+    name: "fetch_portfolio_history",
     ops: ["GET /api/v1/account/portfolio-history"],
     description:
       "Get the authenticated account's portfolio time-series — equity, " +
       "cumulative trading PnL, and cumulative traded volume — over a " +
-      "selectable window, oldest first. Richer than `get_equity_history` " +
+      "selectable window, oldest first. Richer than `fetch_equity_history` " +
       "(equity only, 5s cadence, ~1h); both derive equity from the same " +
       "source, so the two never disagree. Each window sets its own downsample " +
       "cadence and point capacity: day 5m/288, week 1h/168, month 6h/120, all " +
@@ -1097,7 +1102,7 @@ export const tools: ToolDef[] = [
       "`volume` is monotonically non-decreasing. This is a HEAVY read — the " +
       "gateway charges it 5x an ordinary GET, so a single call draws about " +
       "five requests' worth of budget and the `remaining` reported by " +
-      "`get_rate_limit_status` (counted in ordinary requests) drops by ~5. " +
+      "`fetch_rate_limit_status` (counted in ordinary requests) drops by ~5. " +
       "Poll it sparingly. Requires API credentials.",
     inputSchema: jsonSchema({
       window: {
@@ -1139,12 +1144,12 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_equity_history",
+    name: "fetch_equity_history",
     ops: ["GET /api/v1/account/equity-history"],
     description:
       "Get the authenticated account's equity time-series (5s cadence, ~1h " +
       "window), oldest first. For a longer window, or for PnL and volume " +
-      `series alongside equity, use \`get_portfolio_history\`. ${PAGINATION_NOTE} ` +
+      `series alongside equity, use \`fetch_portfolio_history\`. ${PAGINATION_NOTE} ` +
       "Requires API credentials.",
     inputSchema: jsonSchema({
       limit: {
@@ -1170,7 +1175,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_positions",
+    name: "fetch_positions",
     ops: ["GET /api/v1/positions"],
     description:
       "Get the authenticated account's open positions. " +
@@ -1182,7 +1187,7 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/positions", signed: true }),
   },
   {
-    name: "get_closed_positions",
+    name: "fetch_positions_history",
     ops: ["GET /api/v1/positions/closed"],
     description:
       "Get the authenticated account's closed positions (realized PnL per " +
@@ -1211,7 +1216,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_open_orders",
+    name: "fetch_open_orders",
     ops: ["GET /api/v1/orders"],
     description:
       "Get the authenticated account's resting (open) orders. Requires API credentials.",
@@ -1222,7 +1227,7 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/orders", signed: true }),
   },
   {
-    name: "get_order",
+    name: "fetch_order",
     ops: ["GET /orders/{order_id}"],
     description:
       "Get a single order by its id (status, fills, remaining size). Pass " +
@@ -1265,7 +1270,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_order_history",
+    name: "fetch_orders",
     ops: ["GET /api/v1/orders/history"],
     description:
       "Get the authenticated account's terminal-status order history (filled / " +
@@ -1295,7 +1300,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_fills",
+    name: "fetch_my_trades",
     ops: ["GET /api/v1/fills"],
     description:
       "List the authenticated account's fills (executed trades), newest first. " +
@@ -1324,7 +1329,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_funding_payments",
+    name: "fetch_funding_history",
     ops: ["GET /funding"],
     description:
       "Get the authenticated account's funding-payment history, newest first, " +
@@ -1362,7 +1367,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_withdrawals",
+    name: "fetch_withdrawals",
     ops: ["GET /withdrawals"],
     description:
       "List the authenticated account's withdrawal history. Requires API " +
@@ -1390,7 +1395,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "list_deposits",
+    name: "fetch_deposits",
     ops: ["GET /deposits"],
     description:
       "List the authenticated account's deposit history. Requires API " +
@@ -1418,7 +1423,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_rate_limit_status",
+    name: "fetch_rate_limit_status",
     ops: ["GET /api/v1/account/rate-limit"],
     description:
       "Get the authenticated account's current rate-limit status (remaining " +
@@ -1431,7 +1436,7 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/account/rate-limit", signed: true }),
   },
   {
-    name: "get_adl_history",
+    name: "fetch_adl_history",
     ops: ["GET /account/{address}/adl-history"],
     description:
       "Get the auto-deleveraging (ADL) events that touched a given account. " +
@@ -1472,7 +1477,7 @@ export const tools: ToolDef[] = [
 
   // ── Cancel-on-disconnect (dead man's switch; requires credentials) ────────
   {
-    name: "get_cancel_on_disconnect",
+    name: "fetch_cancel_on_disconnect",
     ops: ["GET /api/v1/account/cancel-on-disconnect"],
     description:
       "Get the authenticated account's cancel-on-disconnect (COD) status. COD " +
@@ -1529,7 +1534,7 @@ export const tools: ToolDef[] = [
 
   // ── Trade actions (require credentials) ───────────────────────────────────
   {
-    name: "place_order",
+    name: "create_order",
     ops: ["POST /api/v1/orders"],
     description:
       "Place an order on a market, buy/sell. Supports limit, market, stop-loss " +
@@ -1554,11 +1559,11 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "place_orders_batch",
+    name: "create_orders",
     ops: ["POST /api/v1/orders/batch"],
     description:
       "Submit multiple orders in one request. Each order has the same shape as " +
-      "`place_order` (market_id, side, type, size, and the type-dependent " +
+      "`create_order` (market_id, side, type, size, and the type-dependent " +
       "price / trigger_price / trailing offsets / time_in_force / reduce_only). " +
       "Requires API credentials. This submits REAL orders to the matching engine.",
     inputSchema: jsonSchema(
@@ -1567,7 +1572,7 @@ export const tools: ToolDef[] = [
           type: "array",
           minItems: 1,
           maxItems: MAX_BATCH_ORDERS,
-          description: `Orders to submit (1–${MAX_BATCH_ORDERS}). Each uses the place_order arg shape.`,
+          description: `Orders to submit (1–${MAX_BATCH_ORDERS}). Each uses the create_order arg shape.`,
           items: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
         },
       },
@@ -1594,73 +1599,34 @@ export const tools: ToolDef[] = [
   },
   {
     name: "cancel_order",
-    ops: ["DELETE /api/v1/orders", "DELETE /api/v1/orders/{order_id}"],
+    ops: ["DELETE /api/v1/orders/{order_id}"],
     description:
-      "Cancel a resting order. Pass `order_id` to cancel one order. To cancel " +
-      "ALL open orders you must explicitly pass `cancel_all: true` — an empty " +
-      "or argless call is rejected so a stray call can't mass-cancel by " +
-      "accident. Requires API credentials.",
-    inputSchema: jsonSchema({
-      order_id: {
-        type: "string",
-        description: "Order id to cancel a single order.",
+      "Cancel ONE resting order by `order_id`. `market_id` is required (the " +
+      "route uses it for routing). This tool only ever cancels the single " +
+      "named order; to cancel every open order use `cancel_all_orders`. " +
+      "Requires API credentials.",
+    inputSchema: jsonSchema(
+      {
+        order_id: {
+          type: "string",
+          description: "Id of the order to cancel.",
+        },
+        market_id: {
+          type: "string",
+          description: "Market the order rests on (required for routing).",
+        },
       },
-      market_id: {
-        type: "string",
-        description:
-          "Market id. REQUIRED when cancelling a single order (`order_id`); " +
-          "optional with `cancel_all` to scope the mass-cancel to one market.",
-      },
-      cancel_all: {
-        type: "boolean",
-        description:
-          "Set true to cancel ALL open orders. Required (and the only way) to " +
-          "trigger a mass-cancel; ignored when `order_id` is given.",
-      },
-    }),
+      ["order_id", "market_id"],
+    ),
     zod: z
       .object({
-        order_id: z.string().optional(),
-        market_id: z.string().optional(),
-        cancel_all: z.boolean().optional(),
+        order_id: z.string().min(1),
+        market_id: z.string().min(1),
       })
       .strict(),
     requiresAuth: true,
     handler: (client, args) => {
-      const a = args as {
-        order_id?: string;
-        market_id?: string;
-        cancel_all?: boolean;
-      };
-      if (!a.order_id) {
-        // Mass-cancel is destructive; require an explicit opt-in flag so an
-        // empty/argless call errors instead of silently cancelling everything.
-        if (!a.cancel_all) {
-          throw new Error(
-            "Refusing to cancel: pass `order_id` (with `market_id`) to cancel " +
-              "one order, or `cancel_all: true` to cancel ALL open orders.",
-          );
-        }
-        // `market_id` is optional on mass-cancel: scopes the cancel to one
-        // market when given, otherwise cancels across all markets.
-        const query = a.market_id
-          ? `market_id=${encodeURIComponent(a.market_id)}`
-          : "";
-        return client.request({
-          method: "DELETE",
-          path: "/api/v1/orders",
-          query,
-          signed: true,
-        });
-      }
-      // Single cancel: /api/v1 marks `market_id` required (query). Fail fast
-      // client-side so a missing id surfaces as a clear error, not a 400.
-      if (!a.market_id) {
-        throw new Error(
-          "cancel_order requires `market_id` when cancelling a single order " +
-            "(order_id). Pass the market the order is on.",
-        );
-      }
+      const a = args as { order_id: string; market_id: string };
       return client.request({
         method: "DELETE",
         path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
@@ -1670,7 +1636,53 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "amend_order",
+    name: "cancel_all_orders",
+    ops: ["DELETE /api/v1/orders"],
+    description:
+      "Cancel ALL of the authenticated account's open orders, optionally " +
+      "scoped to one market with `market_id`. Destructive: you must pass " +
+      "`confirm: true`, so a stray or argless call can't mass-cancel by " +
+      "accident. To cancel a single order use `cancel_order`. Requires API " +
+      "credentials.",
+    inputSchema: jsonSchema({
+      market_id: {
+        type: "string",
+        description:
+          "Scope the cancel to one market. Omit to cancel across all markets.",
+      },
+      confirm: {
+        type: "boolean",
+        description: "Must be true to actually cancel (guards against typos).",
+      },
+    }),
+    zod: z
+      .object({
+        market_id: z.string().min(1).optional(),
+        confirm: z.boolean().optional(),
+      })
+      .strict(),
+    requiresAuth: true,
+    handler: (client, args) => {
+      const a = args as { market_id?: string; confirm?: boolean };
+      if (!a.confirm) {
+        throw new Error(
+          "Refusing to cancel: pass `confirm: true` to cancel ALL open orders" +
+            (a.market_id ? ` on ${a.market_id}.` : " across every market."),
+        );
+      }
+      const query = a.market_id
+        ? `market_id=${encodeURIComponent(a.market_id)}`
+        : "";
+      return client.request({
+        method: "DELETE",
+        path: "/api/v1/orders",
+        query,
+        signed: true,
+      });
+    },
+  },
+  {
+    name: "edit_order",
     ops: ["PATCH /api/v1/orders/{order_id}"],
     description:
       "Amend a resting order's price and/or size in one atomic cancel-replace " +
@@ -1743,7 +1755,7 @@ export const tools: ToolDef[] = [
     ops: ["POST /api/v1/orders/preview"],
     description:
       "Preview an order without submitting it: projects the margin, equity, " +
-      "and fee impact of the order. Takes the same arguments as `place_order`. " +
+      "and fee impact of the order. Takes the same arguments as `create_order`. " +
       "Nothing reaches the matching engine. Requires API credentials.",
     inputSchema: jsonSchema(orderProps, ["market_id", "side", "type", "size"]),
     zod: friendlyOrderSchema,
@@ -1761,7 +1773,7 @@ export const tools: ToolDef[] = [
 
   // ── Auto-deleveraging (per-market, requires credentials) ──────────────────
   {
-    name: "get_market_adl_events",
+    name: "fetch_adl_events",
     ops: ["GET /markets/{market_id}/adl-events"],
     description:
       "Get the auto-deleveraging (ADL) settlement history for one market — the " +
@@ -1802,7 +1814,7 @@ export const tools: ToolDef[] = [
 
   // ── Funding actions (require credentials) ─────────────────────────────────
   {
-    name: "deposit_collateral",
+    name: "deposit",
     ops: ["POST /account/deposit"],
     description:
       "Deposit USDX collateral into the authenticated account. `amount` is a " +
@@ -1866,12 +1878,12 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "submit_deposit",
+    name: "create_deposit",
     ops: ["POST /deposits"],
     description:
       "Submit a (testnet/synthetic) deposit for the authenticated account via " +
-      "the deposits ledger (`POST /deposits` — unlike `deposit_collateral`, " +
-      "the deposit is recorded and listable with `list_deposits`). `amount` is " +
+      "the deposits ledger (`POST /deposits` — unlike `deposit`, " +
+      "the deposit is recorded and listable with `fetch_deposits`). `amount` is " +
       "a positive decimal string; `asset` defaults to USDX. Requires API " +
       "credentials. This moves REAL collateral on the account.",
     inputSchema: jsonSchema(
@@ -1929,7 +1941,7 @@ export const tools: ToolDef[] = [
       }),
   },
   {
-    name: "adjust_isolated_margin",
+    name: "add_margin",
     ops: ["POST /account/margin"],
     description:
       "Add or remove isolated margin on an open position. Fails if the " +
@@ -1989,7 +2001,7 @@ export const tools: ToolDef[] = [
 
   // ── Bridge: cross-chain deposits (Phase A) ────────────────────────────────
   {
-    name: "get_bridge_assets",
+    name: "fetch_bridge_assets",
     ops: ["GET /api/v1/bridge/assets"],
     description:
       "List the bridgeable chains and, per chain, the depositable assets " +
@@ -2016,7 +2028,7 @@ export const tools: ToolDef[] = [
           type: "string",
           description:
             'Chain to get-or-create a deposit address on, e.g. "ethereum". ' +
-            "Use `get_bridge_assets` to discover supported chains.",
+            "Use `fetch_bridge_assets` to discover supported chains.",
         },
       },
       ["chain"],
@@ -2053,13 +2065,13 @@ export const tools: ToolDef[] = [
       }),
   },
   {
-    name: "list_bridge_deposits",
+    name: "fetch_bridge_deposits",
     ops: ["GET /api/v1/bridge/deposits"],
     description:
       "List the authenticated account's cross-chain (bridge) deposits, newest " +
       "first. Optionally filter by source `chain`, `asset` (USDC|USDX), or " +
       "`status` (detected|confirming|credited|failed). Distinct from " +
-      "`list_deposits`, which lists the account's ledger deposits. Requires " +
+      "`fetch_deposits`, which lists the account's ledger deposits. Requires " +
       "API credentials.",
     inputSchema: jsonSchema({
       limit: {
@@ -2112,7 +2124,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_bridge_deposit",
+    name: "fetch_bridge_deposit",
     ops: ["GET /api/v1/bridge/deposits/{id}"],
     description:
       "Fetch a single cross-chain (bridge) deposit by id. Only deposits owned " +
@@ -2295,7 +2307,7 @@ export const tools: ToolDef[] = [
 
   // ── Agent-key management (requires credentials) ───────────────────────────
   {
-    name: "list_agents",
+    name: "fetch_agents",
     ops: ["GET /agents"],
     description:
       "List the delegated agent keys registered for the authenticated wallet " +
@@ -2477,7 +2489,7 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "list_api_keys",
+    name: "fetch_api_keys",
     ops: ["GET /keys"],
     description:
       "List the HMAC API keys for the authenticated wallet (key ids and " +
@@ -2553,7 +2565,7 @@ export const tools: ToolDef[] = [
 
   // ── WebSocket access (requires credentials) ───────────────────────────────
   {
-    name: "get_ws_token",
+    name: "create_ws_token",
     ops: ["POST /ws/token"],
     description:
       "Mint a short-lived (60s, single-use) token for an authenticated " +
@@ -2576,11 +2588,11 @@ export const tools: ToolDef[] = [
     },
   },
   {
-    name: "get_ws_token_legacy",
+    name: "create_ws_token_legacy",
     ops: ["POST /ws-tokens"],
     description:
       "Mint a short-lived (60s, single-use) token for the legacy public " +
-      "`/stream` endpoint via `POST /ws-tokens`. Prefer `get_ws_token` " +
+      "`/stream` endpoint via `POST /ws-tokens`. Prefer `create_ws_token` " +
       "(`/ws/token`) for new code; this is kept for `/stream` compatibility. " +
       "The response carries `ws_endpoint` for the configured network. " +
       "Requires API credentials.",
@@ -2603,9 +2615,9 @@ export const tools: ToolDef[] = [
   // the public contract (they are operational probes, not a public API);
   // `/status` is the surviving, contract-documented health surface, so the
   // former `get_health` / `get_readiness` tools were dropped in favour of the
-  // single `get_service_status` below (ENG-6136).
+  // single `fetch_status` below (ENG-6136).
   {
-    name: "get_service_status",
+    name: "fetch_status",
     ops: ["GET /status"],
     description:
       "Aggregate service health of the exchange stack (indexer / engine / " +
@@ -2621,7 +2633,7 @@ export const tools: ToolDef[] = [
   // These use the operator admin secret and mutate OTHER accounts' fee tiers,
   // so they are registered only when NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS is set.
   {
-    name: "list_tiers",
+    name: "fetch_tiers",
     ops: ["GET /admin/tiers"],
     description:
       "ADMIN: list the configured account fee-tier overrides. Operator-only — " +
@@ -2770,6 +2782,84 @@ for (const tool of tools) {
   }
   Object.freeze(tool);
 }
+/**
+ * Pre-R2.25 tool names (ENG-17742), each kept registered for one minor release
+ * as a thin alias of its canonical tool, per CONTRIBUTING's "deprecate, don't
+ * remove". Remove the whole map in the next minor.
+ *
+ * An alias is the canonical definition with only `name` and `description`
+ * changed, so it shares the (already funds-guarded) handler, `ops`, and input
+ * schema: both names behave identically during the window.
+ *
+ * `list_markets` aliases `fetch_markets_summary`, NOT `fetch_markets`: it has
+ * always been `GET /markets/summary`, and pointing it at `GET /markets` would
+ * silently change what an existing prompt gets back. `cancel_order` has no
+ * alias because its name did not change; its account-wide mode moved to
+ * `cancel_all_orders`.
+ */
+export const DEPRECATED_ALIASES: Readonly<Record<string, string>> = {
+  list_markets: "fetch_markets_summary",
+  get_ticker: "fetch_ticker",
+  get_orderbook: "fetch_order_book",
+  list_market_specs: "fetch_markets",
+  get_tickers: "fetch_tickers",
+  get_mark_price: "fetch_mark_price",
+  get_market_status: "fetch_market_status",
+  get_trades: "fetch_trades",
+  get_candles: "fetch_ohlcv",
+  get_funding_history: "fetch_funding_rate_history",
+  get_funding_samples: "fetch_funding_samples",
+  get_market_risk_params: "fetch_market_risk_params",
+  get_stats: "fetch_stats",
+  get_stats_history: "fetch_stats_history",
+  get_balance: "fetch_balance",
+  get_account_summary: "fetch_account_summary",
+  get_account_state: "fetch_account_state",
+  get_account_fees: "fetch_trading_fees",
+  get_portfolio_history: "fetch_portfolio_history",
+  get_equity_history: "fetch_equity_history",
+  get_positions: "fetch_positions",
+  get_closed_positions: "fetch_positions_history",
+  get_open_orders: "fetch_open_orders",
+  get_order: "fetch_order",
+  get_order_history: "fetch_orders",
+  get_fills: "fetch_my_trades",
+  get_funding_payments: "fetch_funding_history",
+  get_withdrawals: "fetch_withdrawals",
+  list_deposits: "fetch_deposits",
+  get_rate_limit_status: "fetch_rate_limit_status",
+  get_adl_history: "fetch_adl_history",
+  get_cancel_on_disconnect: "fetch_cancel_on_disconnect",
+  place_order: "create_order",
+  place_orders_batch: "create_orders",
+  amend_order: "edit_order",
+  get_market_adl_events: "fetch_adl_events",
+  deposit_collateral: "deposit",
+  submit_deposit: "create_deposit",
+  adjust_isolated_margin: "add_margin",
+  get_bridge_assets: "fetch_bridge_assets",
+  list_bridge_deposits: "fetch_bridge_deposits",
+  get_bridge_deposit: "fetch_bridge_deposit",
+  list_agents: "fetch_agents",
+  list_api_keys: "fetch_api_keys",
+  get_ws_token: "create_ws_token",
+  get_ws_token_legacy: "create_ws_token_legacy",
+  get_service_status: "fetch_status",
+  list_tiers: "fetch_tiers",
+};
+
+for (const [oldName, newName] of Object.entries(DEPRECATED_ALIASES)) {
+  const target = tools.find((t) => t.name === newName);
+  if (!target) throw new Error(`alias ${oldName} targets unknown ${newName}`);
+  tools.push(
+    Object.freeze({
+      ...target,
+      name: oldName,
+      description: `Deprecated: use \`${newName}\`. ${target.description}`,
+    }),
+  );
+}
+
 // The array too, not just its elements: `Object.freeze` is shallow, so freezing
 // each definition stops `tool.handler = ...` but leaves `tools[i] = {…}` and
 // `tools.push(…)` open — and `findTool` / `visibleTools` read straight from this

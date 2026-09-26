@@ -8,8 +8,9 @@ defeated", and the gap rs's own test suite exists to close.
 
 Three groups:
 
-* **The invariants.** For each of the four (manifest -> spec, manifest ==
-  declarations, declarations == code, network map -> spec `servers`) a synthetic
+* **The invariants.** For each of the five (manifest -> spec, manifest ==
+  declarations, declarations == code, network map -> spec `servers`, tool name
+  == snake_case(operationId)) a synthetic
   tool source, network map or spec is built that breaks exactly that one, and the
   check must report a non-zero error count. Passing cases are asserted too, so a
   checker that simply always fails would not satisfy this file either.
@@ -747,6 +748,99 @@ class TestInvariant4NetworkGatewayBases(unittest.TestCase):
             )
 
 
+def spec_with_ids(**ids):
+    """A minimal OpenAPI document from {"METHOD /path": operationId}."""
+    paths = {}
+    for op, op_id in ids.items():
+        method, path = op.split()
+        paths.setdefault(path, {})[method.lower()] = {
+            "operationId": op_id,
+            "responses": {},
+        }
+    return {"info": {"version": "0.0.0-test"}, "paths": paths}
+
+
+class TestInvariant5ToolNames(unittest.TestCase):
+    """Each tool is named snake_case(operationId) of its one operation."""
+
+    SPEC = spec_with_ids(
+        **{
+            "GET /api/v1/markets/{market_id}/orderbook": "fetchOrderBookV1",
+            "GET /api/v1/markets/{market_id}/candles": "fetchOHLCVV1",
+            "DELETE /api/v1/orders": "cancelAllOrdersV1",
+            "DELETE /api/v1/orders/{order_id}": "cancelOrderV1",
+            "GET /fills": "fetchFills",
+        }
+    )
+
+    def check(self, *tools, ahead=None, without_ops=frozenset(), non_spec=frozenset()):
+        with patched("OPERATION_IDS_AHEAD_OF_PIN", dict(ahead or {})), patched(
+            "TOOLS_WITHOUT_OPS", set(without_ops)
+        ), patched("NON_SPEC_TARGETS", set(non_spec)):
+            return _quiet(csd.check_tool_names, parse(tool_source(*tools)), self.SPEC)
+
+    def test_snake_case_drops_v1_and_keeps_acronyms_whole(self):
+        self.assertEqual(csd.tool_name_for("fetchOrderBookV1"), "fetch_order_book")
+        self.assertEqual(csd.tool_name_for("fetchOHLCVV1"), "fetch_ohlcv")
+        self.assertEqual(csd.tool_name_for("createWsTokenLegacy"), "create_ws_token_legacy")
+        self.assertEqual(csd.tool_name_for("fetchApiKeys"), "fetch_api_keys")
+        self.assertEqual(csd.tool_name_for("deposit"), "deposit")
+
+    def test_canonical_names_pass(self):
+        self.assertEqual(
+            self.check(
+                ("fetch_order_book", ["GET /api/v1/markets/{market_id}/orderbook"],
+                 ['path: `/api/v1/markets/${m}/orderbook`']),
+                ("fetch_ohlcv", ["GET /api/v1/markets/{market_id}/candles"],
+                 ['path: `/api/v1/markets/${m}/candles`']),
+            ),
+            0,
+        )
+
+    def test_old_name_fails(self):
+        self.assertGreater(
+            self.check(
+                ("get_orderbook", ["GET /api/v1/markets/{market_id}/orderbook"],
+                 ['path: `/api/v1/markets/${m}/orderbook`']),
+            ),
+            0,
+        )
+
+    def test_a_tool_calling_two_operations_fails(self):
+        self.assertGreater(
+            self.check(
+                ("cancel_order", ["DELETE /api/v1/orders", "DELETE /api/v1/orders/{order_id}"],
+                 ['method: "DELETE", path: "/api/v1/orders"',
+                  'method: "DELETE", path: `/api/v1/orders/${id}`']),
+            ),
+            0,
+        )
+
+    def test_no_op_and_non_spec_tools_are_exempt(self):
+        self.assertEqual(
+            self.check(
+                ("get_deposit_target", [], []),
+                ("get_demo_account", ["GET /demo/account"], ['path: "/demo/account"']),
+                without_ops={"get_deposit_target"},
+                non_spec={("GET", "/demo/account")},
+            ),
+            0,
+        )
+
+    def test_ahead_of_pin_name_is_used(self):
+        tool = ("fetch_my_trades", ["GET /fills"], ['path: "/fills"'])
+        self.assertGreater(self.check(tool), 0)  # pinned says fetchFills
+        self.assertEqual(self.check(tool, ahead={("GET", "/fills"): "fetchMyTrades"}), 0)
+
+    def test_ahead_of_pin_entry_the_pin_caught_up_with_fails(self):
+        tool = ("fetch_fills", ["GET /fills"], ['path: "/fills"'])
+        self.assertGreater(self.check(tool, ahead={("GET", "/fills"): "fetchFills"}), 0)
+
+    def test_ahead_of_pin_entry_no_tool_declares_fails(self):
+        tool = ("fetch_fills", ["GET /fills"], ['path: "/fills"'])
+        self.assertGreater(self.check(tool, ahead={("GET", "/gone"): "fetchGone"}), 0)
+
+
 class TestAgainstRealSource(unittest.TestCase):
     """The real src/tools/index.ts, so the synthetic fixtures above cannot pass
     while the file they stand in for has drifted."""
@@ -765,15 +859,14 @@ class TestAgainstRealSource(unittest.TestCase):
                     f"{t['name']} declares no ops and is not in TOOLS_WITHOUT_OPS",
                 )
 
-    def test_a_real_tool_calls_more_than_one_operation(self):
-        """The premise of the whole exercise: tools are not operations. If this
-        ever stops holding, the unit decision in docs/coverage-unit.md should be
-        revisited — but silently reverting to "tool count == operation count" is
-        not the way to find out."""
+    def test_every_real_tool_calls_at_most_one_operation(self):
+        """R2.25 (ENG-17742): a tool is named for the one operation it calls, so
+        none may declare two. The tool/operation counts still differ: the
+        deprecated aliases share their target's operation at runtime, and
+        TOOLS_WITHOUT_OPS names a tool that calls none."""
         multi = [t["name"] for t in self.tools if len(t["declared"]) > 1]
-        self.assertTrue(
-            multi, "no tool declares multiple operations; re-check the unit decision"
-        )
+        self.assertEqual(multi, [])
+        self.assertTrue(any(not t["declared"] for t in self.tools))
 
     def test_real_declarations_match_the_real_handlers(self):
         self.assertEqual(_quiet(csd.check_declarations_vs_code, self.tools), 0)

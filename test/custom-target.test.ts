@@ -25,7 +25,7 @@ import {
   MAX_TARGET_LABEL_LENGTH,
   validateTargetLabel,
 } from "../src/networks.js";
-import { findTool, tools } from "../src/tools/index.js";
+import { DEPRECATED_ALIASES, findTool, tools } from "../src/tools/index.js";
 
 /** Build an env with nothing inherited from the real process. */
 const env = (over: Record<string, string> = {}) =>
@@ -118,7 +118,7 @@ test("the custom bundle drives transport the same way a network does", () => {
 test("a custom stage can declare the bare-origin gateway shape", () => {
   // A private indexer serves the legacy routes at its root — the `local` shape.
   // Without this the gateway prefix is appended unconditionally, which 404s every
-  // legacy route and hands `get_ws_token` a ws_endpoint nothing listens on.
+  // legacy route and hands `create_ws_token` a ws_endpoint nothing listens on.
   const cfg = loadConfig(env({ ...BUNDLE, NEXUS_EXCHANGE_GATEWAY_PATH: "/" }));
   assert.equal(cfg.target?.gatewayPath, "");
   assert.equal(cfg.gatewayBaseUrl, HOST);
@@ -478,12 +478,12 @@ function clientFor(over: Record<string, string>): ExchangeClient {
  * classifying it shows up here as a reviewable diff rather than as silence.
  */
 const GUARDED = {
-  place_order: "declared-funds",
-  place_orders_batch: "declared-funds",
-  amend_order: "declared-funds",
-  deposit_collateral: "declared-funds",
-  submit_deposit: "declared-funds",
-  adjust_isolated_margin: "declared-funds",
+  create_order: "declared-funds",
+  create_orders: "declared-funds",
+  edit_order: "declared-funds",
+  deposit: "declared-funds",
+  create_deposit: "declared-funds",
+  add_margin: "declared-funds",
   create_bridge_deposit_address: "declared-funds",
   register_bridge_wallet: "declared-funds",
   claim_credit: "play-funds",
@@ -491,8 +491,12 @@ const GUARDED = {
 } as const;
 
 test("the guarded set is exactly the tools that move value", () => {
+  // Canonical names only: a deprecated alias shares its target's guarded
+  // handler, which test/tools.test.ts asserts alias by alias.
   const declared = Object.fromEntries(
-    tools.filter((t) => t.fundsGuard).map((t) => [t.name, t.fundsGuard]),
+    tools
+      .filter((t) => t.fundsGuard && !Object.hasOwn(DEPRECATED_ALIASES, t.name))
+      .map((t) => [t.name, t.fundsGuard]),
   );
   assert.deepEqual(declared, GUARDED);
 });
@@ -528,7 +532,7 @@ test("a config with no target at all fails closed the same way", async () => {
     apiSecret: "00",
   });
   await assert.rejects(
-    () => findTool("place_order")!.handler(client, {}) as Promise<unknown>,
+    () => findTool("create_order")!.handler(client, {}) as Promise<unknown>,
     FundsGuardError,
   );
   assert.equal(client.target(), undefined);
@@ -605,7 +609,7 @@ test("a named network keeps working unguarded-as-before, mainnet included", () =
     NEXUS_EXCHANGE_API_URL: HOST,
   });
   assert.doesNotThrow(() =>
-    mainnet.assertFundsAllow("declared-funds", "place_order"),
+    mainnet.assertFundsAllow("declared-funds", "create_order"),
   );
   assert.throws(
     () => mainnet.assertFundsAllow("play-funds", "claim_faucet"),
@@ -619,9 +623,9 @@ test("reads and cancels are never funds-guarded", async () => {
   for (const name of [
     "cancel_order",
     "preview_order",
-    "list_markets",
-    "get_positions",
-    "get_open_orders",
+    "fetch_markets_summary",
+    "fetch_positions",
+    "fetch_open_orders",
     "set_cancel_on_disconnect",
   ]) {
     assert.equal(findTool(name)?.fundsGuard, undefined, name);
@@ -654,7 +658,7 @@ test("the guard is wired into the tool objects themselves, and frozen there", as
   // read from this array, so a replaced slot would hand back an unguarded
   // definition even though every object in it is frozen.
   assert.ok(Object.isFrozen(tools));
-  const guarded = findTool("place_order")!;
+  const guarded = findTool("create_order")!;
   try {
     (guarded as { handler: unknown }).handler = async () => "bypassed";
   } catch {
@@ -677,7 +681,7 @@ test("a guard refusal rejects, it does not throw synchronously", () => {
     directBaseUrl: HOST,
     gatewayBaseUrl: HOST,
   });
-  const returned = findTool("place_order")!.handler(client, {});
+  const returned = findTool("create_order")!.handler(client, {});
   assert.ok(returned instanceof Promise);
   return assert.rejects(() => returned, FundsGuardError);
 });

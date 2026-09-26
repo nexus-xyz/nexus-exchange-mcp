@@ -56,7 +56,7 @@ export interface ExchangeConfig {
   /**
    * Legacy gateway proxy base (`${origin}/api/exchange`), used only by the
    * tools that do NOT have an `/api/v1` route: demo reads, market specs,
-   * get_order (GET by id), withdrawals, adl-history/events, ws-tokens, agents,
+   * fetch_order (GET by id), withdrawals, adl-history/events, ws-tokens, agents,
    * api-key management, admin tiers, deposit, funding-payments, health. The
    * gateway stays live dual-stack (ENG-4751) so these keep working.
    *
@@ -90,7 +90,7 @@ export interface ExchangeConfig {
    */
   adminSecret?: string;
   /**
-   * Whether to register the admin tier-management tools (`list_tiers`,
+   * Whether to register the admin tier-management tools (`fetch_tiers`,
    * `set_tier`, `delete_tier`). Off by default: these use the operator-level
    * admin secret and mutate other accounts' fee tiers, so they must not be
    * exposed to a general trading agent. Set
@@ -417,7 +417,7 @@ function resolveDeclaredFunds(raw: string): DeclaredFunds {
  * gateway convention, and `/` for a bare indexer that serves at its root — the
  * `local` shape, and the one a private stage is most likely to be. Since
  * ENG-6221 this places BOTH surfaces, not only the legacy routes, so getting it
- * wrong 404s every tool and hands `get_ws_token` a `ws_endpoint` nothing listens
+ * wrong 404s every tool and hands `create_ws_token` a `ws_endpoint` nothing listens
  * on. It is a declared value, never a guess.
  *
  * The bare-origin shape is spelled `/` rather than the empty string on purpose:

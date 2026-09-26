@@ -9,11 +9,11 @@
 // assumes the public-gateway one (ENG-6221).
 //
 // Why the split: an MCP tool is request/response — it cannot hold a socket
-// open. So the server's `get_ws_token` tool mints the single-use 60s token,
+// open. So the server's `create_ws_token` tool mints the single-use 60s token,
 // and the CALLER connects to `wss://host/ws?token=...` directly. This script
 // plays both roles: MCP client for the mint, WebSocket client for the stream.
 //
-//   get_ws_token  -> POST /ws/token (MCP tool, HMAC-signed)
+//   create_ws_token  -> POST /ws/token (MCP tool, HMAC-signed)
 //   /ws           -> subscribe to public trades + private fills channels
 //
 // Requires Node >= 22 for the global WebSocket client.
@@ -69,7 +69,7 @@ async function main() {
 
   let token;
   try {
-    const minted = await callJson(client, "get_ws_token");
+    const minted = await callJson(client, "create_ws_token");
     token = minted.token ?? minted.ws_token;
     if (!token)
       throw new Error(`no token in response: ${JSON.stringify(minted)}`);

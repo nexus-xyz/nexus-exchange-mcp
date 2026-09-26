@@ -21,14 +21,14 @@
 //
 //   1. claim_credit          -> fund the account with synthetic testnet USDX
 //                               (falls back to claim_faucet on cooldown)
-//   2. get_balance           -> confirm collateral landed
-//   3. get_market_risk_params-> check leverage/margin rules before sizing
+//   2. fetch_balance           -> confirm collateral landed
+//   3. fetch_market_risk_params-> check leverage/margin rules before sizing
 //   4. preview_order         -> project margin/fee impact; abort if unhappy
-//   5. place_order           -> tiny IOC market buy (opens the position)
-//   6. get_positions         -> observe the live position + unrealized PnL
-//   7. place_order           -> reduce_only market sell (closes it flat)
-//   8. get_closed_positions  -> read the realized PnL of the round trip
-//   9. get_fills             -> the execution trail an agent would log
+//   5. create_order           -> tiny IOC market buy (opens the position)
+//   6. fetch_positions         -> observe the live position + unrealized PnL
+//   7. create_order           -> reduce_only market sell (closes it flat)
+//   8. fetch_positions_history  -> read the realized PnL of the round trip
+//   9. fetch_my_trades             -> the execution trail an agent would log
 //
 // Everything is sized tiny (default 0.001) and closed before exit; worst case
 // on error is a 0.001-sized testnet position you close by rerunning step 7.
@@ -96,11 +96,11 @@ async function main() {
     }
 
     // 2. Confirm the collateral landed.
-    const balance = await callJson(client, "get_balance");
+    const balance = await callJson(client, "fetch_balance");
     console.log(`2. balance: ${JSON.stringify(balance).slice(0, 200)}`);
 
     // 3. Know the rules before sizing: margin requirements and max leverage.
-    const risk = await callJson(client, "get_market_risk_params", {
+    const risk = await callJson(client, "fetch_market_risk_params", {
       market_id: MARKET,
     });
     console.log(
@@ -119,7 +119,7 @@ async function main() {
 
     // 5. Enter: tiny market buy. IOC is the market-order default: fill what
     //    crosses, cancel the rest — nothing rests on the book.
-    const entry = await callJson(client, "place_order", {
+    const entry = await callJson(client, "create_order", {
       market_id: MARKET,
       side: "buy",
       type: "market",
@@ -129,7 +129,7 @@ async function main() {
     console.log(`5. entry order: ${JSON.stringify(entry).slice(0, 250)}`);
 
     // 6. Observe the position the fill produced.
-    const positions = await callJson(client, "get_positions");
+    const positions = await callJson(client, "fetch_positions");
     const pos = (Array.isArray(positions) ? positions : []).find(
       (p) => (p.market_id ?? p.market) === MARKET,
     );
@@ -139,7 +139,7 @@ async function main() {
 
     // 7. Exit flat: reduce_only guarantees this can only shrink the position,
     //    never flip it short — the right way for an agent to close.
-    const exit = await callJson(client, "place_order", {
+    const exit = await callJson(client, "create_order", {
       market_id: MARKET,
       side: "sell",
       type: "market",
@@ -150,11 +150,13 @@ async function main() {
     console.log(`7. exit order: ${JSON.stringify(exit).slice(0, 250)}`);
 
     // 8. The scoreboard: realized PnL of the round trip.
-    const closed = await callJson(client, "get_closed_positions", { limit: 1 });
+    const closed = await callJson(client, "fetch_positions_history", {
+      limit: 1,
+    });
     console.log(`8. closed position: ${JSON.stringify(closed).slice(0, 250)}`);
 
     // 9. The audit trail: the fills behind both orders.
-    const fills = await callJson(client, "get_fills", { limit: 4 });
+    const fills = await callJson(client, "fetch_my_trades", { limit: 4 });
     console.log(`9. recent fills: ${JSON.stringify(fills).slice(0, 300)}`);
 
     console.log(

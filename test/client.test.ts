@@ -245,8 +245,8 @@ test("the undeclared-surface guard runs before credentials and before signing", 
   assert.equal(fetched, 0, "an undeclared surface never reaches the network");
 });
 
-test("place_order maps friendly args to the engine wire shape", async () => {
-  const tool = findTool("place_order")!;
+test("create_order maps friendly args to the engine wire shape", async () => {
+  const tool = findTool("create_order")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
     gatewayBaseUrl: "http://example.test",
@@ -283,8 +283,7 @@ test("place_order maps friendly args to the engine wire shape", async () => {
   });
 });
 
-test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
-  const tool = findTool("cancel_order")!;
+test("cancel_order and cancel_all_orders build their own URLs", async () => {
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
     gatewayBaseUrl: "http://example.test",
@@ -300,28 +299,53 @@ test("cancel_order builds the single-cancel and cancel-all URLs", async () => {
   }) as typeof fetch;
   try {
     // (a) single cancel: /orders/<encoded id>?market_id=... — id is encoded.
-    await tool.handler(client, {
+    await findTool("cancel_order")!.handler(client, {
       order_id: "abc/123",
       market_id: "BTC-USDX-PERP",
     });
-    // (b) explicit mass-cancel: /orders with no id and no query.
-    await tool.handler(client, { cancel_all: true });
+    // (b) confirmed mass-cancel: /orders with no id and no query.
+    await findTool("cancel_all_orders")!.handler(client, { confirm: true });
+    // (c) mass-cancel scoped to one market.
+    await findTool("cancel_all_orders")!.handler(client, {
+      confirm: true,
+      market_id: "BTC-USDX-PERP",
+    });
   } finally {
     globalThis.fetch = realFetch;
   }
 
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].method, "DELETE");
-  assert.equal(
-    calls[0].url,
-    "http://example.test/api/v1/orders/abc%2F123?market_id=BTC-USDX-PERP",
-  );
-  assert.equal(calls[1].method, "DELETE");
-  assert.equal(calls[1].url, "http://example.test/api/v1/orders");
+  assert.deepEqual(calls, [
+    {
+      method: "DELETE",
+      url: "http://example.test/api/v1/orders/abc%2F123?market_id=BTC-USDX-PERP",
+    },
+    { method: "DELETE", url: "http://example.test/api/v1/orders" },
+    {
+      method: "DELETE",
+      url: "http://example.test/api/v1/orders?market_id=BTC-USDX-PERP",
+    },
+  ]);
 });
 
-test("cancel_order refuses to mass-cancel without an explicit cancel_all flag", async () => {
+test("cancel_order can never reach the account-wide DELETE /orders", () => {
+  // ENG-17742: a tool named for one order must not cancel everything. The old
+  // `cancel_all` mode is gone from its schema, and an order_id is required.
   const tool = findTool("cancel_order")!;
+  assert.deepEqual(tool.ops, ["DELETE /api/v1/orders/{order_id}"]);
+  assert.equal(tool.zod.safeParse({ cancel_all: true }).success, false);
+  assert.equal(
+    tool.zod.safeParse({ market_id: "BTC-USDX-PERP", cancel_all: true })
+      .success,
+    false,
+  );
+  assert.equal(
+    tool.zod.safeParse({ market_id: "BTC-USDX-PERP" }).success,
+    false,
+  );
+});
+
+test("cancel_all_orders refuses to mass-cancel without confirm: true", async () => {
+  const tool = findTool("cancel_all_orders")!;
   const client = new ExchangeClient({
     directBaseUrl: "http://example.test",
     gatewayBaseUrl: "http://example.test",
@@ -337,63 +361,17 @@ test("cancel_order refuses to mass-cancel without an explicit cancel_all flag", 
   }) as typeof fetch;
   try {
     // Argless call must throw, not mass-cancel.
+    await assert.rejects(async () => tool.handler(client, {}), /confirm: true/);
+    // confirm: false is equally rejected, scoped or not.
     await assert.rejects(
-      async () => tool.handler(client, {}),
-      /cancel_all: true/,
-    );
-    // cancel_all: false is equally rejected.
-    await assert.rejects(
-      async () => tool.handler(client, { cancel_all: false }),
-      /cancel_all: true/,
+      async () =>
+        tool.handler(client, { confirm: false, market_id: "BTC-USDX-PERP" }),
+      /confirm: true/,
     );
   } finally {
     globalThis.fetch = realFetch;
   }
   assert.equal(fetchCalled, false, "no request should be sent");
-});
-
-test("cancel_order: order_id wins the tie-break when cancel_all is also true", async () => {
-  // Tie-break safety: if both `order_id` and `cancel_all: true` are passed, the
-  // narrower, less destructive action wins — we cancel only the named order and
-  // ignore cancel_all. The guard must never escalate an ambiguous request into a
-  // mass-cancel. This matches the tool description ("ignored when `order_id` is
-  // given").
-  const tool = findTool("cancel_order")!;
-  const client = new ExchangeClient({
-    directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test",
-    apiKey: "nx_test",
-    apiSecret: "00",
-  });
-
-  const calls: Array<{ url: string; method: string }> = [];
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (url: string, init: RequestInit) => {
-    calls.push({ url, method: init.method as string });
-    return new Response("{}", { status: 200 });
-  }) as typeof fetch;
-  try {
-    await tool.handler(client, {
-      order_id: "abc/123",
-      market_id: "BTC-USDX-PERP",
-      cancel_all: true,
-    });
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, "DELETE");
-  // Single-cancel URL for the named order — NOT the mass-cancel `/orders`.
-  assert.equal(
-    calls[0].url,
-    "http://example.test/api/v1/orders/abc%2F123?market_id=BTC-USDX-PERP",
-  );
-  assert.notEqual(
-    calls[0].url,
-    "http://example.test/api/v1/orders",
-    "must not fall through to mass-cancel",
-  );
 });
 
 test("sanitizeErrorBody bounds length and redacts secret-looking tokens", () => {
@@ -443,7 +421,7 @@ test("ExchangeApiError carries the sanitized, bounded body", async () => {
 });
 
 test("limit order without price is rejected by schema", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   const parsed = tool.zod.safeParse({
     market_id: "BTC-USDX-PERP",
     side: "buy",
@@ -487,7 +465,7 @@ async function captureCalls(
 
 test("public market-data tools hit the right unsigned paths with query params", async () => {
   const candles = await captureCalls((c) =>
-    findTool("get_candles")!.handler(c, {
+    findTool("fetch_ohlcv")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       timeframe: "5m",
       limit: 100,
@@ -501,7 +479,7 @@ test("public market-data tools hit the right unsigned paths with query params", 
   );
 
   const trades = await captureCalls((c) =>
-    findTool("get_trades")!.handler(c, { market_id: "ETH-USDX-PERP" }),
+    findTool("fetch_trades")!.handler(c, { market_id: "ETH-USDX-PERP" }),
   );
   // No limit -> no query string.
   assert.equal(
@@ -510,7 +488,7 @@ test("public market-data tools hit the right unsigned paths with query params", 
   );
 
   const funding = await captureCalls((c) =>
-    findTool("get_funding_history")!.handler(c, {
+    findTool("fetch_funding_rate_history")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       limit: 5,
     }),
@@ -521,7 +499,7 @@ test("public market-data tools hit the right unsigned paths with query params", 
   );
 
   const mark = await captureCalls((c) =>
-    findTool("get_mark_price")!.handler(c, { market_id: "BTC-USDX-PERP" }),
+    findTool("fetch_mark_price")!.handler(c, { market_id: "BTC-USDX-PERP" }),
   );
   assert.equal(
     mark[0].url,
@@ -529,15 +507,15 @@ test("public market-data tools hit the right unsigned paths with query params", 
   );
 });
 
-test("get_order and get_adl_history encode path segments and forward limit", async () => {
+test("fetch_order and fetch_adl_history encode path segments and forward limit", async () => {
   const order = await captureCalls((c) =>
-    findTool("get_order")!.handler(c, { order_id: "abc/123" }),
+    findTool("fetch_order")!.handler(c, { order_id: "abc/123" }),
   );
   assert.equal(order[0].method, "GET");
   assert.equal(order[0].url, "http://example.test/orders/abc%2F123");
 
   const adl = await captureCalls((c) =>
-    findTool("get_adl_history")!.handler(c, { address: "0xABC", limit: 10 }),
+    findTool("fetch_adl_history")!.handler(c, { address: "0xABC", limit: 10 }),
   );
   assert.equal(
     adl[0].url,
@@ -545,11 +523,11 @@ test("get_order and get_adl_history encode path segments and forward limit", asy
   );
 });
 
-test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", async () => {
+test("fetch_my_trades / fetch_withdrawals / fetch_rate_limit_status sign their requests", async () => {
   for (const name of [
-    "get_fills",
-    "get_withdrawals",
-    "get_rate_limit_status",
+    "fetch_my_trades",
+    "fetch_withdrawals",
+    "fetch_rate_limit_status",
   ]) {
     const client = new ExchangeClient({
       directBaseUrl: "http://example.test",
@@ -563,9 +541,9 @@ test("get_fills / get_withdrawals / get_rate_limit_status sign their requests", 
   }
 });
 
-test("get_ws_token POSTs to /ws/token and is signed", async () => {
+test("create_ws_token POSTs to /ws/token and is signed", async () => {
   const calls = await captureCalls((c) =>
-    findTool("get_ws_token")!.handler(c, {}),
+    findTool("create_ws_token")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url, "http://example.test/ws/token");
@@ -575,14 +553,14 @@ test("get_ws_token POSTs to /ws/token and is signed", async () => {
     gatewayBaseUrl: "http://example.test",
   });
   await assert.rejects(
-    () => findTool("get_ws_token")!.handler(client, {}) as Promise<unknown>,
+    () => findTool("create_ws_token")!.handler(client, {}) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
 
-test("get_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
+test("create_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
   const calls = await captureCalls((c) =>
-    findTool("get_ws_token_legacy")!.handler(c, {}),
+    findTool("create_ws_token_legacy")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url, "http://example.test/ws-tokens");
@@ -593,20 +571,23 @@ test("get_ws_token_legacy POSTs to /ws-tokens and is signed", async () => {
   });
   await assert.rejects(
     () =>
-      findTool("get_ws_token_legacy")!.handler(client, {}) as Promise<unknown>,
+      findTool("create_ws_token_legacy")!.handler(
+        client,
+        {},
+      ) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
 
-test("get_funding_payments builds filtered and unfiltered signed URLs", async () => {
+test("fetch_funding_history builds filtered and unfiltered signed URLs", async () => {
   // Spec route is GET /funding (fetchAccountFunding) — the old
   // /funding-payments path never existed server-side.
   const calls = await captureCalls(async (c) => {
-    await findTool("get_funding_payments")!.handler(c, {
+    await findTool("fetch_funding_history")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       limit: 25,
     });
-    await findTool("get_funding_payments")!.handler(c, {});
+    await findTool("fetch_funding_history")!.handler(c, {});
   });
 
   assert.equal(
@@ -621,14 +602,17 @@ test("get_funding_payments builds filtered and unfiltered signed URLs", async ()
   });
   await assert.rejects(
     () =>
-      findTool("get_funding_payments")!.handler(client, {}) as Promise<unknown>,
+      findTool("fetch_funding_history")!.handler(
+        client,
+        {},
+      ) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
 
-test("place_orders_batch maps each order to the engine wire shape", async () => {
+test("create_orders maps each order to the engine wire shape", async () => {
   const calls = await captureCalls((c) =>
-    findTool("place_orders_batch")!.handler(c, {
+    findTool("create_orders")!.handler(c, {
       orders: [
         {
           market_id: "BTC-USDX-PERP",
@@ -667,8 +651,8 @@ test("place_orders_batch maps each order to the engine wire shape", async () => 
   ]);
 });
 
-test("place_orders_batch rejects an empty list and limit orders missing price", () => {
-  const tool = findTool("place_orders_batch")!;
+test("create_orders rejects an empty list and limit orders missing price", () => {
+  const tool = findTool("create_orders")!;
   assert.equal(tool.zod.safeParse({ orders: [] }).success, false);
   assert.equal(
     tool.zod.safeParse({
@@ -681,7 +665,7 @@ test("place_orders_batch rejects an empty list and limit orders missing price", 
 });
 
 test("order schema rejects non-positive / non-decimal size", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   const base = {
     market_id: "BTC-USDX-PERP",
     side: "buy",
@@ -706,7 +690,7 @@ test("order schema rejects non-positive / non-decimal size", () => {
 });
 
 test("order schema rejects non-positive / non-decimal price", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   const base = {
     market_id: "BTC-USDX-PERP",
     side: "buy",
@@ -723,8 +707,8 @@ test("order schema rejects non-positive / non-decimal price", () => {
   assert.equal(tool.zod.safeParse({ ...base, price: "60000" }).success, true);
 });
 
-test("place_orders_batch enforces the max-length bound", () => {
-  const tool = findTool("place_orders_batch")!;
+test("create_orders enforces the max-length bound", () => {
+  const tool = findTool("create_orders")!;
   const order = {
     market_id: "BTC-USDX-PERP",
     side: "buy",
@@ -1081,31 +1065,14 @@ test("client routes surface to the right base and signs the exact path sent", as
   assert.equal(calls[0].sig, expectedV1, "v1 request signs the prefixed path");
 });
 
-test("cancel_order requires market_id when cancelling a single order", async () => {
+test("cancel_order requires order_id and market_id", () => {
   const tool = findTool("cancel_order")!;
-  const client = new ExchangeClient({
-    directBaseUrl: "http://example.test",
-    gatewayBaseUrl: "http://example.test",
-    apiKey: "nx_test",
-    apiSecret: "00",
-  });
-
-  let fetchCalled = false;
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    fetchCalled = true;
-    return new Response("{}", { status: 200 });
-  }) as typeof fetch;
-  try {
-    // order_id without market_id must fail fast, before any request.
-    await assert.rejects(
-      async () => tool.handler(client, { order_id: "abc123" }),
-      /market_id/,
-    );
-  } finally {
-    globalThis.fetch = realFetch;
-  }
-  assert.equal(fetchCalled, false, "no request should be sent");
+  assert.equal(tool.zod.safeParse({ order_id: "abc123" }).success, false);
+  assert.equal(
+    tool.zod.safeParse({ order_id: "abc123", market_id: "BTC-USDX-PERP" })
+      .success,
+    true,
+  );
 });
 
 /**

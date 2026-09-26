@@ -101,7 +101,7 @@ test("Streamable HTTP: a public tool call reaches the gateway and returns its re
   const { client, close } = await withHttpServer({});
   try {
     const res = (await client.callTool({
-      name: "list_markets",
+      name: "fetch_markets_summary",
       arguments: {},
     })) as { isError?: boolean; content: Array<{ text?: string }> };
 
@@ -149,7 +149,7 @@ test("Streamable HTTP: per-session credential headers sign the upstream request"
   try {
     // A signed (auth-required) tool: the session must forward an HMAC built
     // from the credential the caller passed in headers at initialize.
-    await client.callTool({ name: "get_balance", arguments: {} });
+    await client.callTool({ name: "fetch_balance", arguments: {} });
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "http://gateway.test/api/v1/account");
@@ -158,7 +158,7 @@ test("Streamable HTTP: per-session credential headers sign the upstream request"
     const sig = calls[0].headers.get("x-signature")!;
     assert.ok(ts, "timestamp header present");
 
-    // Recompute the canonical signature the indexer would verify. get_balance
+    // Recompute the canonical signature the indexer would verify. fetch_balance
     // targets the /api/v1 surface, so the signed path carries the prefix.
     const canonical = [
       ts,
@@ -249,7 +249,7 @@ test("Streamable HTTP: a header-less session is refused on authed tools even wit
   const { client, close } = await withHttpServer({}, ENV_CREDS);
   try {
     const res = (await client.callTool({
-      name: "get_balance",
+      name: "fetch_balance",
       arguments: {},
     })) as { isError?: boolean; content: Array<{ text?: string }> };
     assert.equal(res.isError, true);
@@ -263,7 +263,7 @@ test("Streamable HTTP: a header-less session is refused on authed tools even wit
 
     // A public tool still works, and carries no server credential upstream.
     const pub = (await client.callTool({
-      name: "list_markets",
+      name: "fetch_markets_summary",
       arguments: {},
     })) as { isError?: boolean };
     assert.notEqual(pub.isError, true);
@@ -284,7 +284,7 @@ test("Streamable HTTP: only one credential header is refused like none", async (
   );
   try {
     const res = (await client.callTool({
-      name: "get_balance",
+      name: "fetch_balance",
       arguments: {},
     })) as { isError?: boolean };
     assert.equal(res.isError, true);
@@ -435,8 +435,8 @@ test("the API secret never appears in log output", async () => {
       [API_SECRET_HEADER]: secretHex,
     });
     try {
-      await client.callTool({ name: "get_balance", arguments: {} });
-      await client.callTool({ name: "list_markets", arguments: {} });
+      await client.callTool({ name: "fetch_balance", arguments: {} });
+      await client.callTool({ name: "fetch_markets_summary", arguments: {} });
     } finally {
       await close();
     }

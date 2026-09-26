@@ -58,7 +58,7 @@ the environment by the server itself; see [`.env.example`](../.env.example).
 
 A minimal standalone MCP client. It spawns the built server over stdio — the
 same way a real MCP client launches it — connects, lists the available tools,
-and calls `list_markets`, printing the results.
+and calls `fetch_markets_summary`, printing the results.
 
 ```bash
 npm run build

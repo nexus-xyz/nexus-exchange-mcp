@@ -21,12 +21,12 @@
 // rests without filling, and the script always cancels it at the end (also on
 // error). The only state left behind is an order-history entry.
 //
-//   get_mark_price  -> price the order safely off-market
+//   fetch_mark_price  -> price the order safely off-market
 //   preview_order   -> margin/fee impact BEFORE committing (nothing submitted)
-//   place_order     -> submit the resting bid (PostOnly: never takes)
-//   get_order       -> inspect it on the book
-//   amend_order     -> atomic cancel-replace: nudge price up 1%
-//   cancel_order    -> clean up (single-order cancel; never cancel_all)
+//   create_order     -> submit the resting bid (PostOnly: never takes)
+//   fetch_order       -> inspect it on the book
+//   edit_order     -> atomic cancel-replace: nudge price up 1%
+//   cancel_order    -> clean up (single-order cancel; never cancel_all_orders)
 //
 // Run `npm run build` first, then: node examples/trading-walkthrough.mjs
 
@@ -65,7 +65,7 @@ async function callJson(client, name, args = {}) {
 function pct(price, factorPct) {
   // Orders carry prices as decimal strings; keep 2dp which every USDX quote
   // market accepts. (A production agent would round to the market tick size
-  // from get_market_risk_params / list_market_specs.)
+  // from fetch_market_risk_params / fetch_markets.)
   return (Number(price) * (factorPct / 100)).toFixed(2);
 }
 
@@ -84,7 +84,7 @@ async function main() {
   let orderId;
   try {
     // 1. Price the order safely off-market: 20% below the current mark.
-    const mark = await callJson(client, "get_mark_price", {
+    const mark = await callJson(client, "fetch_mark_price", {
       market_id: MARKET,
     });
     const markPrice = mark.mark_price ?? mark.price ?? mark;
@@ -104,7 +104,7 @@ async function main() {
 
     // 3. Commit. PostOnly guarantees it can only rest as a maker — if it would
     //    cross the book, the engine rejects it instead of filling.
-    const placed = await callJson(client, "place_order", {
+    const placed = await callJson(client, "create_order", {
       market_id: MARKET,
       side: "buy",
       type: "limit",
@@ -116,16 +116,16 @@ async function main() {
     console.log(`\nplaced order ${orderId}`);
 
     // 4. Inspect it on the book.
-    const order = await callJson(client, "get_order", {
+    const order = await callJson(client, "fetch_order", {
       order_id: String(orderId),
       market_id: MARKET,
     });
-    console.log(`get_order: ${JSON.stringify(order).slice(0, 300)}`);
+    console.log(`fetch_order: ${JSON.stringify(order).slice(0, 300)}`);
 
     // 5. Amend: nudge the price up 1% (still far below mark) in one atomic
     //    cancel-replace. At least one of price/size is required.
     const newPrice = pct(bidPrice, 101);
-    const amended = await callJson(client, "amend_order", {
+    const amended = await callJson(client, "edit_order", {
       order_id: String(orderId),
       market_id: MARKET,
       price: newPrice,
@@ -135,7 +135,7 @@ async function main() {
     );
   } finally {
     // 6. Always clean up the resting order — including on error paths.
-    //    Note: single-order cancel. `cancel_all: true` exists but is the
+    //    Note: single-order cancel. `cancel_all_orders` exists but is the
     //    blast-radius option; never use it in a script that shares a key.
     if (orderId !== undefined) {
       try {

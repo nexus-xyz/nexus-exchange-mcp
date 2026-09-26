@@ -94,7 +94,7 @@ export interface NetworkDescriptor {
    * Per-network because deployment shapes are NOT uniform. It was `/api/exchange`
    * for the public gateway and `""` for a bare indexer serving at its root
    * (`local`); appending `/api/exchange` to the latter would 404 every call and
-   * hand `get_ws_token` a `ws_endpoint` nothing listens on, which is worse than
+   * hand `create_ws_token` a `ws_endpoint` nothing listens on, which is worse than
    * no endpoint at all.
    *
    * Since ENG-8869 the only non-empty value left is mainnet's, which is a
@@ -128,7 +128,7 @@ export interface NetworkDescriptor {
    * the public one.
    *
    * LIVE for every network with a {@link baseUrl}: `loadConfig` hands this
-   * string to `get_ws_token` as `ws_endpoint`'s base whenever a named network
+   * string to `create_ws_token` as `ws_endpoint`'s base whenever a named network
    * selects the target, so there is one place the socket URL is written and the
    * durable and derived values cannot disagree. An explicit
    * `NEXUS_EXCHANGE_API_URL` still derives its own (scheme-swapped gateway base).
@@ -230,7 +230,7 @@ export const NETWORKS: Readonly<Record<NetworkId, NetworkDescriptor>> =
       // `/indexer` routes too, but it is the prefix kept for existing
       // first-party consumers; `/v1` is the published one (spec `ws_url`,
       // nexus#12253). Both are stripped to `/` at the edge, so the socket lands
-      // on the same indexer, and the token `get_ws_token` mints on this host is
+      // on the same indexer, and the token `create_ws_token` mints on this host is
       // valid on it: `/ws/token` binds to the HOST, which both prefixes share.
       //
       // The REST base above is still `/indexer` — the spec's `rest_base` is

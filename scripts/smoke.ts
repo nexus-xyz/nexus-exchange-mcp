@@ -1,7 +1,7 @@
 /**
  * Manual smoke check: spawn the MCP server over stdio (in-process via the
  * SDK's InMemory transport pair), call tools/list, then tools/call
- * list_markets against the exchange target named by NEXUS_EXCHANGE_API_URL.
+ * fetch_markets_summary against the exchange target named by NEXUS_EXCHANGE_API_URL.
  * Prints the market count or the error.
  *
  * Run: NEXUS_EXCHANGE_API_URL=… npm run smoke   (uses tsx, no build needed)
@@ -110,10 +110,10 @@ export function containsMarkup(message: string): boolean {
 }
 
 /**
- * Validate that a `list_markets` result really is the API's market-summary
+ * Validate that a `fetch_markets_summary` result really is the API's market-summary
  * JSON: an array whose entries carry a `market_id` string.
  *
- * `list_markets` is not one of the cursor-paginated tools, so a bare array is
+ * `fetch_markets_summary` is not one of the cursor-paginated tools, so a bare array is
  * the expected shape. Anything else throws, including the empty string an
  * unexpected 204 would produce — a check that reports "OK" for a body it could
  * not parse is exactly the defect this replaces.
@@ -131,7 +131,7 @@ export function assertMarketPayload(body: string): unknown[] {
     parsed = JSON.parse(body);
   } catch {
     throw new SmokeResponseError(
-      `list_markets body is not JSON. First 120 bytes: ` +
+      `fetch_markets_summary body is not JSON. First 120 bytes: ` +
         `${JSON.stringify(body.slice(0, 120))}`,
     );
   }
@@ -149,7 +149,7 @@ export function assertMarketPayload(body: string): unknown[] {
   }
   if (!Array.isArray(parsed)) {
     throw new SmokeResponseError(
-      `list_markets returned ${describe(parsed)}, expected an array of market ` +
+      `fetch_markets_summary returned ${describe(parsed)}, expected an array of market ` +
         `summaries.`,
     );
   }
@@ -157,7 +157,7 @@ export function assertMarketPayload(body: string): unknown[] {
   // it passes; only a populated array's shape can be checked further.
   if (parsed.length > 0 && !isMarketSummary(parsed[0])) {
     throw new SmokeResponseError(
-      `list_markets returned an array whose first entry is not a market ` +
+      `fetch_markets_summary returned an array whose first entry is not a market ` +
         `summary (no string \`market_id\`): ` +
         `${JSON.stringify(parsed[0]).slice(0, 160)}`,
     );
@@ -199,12 +199,15 @@ async function main(): Promise<void> {
       `tools/list -> ${list.tools.length} tools: ${list.tools.map((t) => t.name).join(", ")}`,
     );
 
-    const res = await client.callTool({ name: "list_markets", arguments: {} });
+    const res = await client.callTool({
+      name: "fetch_markets_summary",
+      arguments: {},
+    });
     const content = res.content as Array<{ type: string; text?: string }>;
     const text = content[0]?.text ?? "";
 
     if (res.isError) {
-      console.error("list_markets FAILED:");
+      console.error("fetch_markets_summary FAILED:");
       if (looksLikeMarkup(text) || containsMarkup(text)) {
         console.error(
           `  the target answered with HTML, not JSON — ${BASE_URL_ENV} points ` +
@@ -220,13 +223,13 @@ async function main(): Promise<void> {
     try {
       markets = assertMarketPayload(text);
     } catch (err) {
-      console.error("list_markets FAILED:");
+      console.error("fetch_markets_summary FAILED:");
       console.error(`  ${(err as Error).message}`);
       process.exitCode = 1;
       return;
     }
 
-    console.error(`list_markets OK -> ${markets.length} markets`);
+    console.error(`fetch_markets_summary OK -> ${markets.length} markets`);
     console.error(text.slice(0, 600));
   } finally {
     await client.close();

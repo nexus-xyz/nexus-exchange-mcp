@@ -7,12 +7,12 @@
 // MCP client launches it — then walks the same tools an agent would use to
 // build a market picture:
 //
-//   list_markets            -> what's tradable + live summary
-//   get_ticker              -> best bid/ask for the most active market
-//   get_orderbook           -> depth snapshot
-//   get_funding_history     -> settled hourly funding rates
-//   get_market_risk_params  -> margin requirements / max leverage
-//   get_stats               -> venue-wide volume and trader counts
+//   fetch_markets_summary            -> what's tradable + live summary
+//   fetch_ticker              -> best bid/ask for the most active market
+//   fetch_order_book           -> depth snapshot
+//   fetch_funding_rate_history     -> settled hourly funding rates
+//   fetch_market_risk_params  -> margin requirements / max leverage
+//   fetch_stats               -> venue-wide volume and trader counts
 //
 // Run `npm run build` first, then: node examples/market-scan.mjs
 
@@ -47,7 +47,7 @@ async function main() {
 
   try {
     // 1. What's tradable, and how active is each market?
-    const markets = await callJson(client, "list_markets");
+    const markets = await callJson(client, "fetch_markets_summary");
     console.log(`Markets: ${markets.length}`);
     for (const m of markets) {
       console.log(
@@ -60,13 +60,13 @@ async function main() {
     console.log(`\nDeep dive: ${marketId}`);
 
     // 2. Top of book.
-    const ticker = await callJson(client, "get_ticker", {
+    const ticker = await callJson(client, "fetch_ticker", {
       market_id: marketId,
     });
     console.log(`  ticker: ${JSON.stringify(ticker).slice(0, 200)}`);
 
     // 3. Depth: how much size rests near the touch?
-    const book = await callJson(client, "get_orderbook", {
+    const book = await callJson(client, "fetch_order_book", {
       market_id: marketId,
     });
     console.log(
@@ -74,20 +74,20 @@ async function main() {
     );
 
     // 4. Funding: what does it cost to hold a position?
-    const funding = await callJson(client, "get_funding_history", {
+    const funding = await callJson(client, "fetch_funding_rate_history", {
       market_id: marketId,
       limit: 3,
     });
     console.log(`  last funding: ${JSON.stringify(funding).slice(0, 200)}`);
 
     // 5. Risk parameters: margin requirements and max leverage.
-    const risk = await callJson(client, "get_market_risk_params", {
+    const risk = await callJson(client, "fetch_market_risk_params", {
       market_id: marketId,
     });
     console.log(`  risk params: ${JSON.stringify(risk).slice(0, 200)}`);
 
     // 6. Venue-wide context: volume and rolling unique traders.
-    const stats = await callJson(client, "get_stats");
+    const stats = await callJson(client, "fetch_stats");
     console.log(`\nVenue stats: ${JSON.stringify(stats).slice(0, 300)}`);
   } finally {
     await client.close();

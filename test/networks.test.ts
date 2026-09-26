@@ -276,7 +276,7 @@ test("ws endpoints are the published /v1 socket base, not the bare host", () => 
   assert.equal(cfg.wsUrl, "wss://api.testnet.nexus.xyz/v1");
   assert.equal(cfg.wsAuthenticatedUrl, "wss://api.testnet.nexus.xyz/v1/ws");
   assert.equal(cfg.wsMarketDataUrl, "wss://api.testnet.nexus.xyz/v1/stream");
-  // The durable value and the one a config actually hands `get_ws_token` are
+  // The durable value and the one a config actually hands `create_ws_token` are
   // the same string by construction, so they cannot drift apart again.
   assert.equal(NETWORKS.testnet.durableWsUrl, cfg.wsUrl);
 
@@ -399,16 +399,16 @@ test("ws token tools return the endpoint the token is for", async () => {
     wsMarketDataUrl: () => "wss://h.example/api/exchange/stream",
   } as never;
 
-  const authed = (await findTool("get_ws_token").handler(stub, {})) as Record<
-    string,
-    unknown
-  >;
+  const authed = (await findTool("create_ws_token").handler(
+    stub,
+    {},
+  )) as Record<string, unknown>;
   assert.equal(authed.token, "tok_123");
   assert.equal(authed.ws_endpoint, "wss://h.example/api/exchange/ws");
   // The token must not be duplicated into the URL — one credential, one place.
   assert.ok(!String(authed.ws_endpoint).includes("tok_123"));
 
-  const legacy = (await findTool("get_ws_token_legacy").handler(
+  const legacy = (await findTool("create_ws_token_legacy").handler(
     stub,
     {},
   )) as Record<string, unknown>;
@@ -421,7 +421,7 @@ test("a non-object upstream payload is passed through unreshaped", async () => {
     wsAuthenticatedUrl: () => "wss://h.example/api/exchange/ws",
   } as never;
   const out = await tools
-    .find((t) => t.name === "get_ws_token")!
+    .find((t) => t.name === "create_ws_token")!
     .handler(stub, {});
   assert.equal(out, "plain-token-string");
 });
@@ -438,7 +438,7 @@ test("an upstream ws_endpoint wins over the locally derived one", async () => {
     wsAuthenticatedUrl: () => "wss://h.example/api/exchange/ws",
   } as never;
   const out = (await tools
-    .find((t) => t.name === "get_ws_token")!
+    .find((t) => t.name === "create_ws_token")!
     .handler(stub, {})) as Record<string, unknown>;
   assert.equal(out.ws_endpoint, "wss://upstream.example/ws");
   assert.ok(!("ws_endpoint_note" in out), "no note contradicting the upstream");

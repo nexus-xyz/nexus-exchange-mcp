@@ -70,7 +70,7 @@ in the top-level README.
 - Clock skew: the HMAC canonical string starts with a client timestamp; a
   machine clock minutes off will fail verification.
 - The key was deleted (`delete_api_key`) or the agent registration expired
-  (`list_agents` shows expiries).
+  (`fetch_agents` shows expiries).
 - On a **gatewayed** deployment the signature covers the _logical_ route
   (`/api/v1/orders`), not the wire path (`/api/exchange/api/v1/orders`) — the
   deployment's gateway path belongs to the base and is not signed over, so
@@ -83,11 +83,11 @@ in the top-level README.
 
 The gateway enforces per-account request budgets. Agents should:
 
-1. Call `get_rate_limit_status` and pace themselves against the remaining
+1. Call `fetch_rate_limit_status` and pace themselves against the remaining
    budget — it's cheap and HMAC-scoped to your key.
 2. Back off on 429 (the response is machine-readable JSON).
-3. Batch: one `place_orders_batch` call instead of N `place_order` calls;
-   `get_tickers` instead of N `get_ticker` calls.
+3. Batch: one `create_orders` call instead of N `create_order` calls;
+   `fetch_tickers` instead of N `fetch_ticker` calls.
 4. Prefer WebSocket streaming (see `ws-streaming.mjs`) over polling loops for
    anything faster than ~1 Hz.
 
@@ -113,12 +113,12 @@ the server's environment.
 ## WebSocket connects then immediately closes
 
 WS tokens are **single-use** and expire in **60 seconds**. Mint with
-`get_ws_token`, connect once, and mint a fresh token for every reconnect.
+`create_ws_token`, connect once, and mint a fresh token for every reconnect.
 Also check you're using the right protocol for the endpoint: `/ws` speaks
 `{op: "subscribe", channel: …}` envelopes; the legacy `/stream` takes a single
-`{"subscribe": [...]}` message (tokens for it come from `get_ws_token_legacy`).
+`{"subscribe": [...]}` message (tokens for it come from `create_ws_token_legacy`).
 
-## `place_order` / the deposit tools say the target "has not declared whose money is behind it"
+## `create_order` / the deposit tools say the target "has not declared whose money is behind it"
 
 You set `NEXUS_EXCHANGE_API_URL` and nothing else. A URL says where to send
 requests, not whether the balances there are real — so the tools that cannot be
@@ -141,17 +141,17 @@ If instead the message names a faucet, `claim_faucet` / `claim_credit` also need
 the stage to HAVE one — set `NEXUS_EXCHANGE_FAUCET=1`. "Not real money" does not
 imply a faucet exists, so it is assumed absent.
 
-## `cancel_order` refuses to run
+## `cancel_order` / `cancel_all_orders` refuse to run
 
-By design. An argless call could mean "cancel everything", so the tool makes
-destruction explicit: pass `order_id` + `market_id` to cancel one order, or
-`cancel_all: true` (optionally scoped by `market_id`) to mass-cancel. The same
-pattern guards `revoke_agent` / `delete_api_key` / `delete_tier`
-(`confirm: true`).
+By design. `cancel_order` cancels exactly one order and needs both `order_id`
+and `market_id`; it no longer has a `cancel_all` mode (ENG-17742). To
+mass-cancel, call `cancel_all_orders` with `confirm: true` (optionally scoped by
+`market_id`). The same `confirm: true` pattern guards `revoke_agent` /
+`delete_api_key` / `delete_tier`.
 
 ## Admin tools are missing from `tools/list`
 
-`list_tiers` / `set_tier` / `delete_tier` are registered only when
+`fetch_tiers` / `set_tier` / `delete_tier` are registered only when
 `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS=1` (plus `NEXUS_EXCHANGE_ADMIN_SECRET`).
 That's an opt-in, not a bug — never enable them on an agent surface you don't
 fully trust.

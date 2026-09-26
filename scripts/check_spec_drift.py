@@ -7,9 +7,9 @@ WHY THIS EXISTS (ENG-7964 / ENG-7788)
 Every other client surface answers "which spec operations do you implement?" from
 a machine-readable `endpoints.txt` validated in CI. MCP had neither the file nor
 the checker, and — worse — no defined *unit*: its natural unit is a registered
-tool, and a tool is not an operation. `cancel_order` calls two operations, and
-`get_deposit_target` calls none, so the registered-tool count and the covered-
-operation count are different numbers. They were being conflated: a status report
+tool, and a tool is not an operation. A deprecated alias calls the same
+operation as its canonical tool, and `get_deposit_target` calls none, so the
+registered-tool count and the covered-operation count are different numbers. They were being conflated: a status report
 recorded "mcp coverage 63/65 spec ops" when 63 was exactly the tool count.
 
 So this repo declares the mapping instead of counting by hand. Each `ToolDef` in
@@ -60,7 +60,7 @@ INVARIANTS
    public host carries `/api/exchange` and local development is the bare origin —
    so a checker that assumed one suffix for all of them is exactly how
    `NEXUS_EXCHANGE_NETWORK=local` came to derive `localhost:9090/api/exchange`,
-   404ing every legacy route and handing `get_ws_token` a `ws_endpoint` nothing
+   404ing every legacy route and handing `create_ws_token` a `ws_endpoint` nothing
    listens on. The map is hand-copied from the spec extension by design
    (networks.ts explains why), so this is the direction that keeps the copy
    honest. It lives here rather than in the TS unit tests because
@@ -70,6 +70,16 @@ INVARIANTS
    SPEC_LEADING_BASES with the ticket that removes it. That list is stale-checked
    in both directions: an entry whose base no longer matches stops excusing it,
    and an entry the spec has since caught up with fails until it is deleted.
+
+5. tool name == snake_case(operationId)
+   Each tool is named for the one spec operation it calls (R2.25, ENG-17742):
+   `snake_case` of its `operationId`, with the direct-indexer `V1` suffix dropped
+   (`fetchOrderBookV1` -> `fetch_order_book`). Tool names are what an agent picks
+   from, so a name that describes a different operation is a correctness bug. A
+   tool that calls no contract operation (TOOLS_WITHOUT_OPS, NON_SPEC_TARGETS) is
+   exempt; a tool that calls more than one fails, because it cannot carry both
+   names. Where the canonical operationId has not reached the pinned spec yet, it
+   comes from OPERATION_IDS_AHEAD_OF_PIN, stale-checked like SPEC_LEADING_BASES.
 
 ALLOWLISTS
 ----------
@@ -769,6 +779,121 @@ def check_network_gateway_bases(spec):
     return failures
 
 
+# R2.25 operationIds that lead the pinned spec (invariant 5).
+#
+# ENG-17740 (nexus#12766) renamed these operationIds in the monorepo spec so each
+# matches its `x-ccxt-method` and the verb grammar, but no published
+# nexus-exchange-api tag carries the rename yet, so the pinned spec still spells
+# them the old way. The tools are named for the canonical id now, and this map is
+# where the checker reads it from until the pin catches up.
+#
+# This is a NAME table, not an operation carve-out: every key is an operation
+# the pinned spec already defines (checked below), so it does not reopen the
+# CODE_ONLY_OPS door. Stale-checked in both directions: an entry the pinned spec
+# no longer defines, or whose pinned operationId now equals the value, fails until
+# it is deleted. So the spec-autobump PR that carries ENG-17740 empties this map.
+OPERATION_IDS_AHEAD_OF_PIN = {
+    ("GET", "/api/v1/account/fees"): "fetchTradingFeesV1",
+    ("POST", "/api/v1/account/credit"): "claimCreditV1",
+    ("POST", "/account/margin"): "addMargin",
+    ("GET", "/admin/tiers"): "fetchTiers",
+    ("GET", "/agents"): "fetchAgents",
+    ("GET", "/api/v1/bridge/assets"): "fetchBridgeAssets",
+    ("GET", "/api/v1/bridge/deposits"): "fetchBridgeDeposits",
+    ("GET", "/api/v1/bridge/deposits/{id}"): "fetchBridgeDeposit",
+    ("GET", "/api/v1/fills"): "fetchMyTradesV1",
+    ("GET", "/api/v1/markets/{market_id}/funding"): "fetchFundingRateHistoryV1",
+    ("POST", "/api/v1/orders/batch"): "createOrdersV1",
+    ("GET", "/api/v1/orders/history"): "fetchOrdersV1",
+    ("GET", "/api/v1/positions/closed"): "fetchPositionsHistoryV1",
+    ("GET", "/funding"): "fetchFundingHistory",
+    ("GET", "/keys"): "fetchApiKeys",
+}
+
+
+def tool_name_for(operation_id):
+    """snake_case an operationId the way R2.25 names MCP tools: drop the `V1`
+    suffix the spec gives the direct-indexer twin of an operation (the tool is
+    named for the operation, not the surface), and keep acronyms whole
+    (`fetchOHLCV` -> `fetch_ohlcv`, `createWsToken` -> `create_ws_token`)."""
+    s = re.sub(r"V1$", "", operation_id)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    return s.lower()
+
+
+def _pinned_operation_id(spec, op):
+    method, path = op
+    entry = spec.get("paths", {}).get(path, {}).get(method.lower())
+    return entry.get("operationId") if isinstance(entry, dict) else None
+
+
+def check_tool_names(tools, spec):
+    """Invariant 5: each tool's name is tool_name_for(operationId) of the one
+    contract operation it calls. Returns the number of errors printed."""
+    errors = 0
+    declared = {op for t in tools for op in t["declared"]}
+
+    for op, canonical in sorted(OPERATION_IDS_AHEAD_OF_PIN.items()):
+        pinned = _pinned_operation_id(spec, op)
+        why = None
+        if op not in declared:
+            why = "no tool declares this operation any more"
+        elif pinned is None:
+            why = "the pinned spec does not define this operation"
+        elif pinned == canonical:
+            why = "the pinned spec now carries this operationId (the pin caught up)"
+        if why:
+            errors += 1
+            print(
+                f"\nERROR: OPERATION_IDS_AHEAD_OF_PIN entry {op[0]} {op[1]} is "
+                f"stale: {why}. Delete it."
+            )
+
+    for t in tools:
+        if t["name"] in TOOLS_WITHOUT_OPS:
+            continue
+        ops = [o for o in t["declared"] if norm_op(o) not in NON_SPEC_TARGETS]
+        if not ops:
+            continue
+        if len(ops) > 1:
+            errors += 1
+            print(
+                f"\nERROR: tool {t['name']!r} calls {len(ops)} operations "
+                f"({', '.join(f'{m} {p}' for m, p in ops)}); a tool is named for "
+                f"ONE operation (R2.25), so split it."
+            )
+            continue
+        op = ops[0]
+        operation_id = OPERATION_IDS_AHEAD_OF_PIN.get(op) or _pinned_operation_id(
+            spec, op
+        )
+        if not operation_id:
+            errors += 1
+            print(
+                f"\nERROR: tool {t['name']!r} calls {op[0]} {op[1]}, which has no "
+                f"operationId in the pinned spec to name it after."
+            )
+            continue
+        want = tool_name_for(operation_id)
+        if t["name"] != want:
+            errors += 1
+            print(
+                f"\nERROR: tool {t['name']!r} calls {op[0]} {op[1]} "
+                f"(operationId {operation_id}), so it must be named {want!r}. "
+                f"Rename it and keep the old name in DEPRECATED_ALIASES "
+                f"(src/tools/index.ts) for one minor."
+            )
+
+    if not errors:
+        print(
+            f"\nOK: every tool is named snake_case(operationId) of the operation "
+            f"it calls ({len(OPERATION_IDS_AHEAD_OF_PIN)} operationId(s) read "
+            f"from OPERATION_IDS_AHEAD_OF_PIN until the pin catches up)."
+        )
+    return errors
+
+
 def spec_ops(spec):
     ops = set()
     for path, methods in spec.get("paths", {}).items():
@@ -794,8 +919,8 @@ MANIFEST_HEADER = """\
 # THE UNIT (read this before comparing the number to anything)
 #   MCP's own unit of work is a registered TOOL; this file counts spec
 #   OPERATIONS. They are different numbers and neither substitutes for the other:
-#   one tool can call several operations (`cancel_order` calls two), and one calls
-#   none. The operation count below is the figure that is comparable with the
+#   a deprecated alias calls the same operation as its canonical tool, and one
+#   tool calls none. The operation count below is the figure that is comparable with the
 #   rs / py / cli manifests. The tool count is not, and must never be reported as
 #   a coverage figure. See docs/coverage-unit.md.
 #
@@ -1173,6 +1298,7 @@ def main():
     failures += check_declarations_vs_code(tools)
     failures += check_allowlists(tools, available)
     failures += check_network_gateway_bases(spec)
+    failures += check_tool_names(tools, spec)
 
     report_coverage(tools, manifest, available, version)
 

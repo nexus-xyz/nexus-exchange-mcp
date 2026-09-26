@@ -25,7 +25,7 @@ config for running this server locally under Claude Desktop over stdio.
 3. Restart Claude Desktop. `nexus-exchange` appears in the tools list.
 
 4. Try it: ask _"Show me the BTC market on Nexus"_ — Claude calls
-   `list_markets` / `get_ticker` and reports the live BTC-USDX-PERP price.
+   `fetch_markets_summary` / `fetch_ticker` and reports the live BTC-USDX-PERP price.
    Or _"What's in the demo account?"_ — Claude calls `get_demo_account`
    with no credentials at all.
 

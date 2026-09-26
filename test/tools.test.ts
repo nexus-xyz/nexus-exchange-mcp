@@ -6,7 +6,12 @@ import {
   MissingCredentialsError,
   MissingSessionTokenError,
 } from "../src/client.js";
-import { findTool, tools, visibleTools } from "../src/tools/index.js";
+import {
+  DEPRECATED_ALIASES,
+  findTool,
+  tools,
+  visibleTools,
+} from "../src/tools/index.js";
 import type { ExchangeConfig } from "../src/config.js";
 import { defineTarget } from "../src/networks.js";
 
@@ -76,9 +81,9 @@ async function capture(
   return calls;
 }
 
-test("get_market_adl_events encodes market id and forwards limit, signed", async () => {
+test("fetch_adl_events encodes market id and forwards limit, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_market_adl_events")!.handler(c, {
+    findTool("fetch_adl_events")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       limit: 50,
     }),
@@ -95,16 +100,16 @@ test("get_market_adl_events encodes market id and forwards limit, signed", async
   });
   await assert.rejects(
     () =>
-      findTool("get_market_adl_events")!.handler(noCreds, {
+      findTool("fetch_adl_events")!.handler(noCreds, {
         market_id: "BTC-USDX-PERP",
       }) as Promise<unknown>,
     MissingCredentialsError,
   );
 });
 
-test("deposit_collateral POSTs {amount} to /account/deposit, signed", async () => {
+test("deposit POSTs {amount} to /account/deposit, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("deposit_collateral")!.handler(c, { amount: "1000" }),
+    findTool("deposit")!.handler(c, { amount: "1000" }),
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url, `${BASE}/account/deposit`);
@@ -112,8 +117,8 @@ test("deposit_collateral POSTs {amount} to /account/deposit, signed", async () =
   assert.ok(calls[0].headers.get("x-signature"));
 });
 
-test("deposit_collateral rejects non-positive amount", () => {
-  const tool = findTool("deposit_collateral")!;
+test("deposit rejects non-positive amount", () => {
+  const tool = findTool("deposit")!;
   for (const amount of ["0", "-1", "abc", ""]) {
     assert.equal(tool.zod.safeParse({ amount }).success, false, amount);
   }
@@ -134,9 +139,9 @@ test("claim_credit sends {amount} when given and {} when omitted", async () => {
   assert.deepEqual(full[0].body, {});
 });
 
-test("list_agents GETs /agents signed", async () => {
+test("fetch_agents GETs /agents signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("list_agents")!.handler(c, {}),
+    findTool("fetch_agents")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].url, `${BASE}/agents`);
@@ -230,9 +235,9 @@ test("login POSTs default message + signature, unsigned", async () => {
   });
 });
 
-test("list_api_keys / create_api_key use the Bearer session token", async () => {
+test("fetch_api_keys / create_api_key use the Bearer session token", async () => {
   const list = await capture(fullClient(), (c) =>
-    findTool("list_api_keys")!.handler(c, {}),
+    findTool("fetch_api_keys")!.handler(c, {}),
   );
   assert.equal(list[0].method, "GET");
   assert.equal(list[0].url, `${BASE}/keys`);
@@ -256,7 +261,8 @@ test("bearer tools without a session token throw MissingSessionTokenError", asyn
     apiSecret: "00",
   });
   await assert.rejects(
-    () => findTool("list_api_keys")!.handler(noSession, {}) as Promise<unknown>,
+    () =>
+      findTool("fetch_api_keys")!.handler(noSession, {}) as Promise<unknown>,
     MissingSessionTokenError,
   );
 });
@@ -283,7 +289,7 @@ test("admin tier tools use the admin Bearer secret and are gated off by default"
   assert.ok(on.includes("set_tier"), "admin tools visible when enabled");
 
   const list = await capture(fullClient(), (c) =>
-    findTool("list_tiers")!.handler(c, {}),
+    findTool("fetch_tiers")!.handler(c, {}),
   );
   assert.equal(list[0].url, `${BASE}/admin/tiers`);
   assert.equal(list[0].headers.get("authorization"), "Bearer admin_secret");
@@ -333,9 +339,9 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
 
 test("public stats / status tools hit the right unsigned paths", async () => {
   const cases: Array<[string, string]> = [
-    ["get_stats", `${BASE}/api/v1/stats`],
-    ["get_stats_history", `${BASE}/api/v1/stats/history`],
-    ["get_service_status", `${BASE}/status`],
+    ["fetch_stats", `${BASE}/api/v1/stats`],
+    ["fetch_stats_history", `${BASE}/api/v1/stats/history`],
+    ["fetch_status", `${BASE}/status`],
   ];
   for (const [name, url] of cases) {
     const calls = await capture(fullClient(), (c) =>
@@ -349,9 +355,9 @@ test("public stats / status tools hit the right unsigned paths", async () => {
   }
 });
 
-test("get_funding_samples encodes the market id and caps limit at 480", async () => {
+test("fetch_funding_samples encodes the market id and caps limit at 480", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_funding_samples")!.handler(c, {
+    findTool("fetch_funding_samples")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       limit: 120,
     }),
@@ -362,7 +368,7 @@ test("get_funding_samples encodes the market id and caps limit at 480", async ()
   );
   assert.equal(calls[0].headers.get("x-api-key"), null, "public");
 
-  const tool = findTool("get_funding_samples")!;
+  const tool = findTool("fetch_funding_samples")!;
   assert.equal(
     tool.zod.safeParse({ market_id: "X", limit: 481 }).success,
     false,
@@ -373,9 +379,9 @@ test("get_funding_samples encodes the market id and caps limit at 480", async ()
   );
 });
 
-test("get_market_risk_params GETs the legacy risk-params route unsigned", async () => {
+test("fetch_market_risk_params GETs the legacy risk-params route unsigned", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_market_risk_params")!.handler(c, {
+    findTool("fetch_market_risk_params")!.handler(c, {
       market_id: "ETH-USDX-PERP",
     }),
   );
@@ -386,22 +392,18 @@ test("get_market_risk_params GETs the legacy risk-params route unsigned", async 
 
 test("account summary / equity / closed positions / order history sign v1 GETs", async () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["get_account_summary", {}, `${BASE}/api/v1/account/summary`],
+    ["fetch_account_summary", {}, `${BASE}/api/v1/account/summary`],
     [
-      "get_equity_history",
+      "fetch_equity_history",
       { limit: 60 },
       `${BASE}/api/v1/account/equity-history?limit=60`,
     ],
     [
-      "get_closed_positions",
+      "fetch_positions_history",
       { limit: 10 },
       `${BASE}/api/v1/positions/closed?limit=10`,
     ],
-    [
-      "get_order_history",
-      { limit: 200 },
-      `${BASE}/api/v1/orders/history?limit=200`,
-    ],
+    ["fetch_orders", { limit: 200 }, `${BASE}/api/v1/orders/history?limit=200`],
   ];
   for (const [name, args, url] of cases) {
     const calls = await capture(fullClient(), (c) =>
@@ -436,19 +438,19 @@ test("account summary / equity / closed positions / order history sign v1 GETs",
  */
 test("history tools enforce the spec limit caps in their schemas", () => {
   const caps: Array<[string, number, Record<string, unknown>]> = [
-    ["get_equity_history", 720, {}],
-    ["get_closed_positions", 200, {}],
-    ["get_order_history", 500, {}],
-    ["list_deposits", 100, {}],
-    ["get_funding_payments", 1000, {}],
-    ["list_bridge_deposits", 100, {}],
-    ["get_withdrawals", 100, {}],
-    ["get_candles", 1000, { market_id: "BTC-USDX-PERP" }],
-    ["get_funding_samples", 480, { market_id: "BTC-USDX-PERP" }],
-    ["get_funding_history", 1000, { market_id: "BTC-USDX-PERP" }],
-    ["get_market_adl_events", 1000, { market_id: "BTC-USDX-PERP" }],
-    ["get_adl_history", 1000, { address: "0xabc" }],
-    ["get_portfolio_history", 366, {}],
+    ["fetch_equity_history", 720, {}],
+    ["fetch_positions_history", 200, {}],
+    ["fetch_orders", 500, {}],
+    ["fetch_deposits", 100, {}],
+    ["fetch_funding_history", 1000, {}],
+    ["fetch_bridge_deposits", 100, {}],
+    ["fetch_withdrawals", 100, {}],
+    ["fetch_ohlcv", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["fetch_funding_samples", 480, { market_id: "BTC-USDX-PERP" }],
+    ["fetch_funding_rate_history", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["fetch_adl_events", 1000, { market_id: "BTC-USDX-PERP" }],
+    ["fetch_adl_history", 1000, { address: "0xabc" }],
+    ["fetch_portfolio_history", 366, {}],
   ];
   for (const [name, cap, base] of caps) {
     const tool = findTool(name)!;
@@ -482,30 +484,30 @@ test("history tools enforce the spec limit caps in their schemas", () => {
  * checked against the cap it does NOT have, to catch a copy-paste fix.
  */
 test("limit caps are per-endpoint, not shared", () => {
-  // get_withdrawals is 100, not the 1000 its sibling legacy reads carry.
+  // fetch_withdrawals is 100, not the 1000 its sibling legacy reads carry.
   assert.equal(
-    findTool("get_withdrawals")!.zod.safeParse({ limit: 1000 }).success,
+    findTool("fetch_withdrawals")!.zod.safeParse({ limit: 1000 }).success,
     false,
   );
-  // get_funding_history is 1000, not get_funding_samples' 480.
+  // fetch_funding_rate_history is 1000, not fetch_funding_samples' 480.
   assert.equal(
-    findTool("get_funding_history")!.zod.safeParse({
+    findTool("fetch_funding_rate_history")!.zod.safeParse({
       market_id: "BTC-USDX-PERP",
       limit: 1000,
     }).success,
     true,
   );
   assert.equal(
-    findTool("get_funding_samples")!.zod.safeParse({
+    findTool("fetch_funding_samples")!.zod.safeParse({
       market_id: "BTC-USDX-PERP",
       limit: 1000,
     }).success,
     false,
   );
-  // get_adl_history is 1000, not get_market_adl_events' — both are 1000, so
+  // fetch_adl_history is 1000, not fetch_adl_events' — both are 1000, so
   // assert the shared value explicitly rather than assuming it transfers.
   assert.equal(
-    findTool("get_adl_history")!.zod.safeParse({
+    findTool("fetch_adl_history")!.zod.safeParse({
       address: "0xabc",
       limit: 1001,
     }).success,
@@ -521,9 +523,9 @@ test("limit caps are per-endpoint, not shared", () => {
  */
 test("limit descriptions state the cap the schema enforces", () => {
   for (const [name, cap] of [
-    ["get_withdrawals", 100],
-    ["get_funding_history", 1000],
-    ["get_adl_history", 1000],
+    ["fetch_withdrawals", 100],
+    ["fetch_funding_rate_history", 1000],
+    ["fetch_adl_history", 1000],
   ] as Array<[string, number]>) {
     const props = findTool(name)!.inputSchema.properties as Record<
       string,
@@ -537,9 +539,9 @@ test("limit descriptions state the cap the schema enforces", () => {
   }
 });
 
-test("amend_order PATCHes the v1 order route with market_id and a partial body", async () => {
+test("edit_order PATCHes the v1 order route with market_id and a partial body", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("amend_order")!.handler(c, {
+    findTool("edit_order")!.handler(c, {
       order_id: "abc/123",
       market_id: "BTC-USDX-PERP",
       price: "61000",
@@ -554,7 +556,7 @@ test("amend_order PATCHes the v1 order route with market_id and a partial body",
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 
   const both = await capture(fullClient(), (c) =>
-    findTool("amend_order")!.handler(c, {
+    findTool("edit_order")!.handler(c, {
       order_id: "o1",
       market_id: "BTC-USDX-PERP",
       price: "61000",
@@ -564,8 +566,8 @@ test("amend_order PATCHes the v1 order route with market_id and a partial body",
   assert.deepEqual(both[0].body, { price: "61000", size: "0.25" });
 });
 
-test("amend_order schema requires at least one of price/size and market_id", () => {
-  const tool = findTool("amend_order")!;
+test("edit_order schema requires at least one of price/size and market_id", () => {
+  const tool = findTool("edit_order")!;
   assert.equal(
     tool.zod.safeParse({ order_id: "o1", market_id: "BTC-USDX-PERP" }).success,
     false,
@@ -619,8 +621,8 @@ test("preview_order maps friendly args to the wire shape at /orders/preview", as
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 });
 
-test("place_order accepts the PostOnly time in force", () => {
-  const tool = findTool("place_order")!;
+test("create_order accepts the PostOnly time in force", () => {
+  const tool = findTool("create_order")!;
   assert.equal(
     tool.zod.safeParse({
       market_id: "BTC-USDX-PERP",
@@ -634,9 +636,9 @@ test("place_order accepts the PostOnly time in force", () => {
   );
 });
 
-test("submit_deposit POSTs {amount, asset?} to /deposits, signed", async () => {
+test("create_deposit POSTs {amount, asset?} to /deposits, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("submit_deposit")!.handler(c, { amount: "500", asset: "USDX" }),
+    findTool("create_deposit")!.handler(c, { amount: "500", asset: "USDX" }),
   );
   assert.equal(calls[0].method, "POST");
   assert.equal(calls[0].url, `${BASE}/deposits`);
@@ -645,19 +647,19 @@ test("submit_deposit POSTs {amount, asset?} to /deposits, signed", async () => {
 
   // asset omitted -> not sent (server defaults to USDX).
   const bare = await capture(fullClient(), (c) =>
-    findTool("submit_deposit")!.handler(c, { amount: "500" }),
+    findTool("create_deposit")!.handler(c, { amount: "500" }),
   );
   assert.deepEqual(bare[0].body, { amount: "500" });
 
-  const tool = findTool("submit_deposit")!;
+  const tool = findTool("create_deposit")!;
   for (const amount of ["0", "-1", "abc", ""]) {
     assert.equal(tool.zod.safeParse({ amount }).success, false, amount);
   }
 });
 
-test("list_deposits GETs /deposits with limit, signed", async () => {
+test("fetch_deposits GETs /deposits with limit, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("list_deposits")!.handler(c, { limit: 20 }),
+    findTool("fetch_deposits")!.handler(c, { limit: 20 }),
   );
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].url, `${BASE}/deposits?limit=20`);
@@ -674,9 +676,9 @@ test("claim_faucet POSTs to /faucet with no body, signed", async () => {
   assert.ok(calls[0].headers.get("x-signature"));
 });
 
-test("adjust_isolated_margin POSTs the margin adjustment, signed", async () => {
+test("add_margin POSTs the margin adjustment, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("adjust_isolated_margin")!.handler(c, {
+    findTool("add_margin")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       amount: "100",
       direction: "add",
@@ -691,7 +693,7 @@ test("adjust_isolated_margin POSTs the margin adjustment, signed", async () => {
   });
   assert.ok(calls[0].headers.get("x-signature"));
 
-  const tool = findTool("adjust_isolated_margin")!;
+  const tool = findTool("add_margin")!;
   assert.equal(
     tool.zod.safeParse({
       market_id: "BTC-USDX-PERP",
@@ -703,9 +705,9 @@ test("adjust_isolated_margin POSTs the margin adjustment, signed", async () => {
   );
 });
 
-test("get_order forwards the optional market_id as a query param", async () => {
+test("fetch_order forwards the optional market_id as a query param", async () => {
   const withMarket = await capture(fullClient(), (c) =>
-    findTool("get_order")!.handler(c, {
+    findTool("fetch_order")!.handler(c, {
       order_id: "o1",
       market_id: "BTC-USDX-PERP",
     }),
@@ -713,16 +715,16 @@ test("get_order forwards the optional market_id as a query param", async () => {
   assert.equal(withMarket[0].url, `${BASE}/orders/o1?market_id=BTC-USDX-PERP`);
 
   const bare = await capture(fullClient(), (c) =>
-    findTool("get_order")!.handler(c, { order_id: "o1" }),
+    findTool("fetch_order")!.handler(c, { order_id: "o1" }),
   );
   assert.equal(bare[0].url, `${BASE}/orders/o1`, "omitted -> no query");
 });
 
 // ── v0.7.1 tool surface (ENG-6136) ───────────────────────────────────────────
 
-test("get_cancel_on_disconnect GETs the signed v1 COD route", async () => {
+test("fetch_cancel_on_disconnect GETs the signed v1 COD route", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_cancel_on_disconnect")!.handler(c, {}),
+    findTool("fetch_cancel_on_disconnect")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
@@ -734,7 +736,7 @@ test("get_cancel_on_disconnect GETs the signed v1 COD route", async () => {
   });
   await assert.rejects(
     () =>
-      findTool("get_cancel_on_disconnect")!.handler(
+      findTool("fetch_cancel_on_disconnect")!.handler(
         noCreds,
         {},
       ) as Promise<unknown>,
@@ -763,9 +765,9 @@ test("set_cancel_on_disconnect PUTs {enabled} and requires an explicit boolean",
   );
 });
 
-test("get_bridge_assets GETs the public v1 bridge catalog unsigned", async () => {
+test("fetch_bridge_assets GETs the public v1 bridge catalog unsigned", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_bridge_assets")!.handler(c, {}),
+    findTool("fetch_bridge_assets")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].url, `${BASE}/api/v1/bridge/assets`);
@@ -799,9 +801,9 @@ test("list_bridge_deposit_addresses GETs the signed v1 route", async () => {
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 });
 
-test("list_bridge_deposits forwards filters + limit, signed, caps at 100", async () => {
+test("fetch_bridge_deposits forwards filters + limit, signed, caps at 100", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("list_bridge_deposits")!.handler(c, {
+    findTool("fetch_bridge_deposits")!.handler(c, {
       limit: 25,
       chain: "ethereum",
       asset: "USDC",
@@ -817,11 +819,11 @@ test("list_bridge_deposits forwards filters + limit, signed, caps at 100", async
 
   // No args -> no query string.
   const bare = await capture(fullClient(), (c) =>
-    findTool("list_bridge_deposits")!.handler(c, {}),
+    findTool("fetch_bridge_deposits")!.handler(c, {}),
   );
   assert.equal(bare[0].url, `${BASE}/api/v1/bridge/deposits`);
 
-  const tool = findTool("list_bridge_deposits")!;
+  const tool = findTool("fetch_bridge_deposits")!;
   assert.equal(tool.zod.safeParse({ limit: 100 }).success, true);
   assert.equal(tool.zod.safeParse({ limit: 101 }).success, false);
   assert.equal(
@@ -836,15 +838,15 @@ test("list_bridge_deposits forwards filters + limit, signed, caps at 100", async
   );
 });
 
-test("get_bridge_deposit encodes the id in the path, signed", async () => {
+test("fetch_bridge_deposit encodes the id in the path, signed", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("get_bridge_deposit")!.handler(c, { id: "dep/1" }),
+    findTool("fetch_bridge_deposit")!.handler(c, { id: "dep/1" }),
   );
   assert.equal(calls[0].method, "GET");
   assert.equal(calls[0].url, `${BASE}/api/v1/bridge/deposits/dep%2F1`);
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 
-  const tool = findTool("get_bridge_deposit")!;
+  const tool = findTool("fetch_bridge_deposit")!;
   assert.equal(tool.zod.safeParse({}).success, false, "id required");
 });
 
@@ -968,9 +970,9 @@ test("list_bridge_wallets GETs the signed v1 route", async () => {
   );
 });
 
-test("place_order maps a trailing_limit order to the wire shape", async () => {
+test("create_order maps a trailing_limit order to the wire shape", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       side: "sell",
       type: "trailing_limit",
@@ -996,7 +998,7 @@ test("place_order maps a trailing_limit order to the wire shape", async () => {
 });
 
 test("trailing_limit requires both offsets and bounds limit_offset_bps to 9999", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   const base = {
     market_id: "BTC-USDX-PERP",
     side: "buy" as const,
@@ -1043,7 +1045,7 @@ test("trailing_limit requires both offsets and bounds limit_offset_bps to 9999",
 });
 
 test("stray fields are rejected for the wrong order type", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   // A price on a market order is rejected, not silently dropped.
   assert.equal(
     tool.zod.safeParse({
@@ -1097,9 +1099,9 @@ test("stray fields are rejected for the wrong order type", () => {
   );
 });
 
-test("place_order maps a stop_market (stop-loss) order to the wire shape", async () => {
+test("create_order maps a stop_market (stop-loss) order to the wire shape", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       side: "sell",
       type: "stop_market",
@@ -1124,9 +1126,9 @@ test("place_order maps a stop_market (stop-loss) order to the wire shape", async
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 });
 
-test("place_order maps a stop_limit order with price + trigger_price", async () => {
+test("create_order maps a stop_limit order with price + trigger_price", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       side: "buy",
       type: "stop_limit",
@@ -1147,9 +1149,9 @@ test("place_order maps a stop_limit order with price + trigger_price", async () 
   });
 });
 
-test("place_order maps take-profit orders (limit + market)", async () => {
+test("create_order maps take-profit orders (limit + market)", async () => {
   const tpLimit = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "ETH-USDX-PERP",
       side: "sell",
       type: "take_profit_limit",
@@ -1164,7 +1166,7 @@ test("place_order maps take-profit orders (limit + market)", async () => {
   assert.equal(tpLimit[0].body.time_in_force, "GTC");
 
   const tpMarket = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "ETH-USDX-PERP",
       side: "sell",
       type: "take_profit_market",
@@ -1178,9 +1180,9 @@ test("place_order maps take-profit orders (limit + market)", async () => {
   assert.equal(tpMarket[0].body.time_in_force, "IOC");
 });
 
-test("place_order maps a trailing_stop order (offset only, no limit offset)", async () => {
+test("create_order maps a trailing_stop order (offset only, no limit offset)", async () => {
   const calls = await capture(fullClient(), (c) =>
-    findTool("place_order")!.handler(c, {
+    findTool("create_order")!.handler(c, {
       market_id: "BTC-USDX-PERP",
       side: "sell",
       type: "trailing_stop",
@@ -1203,7 +1205,7 @@ test("place_order maps a trailing_stop order (offset only, no limit offset)", as
 });
 
 test("stop / take-profit orders require trigger_price", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   for (const type of [
     "stop_limit",
     "stop_market",
@@ -1234,7 +1236,7 @@ test("stop / take-profit orders require trigger_price", () => {
 });
 
 test("trigger_price is rejected on non-triggerable order types", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   // limit
   assert.equal(
     tool.zod.safeParse({
@@ -1277,7 +1279,7 @@ test("trigger_price is rejected on non-triggerable order types", () => {
 });
 
 test("stop_limit requires a price; stop_market rejects one", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   assert.equal(
     tool.zod.safeParse({
       market_id: "BTC-USDX-PERP",
@@ -1304,7 +1306,7 @@ test("stop_limit requires a price; stop_market rejects one", () => {
 });
 
 test("trailing offsets are rejected on stop orders; limit_offset only on trailing_limit", () => {
-  const tool = findTool("place_order")!;
+  const tool = findTool("create_order")!;
   // trailing_offset_bps is not valid on a (non-trailing) stop_market.
   assert.equal(
     tool.zod.safeParse({
@@ -1349,16 +1351,16 @@ test("dropped liveness tools are no longer registered", () => {
   // v0.7.0 removed /health and /ready from the public contract (ENG-6136).
   assert.equal(findTool("get_health"), undefined);
   assert.equal(findTool("get_readiness"), undefined);
-  assert.ok(findTool("get_service_status"), "the surviving /status tool stays");
+  assert.ok(findTool("fetch_status"), "the surviving /status tool stays");
 });
 
 // ── v0.7.2 portfolio-parity tools (ENG-6461) ─────────────────────────────────
 
 test("portfolio-parity reads sign the v1 account routes", async () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["get_account_state", {}, `${BASE}/api/v1/account/state`],
-    ["get_account_fees", {}, `${BASE}/api/v1/account/fees`],
-    ["get_portfolio_history", {}, `${BASE}/api/v1/account/portfolio-history`],
+    ["fetch_account_state", {}, `${BASE}/api/v1/account/state`],
+    ["fetch_trading_fees", {}, `${BASE}/api/v1/account/fees`],
+    ["fetch_portfolio_history", {}, `${BASE}/api/v1/account/portfolio-history`],
   ];
   for (const [name, args, url] of cases) {
     const calls = await capture(fullClient(), (c) =>
@@ -1383,9 +1385,9 @@ test("portfolio-parity reads sign the v1 account routes", async () => {
   }
 });
 
-test("get_portfolio_history forwards window + limit, and omits them when unset", async () => {
+test("fetch_portfolio_history forwards window + limit, and omits them when unset", async () => {
   const both = await capture(fullClient(), (c) =>
-    findTool("get_portfolio_history")!.handler(c, {
+    findTool("fetch_portfolio_history")!.handler(c, {
       window: "week",
       limit: 168,
     }),
@@ -1398,12 +1400,12 @@ test("get_portfolio_history forwards window + limit, and omits them when unset",
   // Omitted args produce a bare path (no stray "?"), so the signed query
   // string matches what the server verifies over.
   const bare = await capture(fullClient(), (c) =>
-    findTool("get_portfolio_history")!.handler(c, {}),
+    findTool("fetch_portfolio_history")!.handler(c, {}),
   );
   assert.equal(bare[0].url, `${BASE}/api/v1/account/portfolio-history`);
 
   const onlyWindow = await capture(fullClient(), (c) =>
-    findTool("get_portfolio_history")!.handler(c, { window: "all" }),
+    findTool("fetch_portfolio_history")!.handler(c, { window: "all" }),
   );
   assert.equal(
     onlyWindow[0].url,
@@ -1411,8 +1413,8 @@ test("get_portfolio_history forwards window + limit, and omits them when unset",
   );
 });
 
-test("get_portfolio_history validates window as a closed enum and caps limit", () => {
-  const tool = findTool("get_portfolio_history")!;
+test("fetch_portfolio_history validates window as a closed enum and caps limit", () => {
+  const tool = findTool("fetch_portfolio_history")!;
   for (const window of ["day", "week", "month", "all"]) {
     assert.equal(tool.zod.safeParse({ window }).success, true, window);
   }
@@ -1432,14 +1434,18 @@ test("get_portfolio_history validates window as a closed enum and caps limit", (
 });
 
 test("argless portfolio-parity tools take no arguments", () => {
-  for (const name of ["get_account_state", "get_account_fees"]) {
+  for (const name of ["fetch_account_state", "fetch_trading_fees"]) {
     const tool = findTool(name)!;
     assert.equal(tool.zod.safeParse({}).success, true, name);
     assert.equal(tool.zod.safeParse({ limit: 10 }).success, false, name);
   }
 });
 
-const POSITION_TOOLS = ["get_balance", "get_positions", "get_account_state"];
+const POSITION_TOOLS = [
+  "fetch_balance",
+  "fetch_positions",
+  "fetch_account_state",
+];
 
 test("tools returning positions document the enriched risk fields", () => {
   // The enrichment is null-able with a companion <field>_error; an agent that
@@ -1484,19 +1490,19 @@ test("account tools warn that the authoritative-margin 502 is not an empty accou
   // and /account/summary. The summary is the tool that advertises
   // `withdrawable`, the field whose authoritative-margin dependency causes the
   // fail-closed, so it needs the retry guidance just as much.
-  for (const name of ["get_account_state", "get_account_summary"]) {
+  for (const name of ["fetch_account_state", "fetch_account_summary"]) {
     const { description } = findTool(name)!;
     assert.match(description, /authoritative_margin_unavailable/, name);
     assert.match(description, /retry/i, name);
     assert.match(description, /do NOT read the error as a flat or empty/, name);
   }
-  assert.match(findTool("get_account_summary")!.description, /withdrawable/);
+  assert.match(findTool("fetch_account_summary")!.description, /withdrawable/);
 });
 
 test("tool names are unique and admin tools carry the adminOnly flag", () => {
   const names = tools.map((t) => t.name);
   assert.equal(new Set(names).size, names.length, "no duplicate tool names");
-  for (const name of ["list_tiers", "set_tier", "delete_tier"]) {
+  for (const name of ["fetch_tiers", "set_tier", "delete_tier"]) {
     assert.equal(findTool(name)!.adminOnly, true, `${name} is adminOnly`);
   }
 });
@@ -1540,19 +1546,66 @@ test("the tool -> operation mapping is not 1:1", () => {
   // operation, so the two counts are different quantities and neither may be
   // reported as the other.
   //
-  // Worth knowing while reading this: the totals currently COINCIDE — 69 tools
-  // declaring 69 distinct operations — which is why the test asserts the mapping's
-  // shape rather than an inequality of totals. A coincidence of totals is exactly
-  // how the tool count came to be reported as an operation count in the first
-  // place (ENG-7964), and 69 is still not the coverage figure: three of those
-  // operations are the non-contract `/demo/*` routes, so endpoints.txt publishes
-  // 66. Asserting `distinct !== tools.length` would be both brittle and, today,
-  // false — the shape below is the property that actually holds.
-  const multi = tools.filter((t) => t.ops.length > 1).map((t) => t.name);
-  assert.ok(multi.length > 0, "some tool covers multiple operations");
-  assert.ok(multi.includes("cancel_order"), "cancel_order covers two");
+  // Since ENG-17742 every canonical tool calls at most ONE operation (it is
+  // named for it), so the many-to-one direction comes from the deprecated
+  // aliases: each calls exactly the operation of the tool it forwards to. And
+  // `get_deposit_target` still calls none.
+  const byOp = new Map<string, string[]>();
+  for (const t of tools) {
+    for (const op of t.ops) byOp.set(op, [...(byOp.get(op) ?? []), t.name]);
+  }
+  assert.ok(
+    [...byOp.values()].some((names) => names.length > 1),
+    "some operation is reached by more than one tool name",
+  );
   assert.ok(
     tools.some((t) => t.ops.length === 0),
     "some tool covers no operation",
   );
+});
+
+test("every deprecated alias forwards to its canonical tool (ENG-17742)", () => {
+  const aliases = Object.entries(DEPRECATED_ALIASES);
+  assert.ok(aliases.length > 0);
+  for (const [oldName, newName] of aliases) {
+    const alias = findTool(oldName);
+    const target = findTool(newName);
+    assert.ok(alias, `${oldName} is still registered`);
+    assert.ok(target, `${newName} is registered`);
+    assert.notEqual(oldName, newName);
+    // The same function object, so both names behave identically — including
+    // the funds guard, which is wrapped onto the canonical handler.
+    assert.equal(
+      alias.handler,
+      target.handler,
+      `${oldName} shares the handler`,
+    );
+    assert.equal(alias.zod, target.zod, `${oldName} shares the validator`);
+    assert.deepEqual(alias.inputSchema, target.inputSchema, oldName);
+    assert.deepEqual(alias.ops, target.ops, oldName);
+    assert.equal(alias.fundsGuard, target.fundsGuard, oldName);
+    assert.equal(alias.adminOnly, target.adminOnly, oldName);
+    assert.ok(
+      alias.description.startsWith(`Deprecated: use \`${newName}\`.`),
+      `${oldName} description names its replacement`,
+    );
+    // An alias must point at a canonical tool, never at another alias.
+    assert.equal(Object.hasOwn(DEPRECATED_ALIASES, newName), false, newName);
+  }
+});
+
+test("list_markets still returns the markets SUMMARY, never GET /markets", async () => {
+  // ENG-17742: `list_markets` has always been GET /markets/summary. Aliasing it
+  // to `fetch_markets` (GET /markets, the static specs) would silently change
+  // what an existing prompt gets back.
+  assert.equal(DEPRECATED_ALIASES.list_markets, "fetch_markets_summary");
+  assert.deepEqual(findTool("list_markets")!.ops, [
+    "GET /api/v1/markets/summary",
+  ]);
+  const calls = await capture(fullClient(), (c) =>
+    findTool("list_markets")!.handler(c, {}),
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${BASE}/api/v1/markets/summary`);
+  assert.deepEqual(findTool("fetch_markets")!.ops, ["GET /markets"]);
 });

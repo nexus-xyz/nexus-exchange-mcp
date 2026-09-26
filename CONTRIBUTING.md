@@ -30,7 +30,7 @@ write); run `npm run format` to fix.
 ### Smoke check
 
 `npm run smoke` spins the server up in-process (over the SDK's in-memory
-transport), lists the tools, and calls `list_markets` against the target you
+transport), lists the tools, and calls `fetch_markets_summary` against the target you
 name. There is **no default target** — set `NEXUS_EXCHANGE_API_URL` to a host
 that serves the Exchange API. Where `/api/v1` hangs off that host is the
 deployment's gateway path, which comes from the network (ENG-6221), so a local

@@ -2018,6 +2018,8 @@ export const tools: ToolDef[] = [
     name: "create_bridge_deposit_address",
     ops: ["POST /api/v1/bridge/deposit-addresses"],
     description:
+      "Deprecated: no server implements this route (its design was cancelled, " +
+      "ENG-11460), so every call fails. " +
       "Get or create the authenticated account's cross-chain deposit address " +
       "on a chain. Sending a supported asset to the returned address credits " +
       "the account. Idempotent per (account, chain): repeated calls return the " +
@@ -2053,6 +2055,8 @@ export const tools: ToolDef[] = [
     name: "list_bridge_deposit_addresses",
     ops: ["GET /api/v1/bridge/deposit-addresses"],
     description:
+      "Deprecated: no server implements this route (its design was cancelled, " +
+      "ENG-11460), so every call fails. " +
       "List the authenticated account's cross-chain deposit addresses across " +
       "chains. Requires API credentials.",
     inputSchema: jsonSchema({}),
@@ -2735,10 +2739,9 @@ export const tools: ToolDef[] = [
     ops: [],
     description:
       "Get the on-chain deposit target (address/memo) to fund the account. " +
-      "Superseded on the direct surface by the bridge deposit-address tools " +
-      "(`create_bridge_deposit_address` / `list_bridge_deposit_addresses`), " +
-      "which return per-chain on-chain deposit addresses — prefer those. This " +
-      "legacy single-target lookup remains unbuilt server-side.",
+      "This legacy single-target lookup remains unbuilt server-side, and the " +
+      "bridge deposit-address tools that were to supersede it are deprecated " +
+      "because nothing serves them either.",
     inputSchema: jsonSchema({
       asset: {
         type: "string",

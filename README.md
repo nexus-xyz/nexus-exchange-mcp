@@ -71,8 +71,8 @@ relative to the same base with no prefix added, and remain live dual-stack
 | `claim_faucet`                   | ✅ Live (needs key + direct gateway)            | `POST /faucet` (legacy)                    |
 | `add_margin`                     | ✅ Live (needs key + direct gateway)            | `POST /account/margin` (legacy)            |
 | `fetch_bridge_assets`            | ✅ Live (public)                                | `GET /api/v1/bridge/assets`                |
-| `create_bridge_deposit_address`  | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/deposit-addresses`    |
-| `list_bridge_deposit_addresses`  | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposit-addresses`     |
+| `create_bridge_deposit_address`  | ⛔ Deprecated — route not served (ENG-11460)    | `POST /api/v1/bridge/deposit-addresses`    |
+| `list_bridge_deposit_addresses`  | ⛔ Deprecated — route not served (ENG-11460)    | `GET /api/v1/bridge/deposit-addresses`     |
 | `fetch_bridge_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits`              |
 | `fetch_bridge_deposit`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits/{id}`         |
 | `create_bridge_wallet_challenge` | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/wallets/challenge`    |
@@ -94,11 +94,11 @@ relative to the same base with no prefix added, and remain live dual-stack
 | `get_deposit_target`             | 🚧 Pending — server-side endpoint not built yet | none yet                                   |
 
 `get_deposit_target` is wired into the agent flow but returns a clear
-`not_yet_available` message rather than faking a result. On the direct surface
-it is superseded by the bridge deposit-address tools
-(`create_bridge_deposit_address` / `list_bridge_deposit_addresses`), which
-return real per-chain on-chain deposit addresses — prefer those; the legacy
-single-target lookup is still unbuilt server-side.
+`not_yet_available` message rather than faking a result. The bridge
+deposit-address tools (`create_bridge_deposit_address` /
+`list_bridge_deposit_addresses`) were meant to supersede it, but they are
+deprecated: no server implements `/api/v1/bridge/deposit-addresses` (its design
+was cancelled with ENG-11460), so every call fails.
 
 ### Tool names
 

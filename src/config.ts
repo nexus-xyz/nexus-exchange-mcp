@@ -297,7 +297,7 @@ function warnIfPlaintext(baseUrl: string): void {
 const BARE_URL_DEPRECATION_NOTICE =
   "nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated " +
   "and still works. On its own it also assumes the PUBLIC-GATEWAY shape, so " +
-  "/api/v1 resolves under /api/exchange; for an indexer that serves at its " +
+  "every route resolves under /api/exchange; for an indexer that serves at its " +
   "root, add NEXUS_EXCHANGE_NETWORK=local, or describe the deployment with the " +
   "full custom bundle — NEXUS_EXCHANGE_NETWORK=custom plus " +
   "NEXUS_EXCHANGE_NETWORK_LABEL, NEXUS_EXCHANGE_FUNDS and " +

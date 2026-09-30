@@ -457,7 +457,7 @@ appear in the spec's `x-nexus-networks`.
 still works — no bundle required, legacy `/api/exchange` suffix still normalized
 — and it resolves to a custom target whose funds are **undeclared**. It also has
 no deployment shape to read, so it assumes the public-gateway one and the notice
-below says so; ENG-6221 moved the `/api/v1` base under that gateway path, which
+below says so; every request is composed under that gateway path, which
 is the one thing about this form that is not byte-identical to what it used to
 resolve to. A bare URL pointed at an indexer that serves at its root wants
 `NEXUS_EXCHANGE_NETWORK=local` alongside it, or the full bundle. That is not the same as play funds, so these
@@ -483,8 +483,8 @@ one notice on **stderr** naming the declared form, then runs exactly as before
 
 ```
 nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated and
-still works. On its own it also assumes the PUBLIC-GATEWAY shape, so /api/v1
-resolves under /api/exchange; for an indexer that serves at its root, add
+still works. On its own it also assumes the PUBLIC-GATEWAY shape, so every
+route resolves under /api/exchange; for an indexer that serves at its root, add
 NEXUS_EXCHANGE_NETWORK=local, or describe the deployment with the full custom
 bundle …
 ```

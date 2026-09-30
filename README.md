@@ -12,86 +12,84 @@ read from environment variables.
 
 ## What works today
 
-Most tools now target the direct-indexer **`/api/v1`** surface, served under
-the deployment's gateway path (ENG-4740 — the indexer serves its REST API
-directly instead of via the gateway REST proxy — as corrected by ENG-6221:
-`…/indexer/api/v1/…` on the public testnet host, and at the origin on a bare
-indexer such as `local`). The routes that have no `/api/v1` equivalent are sent
-relative to the same base with no prefix added, and remain live dual-stack
-(ENG-4751), so nothing breaks. See "Migration to `/api/v1`" below.
+Every tool sends the spec's bare path (`/orders`) to one REST base: the spec's
+`/v1` base on the public testnet host (`https://api.testnet.nexus.xyz/v1`), and
+the origin on a bare indexer such as `local`. The bridge tools are the one
+exception while the pinned spec lacks their bare twins. See
+"REST base and paths" below.
 
-| Tool                             | Status                                          | Endpoint (surface)                         |
-| -------------------------------- | ----------------------------------------------- | ------------------------------------------ |
-| `fetch_markets_summary`          | ✅ Live (public)                                | `GET /api/v1/markets/summary`              |
-| `fetch_markets`                  | ✅ Live (public)                                | `GET /markets` (legacy)                    |
-| `fetch_ticker`                   | ✅ Live (public)                                | `GET /api/v1/markets/{id}/ticker`          |
-| `fetch_tickers`                  | ✅ Live (public)                                | `GET /api/v1/tickers`                      |
-| `fetch_order_book`               | ✅ Live (public)                                | `GET /api/v1/markets/{id}/orderbook`       |
-| `fetch_mark_price`               | ✅ Live (public)                                | `GET /api/v1/markets/{id}/mark-price`      |
-| `fetch_market_status`            | ✅ Live (public)                                | `GET /api/v1/markets/{id}/status`          |
-| `fetch_trades`                   | ✅ Live (public)                                | `GET /api/v1/markets/{id}/trades`          |
-| `fetch_ohlcv`                    | ✅ Live (public)                                | `GET /api/v1/markets/{id}/candles`         |
-| `fetch_funding_rate_history`     | ✅ Live (public)                                | `GET /api/v1/markets/{id}/funding`         |
-| `fetch_funding_samples`          | ✅ Live (public)                                | `GET /api/v1/markets/{id}/funding-samples` |
-| `fetch_market_risk_params`       | ✅ Live (public)                                | `GET /markets/{id}/risk-params` (legacy)   |
-| `fetch_stats`                    | ✅ Live (public)                                | `GET /api/v1/stats`                        |
-| `fetch_stats_history`            | ✅ Live (public)                                | `GET /api/v1/stats/history`                |
-| `get_demo_account`               | ✅ Live (public)                                | `GET /demo/account` (legacy)               |
-| `get_demo_positions`             | ✅ Live (public)                                | `GET /demo/positions` (legacy)             |
-| `get_demo_orders`                | ✅ Live (public)                                | `GET /demo/orders` (legacy)                |
-| `fetch_balance`                  | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account`                      |
-| `fetch_account_summary`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/summary`              |
-| `fetch_account_state`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/state`                |
-| `fetch_trading_fees`             | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/fees`                 |
-| `fetch_portfolio_history`        | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/portfolio-history`    |
-| `fetch_equity_history`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/equity-history`       |
-| `fetch_positions`                | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions`                    |
-| `fetch_positions_history`        | ✅ Live (needs key + direct gateway)            | `GET /api/v1/positions/closed`             |
-| `fetch_open_orders`              | ✅ Live (needs key + direct gateway)            | `GET /api/v1/orders`                       |
-| `fetch_order`                    | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}` (legacy)                |
-| `fetch_orders`                   | ✅ Live (needs key + direct gateway)            | `GET /api/v1/orders/history`               |
-| `fetch_my_trades`                | ✅ Live (needs key + direct gateway)            | `GET /api/v1/fills`                        |
-| `fetch_funding_history`          | ✅ Live (needs key + direct gateway)            | `GET /funding` (legacy)                    |
-| `fetch_withdrawals`              | ✅ Live (needs key + direct gateway)            | `GET /withdrawals` (legacy)                |
-| `fetch_deposits`                 | ✅ Live (needs key + direct gateway)            | `GET /deposits` (legacy)                   |
-| `fetch_rate_limit_status`        | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/rate-limit`           |
-| `fetch_cancel_on_disconnect`     | ✅ Live (needs key + direct gateway)            | `GET /api/v1/account/cancel-on-disconnect` |
-| `set_cancel_on_disconnect`       | ✅ Live (needs key + direct gateway)            | `PUT /api/v1/account/cancel-on-disconnect` |
-| `fetch_adl_history`              | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history` (legacy) |
-| `fetch_adl_events`               | ✅ Live (needs key + direct gateway)            | `GET /markets/{id}/adl-events` (legacy)    |
-| `create_order`                   | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders`                      |
-| `create_orders`                  | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders/batch`                |
-| `edit_order`                     | ✅ Live (needs key + direct gateway)            | `PATCH /api/v1/orders/{id}`                |
-| `preview_order`                  | ✅ Live (needs key + direct gateway)            | `POST /api/v1/orders/preview`              |
-| `cancel_order`                   | ✅ Live (needs key + direct gateway)            | `DELETE /api/v1/orders/{id}`               |
-| `cancel_all_orders`              | ✅ Live (needs key + direct gateway)            | `DELETE /api/v1/orders`                    |
-| `deposit`                        | ✅ Live (needs key + direct gateway)            | `POST /account/deposit` (legacy)           |
-| `create_deposit`                 | ✅ Live (needs key + direct gateway)            | `POST /deposits` (legacy)                  |
-| `claim_credit`                   | ✅ Live (needs key + direct gateway)            | `POST /api/v1/account/credit`              |
-| `claim_faucet`                   | ✅ Live (needs key + direct gateway)            | `POST /faucet` (legacy)                    |
-| `add_margin`                     | ✅ Live (needs key + direct gateway)            | `POST /account/margin` (legacy)            |
-| `fetch_bridge_assets`            | ✅ Live (public)                                | `GET /api/v1/bridge/assets`                |
-| `create_bridge_deposit_address`  | ⛔ Deprecated — route not served (ENG-11460)    | `POST /api/v1/bridge/deposit-addresses`    |
-| `list_bridge_deposit_addresses`  | ⛔ Deprecated — route not served (ENG-11460)    | `GET /api/v1/bridge/deposit-addresses`     |
-| `fetch_bridge_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits`              |
-| `fetch_bridge_deposit`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits/{id}`         |
-| `create_bridge_wallet_challenge` | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/wallets/challenge`    |
-| `register_bridge_wallet`         | ✅ Live (needs key + caller EIP-191 signature)  | `POST /api/v1/bridge/wallets`              |
-| `list_bridge_wallets`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/wallets`               |
-| `fetch_agents`                   | ✅ Live (needs key + direct gateway)            | `GET /agents` (legacy)                     |
-| `register_agent`                 | ✅ Live (needs caller EIP-712 signature)        | `POST /agents/register` (legacy)           |
-| `revoke_agent`                   | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}` (legacy)           |
-| `login`                          | ✅ Live (needs caller EIP-191 signature)        | `POST /auth/login` (legacy)                |
-| `fetch_api_keys`                 | ✅ Live (needs session token)                   | `GET /keys` (legacy)                       |
-| `create_api_key`                 | ✅ Live (needs session token)                   | `POST /keys` (legacy)                      |
-| `delete_api_key`                 | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}` (legacy)           |
-| `create_ws_token`                | ✅ Live (needs key + direct gateway)            | `POST /ws/token` (legacy)                  |
-| `create_ws_token_legacy`         | ✅ Live (needs key + direct gateway)            | `POST /ws-tokens` (legacy)                 |
-| `fetch_status`                   | ✅ Live (public)                                | `GET /status` (legacy)                     |
-| `fetch_tiers`                    | 🔒 Admin (opt-in, see below)                    | `GET /admin/tiers` (legacy)                |
-| `set_tier`                       | 🔒 Admin (opt-in, see below)                    | `PUT /admin/tiers` (legacy)                |
-| `delete_tier`                    | 🔒 Admin (opt-in, see below)                    | `DELETE /admin/tiers/{addr}` (legacy)      |
-| `get_deposit_target`             | 🚧 Pending — server-side endpoint not built yet | none yet                                   |
+| Tool                             | Status                                          | Endpoint (surface)                      |
+| -------------------------------- | ----------------------------------------------- | --------------------------------------- |
+| `fetch_markets_summary`          | ✅ Live (public)                                | `GET /markets/summary`                  |
+| `fetch_markets`                  | ✅ Live (public)                                | `GET /markets`                          |
+| `fetch_ticker`                   | ✅ Live (public)                                | `GET /markets/{id}/ticker`              |
+| `fetch_tickers`                  | ✅ Live (public)                                | `GET /tickers`                          |
+| `fetch_order_book`               | ✅ Live (public)                                | `GET /markets/{id}/orderbook`           |
+| `fetch_mark_price`               | ✅ Live (public)                                | `GET /markets/{id}/mark-price`          |
+| `fetch_market_status`            | ✅ Live (public)                                | `GET /markets/{id}/status`              |
+| `fetch_trades`                   | ✅ Live (public)                                | `GET /markets/{id}/trades`              |
+| `fetch_ohlcv`                    | ✅ Live (public)                                | `GET /markets/{id}/candles`             |
+| `fetch_funding_rate_history`     | ✅ Live (public)                                | `GET /markets/{id}/funding`             |
+| `fetch_funding_samples`          | ✅ Live (public)                                | `GET /markets/{id}/funding-samples`     |
+| `fetch_market_risk_params`       | ✅ Live (public)                                | `GET /markets/{id}/risk-params`         |
+| `fetch_stats`                    | ✅ Live (public)                                | `GET /stats`                            |
+| `fetch_stats_history`            | ✅ Live (public)                                | `GET /stats/history`                    |
+| `get_demo_account`               | ✅ Live (public)                                | `GET /demo/account`                     |
+| `get_demo_positions`             | ✅ Live (public)                                | `GET /demo/positions`                   |
+| `get_demo_orders`                | ✅ Live (public)                                | `GET /demo/orders`                      |
+| `fetch_balance`                  | ✅ Live (needs key + direct gateway)            | `GET /account`                          |
+| `fetch_account_summary`          | ✅ Live (needs key + direct gateway)            | `GET /account/summary`                  |
+| `fetch_account_state`            | ✅ Live (needs key + direct gateway)            | `GET /account/state`                    |
+| `fetch_trading_fees`             | ✅ Live (needs key + direct gateway)            | `GET /account/fees`                     |
+| `fetch_portfolio_history`        | ✅ Live (needs key + direct gateway)            | `GET /account/portfolio-history`        |
+| `fetch_equity_history`           | ✅ Live (needs key + direct gateway)            | `GET /account/equity-history`           |
+| `fetch_positions`                | ✅ Live (needs key + direct gateway)            | `GET /positions`                        |
+| `fetch_positions_history`        | ✅ Live (needs key + direct gateway)            | `GET /positions/closed`                 |
+| `fetch_open_orders`              | ✅ Live (needs key + direct gateway)            | `GET /orders`                           |
+| `fetch_order`                    | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}`                      |
+| `fetch_orders`                   | ✅ Live (needs key + direct gateway)            | `GET /orders/history`                   |
+| `fetch_my_trades`                | ✅ Live (needs key + direct gateway)            | `GET /fills`                            |
+| `fetch_funding_history`          | ✅ Live (needs key + direct gateway)            | `GET /funding`                          |
+| `fetch_withdrawals`              | ✅ Live (needs key + direct gateway)            | `GET /withdrawals`                      |
+| `fetch_deposits`                 | ✅ Live (needs key + direct gateway)            | `GET /deposits`                         |
+| `fetch_rate_limit_status`        | ✅ Live (needs key + direct gateway)            | `GET /account/rate-limit`               |
+| `fetch_cancel_on_disconnect`     | ✅ Live (needs key + direct gateway)            | `GET /account/cancel-on-disconnect`     |
+| `set_cancel_on_disconnect`       | ✅ Live (needs key + direct gateway)            | `PUT /account/cancel-on-disconnect`     |
+| `fetch_adl_history`              | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history`       |
+| `fetch_adl_events`               | ✅ Live (needs key + direct gateway)            | `GET /markets/{id}/adl-events`          |
+| `create_order`                   | ✅ Live (needs key + direct gateway)            | `POST /orders`                          |
+| `create_orders`                  | ✅ Live (needs key + direct gateway)            | `POST /orders/batch`                    |
+| `edit_order`                     | ✅ Live (needs key + direct gateway)            | `PATCH /orders/{id}`                    |
+| `preview_order`                  | ✅ Live (needs key + direct gateway)            | `POST /orders/preview`                  |
+| `cancel_order`                   | ✅ Live (needs key + direct gateway)            | `DELETE /orders/{id}`                   |
+| `cancel_all_orders`              | ✅ Live (needs key + direct gateway)            | `DELETE /orders`                        |
+| `deposit`                        | ✅ Live (needs key + direct gateway)            | `POST /account/deposit`                 |
+| `create_deposit`                 | ✅ Live (needs key + direct gateway)            | `POST /deposits`                        |
+| `claim_credit`                   | ✅ Live (needs key + direct gateway)            | `POST /account/credit`                  |
+| `claim_faucet`                   | ✅ Live (needs key + direct gateway)            | `POST /faucet`                          |
+| `add_margin`                     | ✅ Live (needs key + direct gateway)            | `POST /account/margin`                  |
+| `fetch_bridge_assets`            | ✅ Live (public)                                | `GET /api/v1/bridge/assets`             |
+| `create_bridge_deposit_address`  | ⛔ Deprecated — route not served (ENG-11460)    | `POST /api/v1/bridge/deposit-addresses` |
+| `list_bridge_deposit_addresses`  | ⛔ Deprecated — route not served (ENG-11460)    | `GET /api/v1/bridge/deposit-addresses`  |
+| `fetch_bridge_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits`           |
+| `fetch_bridge_deposit`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits/{id}`      |
+| `create_bridge_wallet_challenge` | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/wallets/challenge` |
+| `register_bridge_wallet`         | ✅ Live (needs key + caller EIP-191 signature)  | `POST /api/v1/bridge/wallets`           |
+| `list_bridge_wallets`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/wallets`            |
+| `fetch_agents`                   | ✅ Live (needs key + direct gateway)            | `GET /agents`                           |
+| `register_agent`                 | ✅ Live (needs caller EIP-712 signature)        | `POST /agents/register`                 |
+| `revoke_agent`                   | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}`                 |
+| `login`                          | ✅ Live (needs caller EIP-191 signature)        | `POST /auth/login`                      |
+| `fetch_api_keys`                 | ✅ Live (needs session token)                   | `GET /keys`                             |
+| `create_api_key`                 | ✅ Live (needs session token)                   | `POST /keys`                            |
+| `delete_api_key`                 | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}`                 |
+| `create_ws_token`                | ✅ Live (needs key + direct gateway)            | `POST /ws/token`                        |
+| `create_ws_token_legacy`         | ✅ Live (needs key + direct gateway)            | `POST /ws-tokens`                       |
+| `fetch_status`                   | ✅ Live (public)                                | `GET /status`                           |
+| `fetch_tiers`                    | 🔒 Admin (opt-in, see below)                    | `GET /admin/tiers`                      |
+| `set_tier`                       | 🔒 Admin (opt-in, see below)                    | `PUT /admin/tiers`                      |
+| `delete_tier`                    | 🔒 Admin (opt-in, see below)                    | `DELETE /admin/tiers/{addr}`            |
+| `get_deposit_target`             | 🚧 Pending — server-side endpoint not built yet | none yet                                |
 
 `get_deposit_target` is wired into the agent flow but returns a clear
 `not_yet_available` message rather than faking a result. The bridge
@@ -114,69 +112,38 @@ The full map is `DEPRECATED_ALIASES` in
 [`src/tools/index.ts`](./src/tools/index.ts). Two changes are not plain renames:
 
 - `list_markets` keeps returning the markets **summary**
-  (`GET /api/v1/markets/summary`), so it aliases `fetch_markets_summary`. The
+  (`GET /markets/summary`), so it aliases `fetch_markets_summary`. The
   static specs (`GET /markets`, formerly `list_market_specs`) are
   `fetch_markets`.
 - `cancel_order` now cancels one order only. The account-wide cancel it used to
   do with `cancel_all: true` is `cancel_all_orders`, which requires
   `confirm: true`.
 
-### Migration to `/api/v1`
+### REST base and paths
 
-Per **ENG-4740** the gateway REST proxy is being eliminated: each backend
-service exposes its own REST API and the indexer serves the exchange surface
-directly under `/api/v1`. This server calls those routes for the v0.8.1
-operations it exposes as tools (see
-[API-surface coverage](#api-surface-coverage) below).
+Per **EDR-006** (ENG-17186, ENG-18323) every request is the spec's bare path
+under one REST base: sent as `/v1/orders` on the public testnet host, signed as
+`/orders`.
 
-- **Both surfaces hang off the deployment base** — `https://api.testnet.nexus.xyz/indexer`
-  on the public testnet host, and the bare origin (`http://localhost:9090`) on
-  an indexer that serves at its root, like `local`. So `/api/v1/*` resolves at
-  `…/indexer/api/v1/*` on testnet and at the origin on `local`. Note the
-  `/indexer`: it is the **route prefix the deployment mounts the service
-  under**, not part of the API contract, so copy the base whole rather than
-  trimming it to the hostname (ENG-8869). Trimming does _not_ fail cleanly:
-  the host serves `/api/v1/*` unprefixed as well, so a trimmed base keeps every
-  `/api/v1` tool working while the tools on the v1-less routes 404, and the
-  signature (which covers the logical path, not the base) verifies either way.
-  **ENG-6221 corrected this**: the v1 base used to be composed at the bare host
-  root, where the public site serves its marketing app, so every `/api/v1` tool
-  answered 404 with a page of HTML. That was `exchange.nexus.xyz`, and it is no
-  longer where testnet lives. On `api.testnet.nexus.xyz` the pinned spec's
-  per-path `servers` override, which lists the bare root for `/api/v1/*`, is
-  **correct**, measured 2026-09-11: the route contract mounts `/indexer`, `/v1`
-  and `/api/v1` on the public host, the first two rewriting to `/` and the last
-  passing through intact (ENG-14693). So there is no upstream defect in
-  `nexus-exchange-api` to fix here; this server prefers the prefixed base
-  because it is the one that reaches _both_ surfaces, not because the bare root
-  is dead. A `NEXUS_EXCHANGE_API_URL` that
-  still ends in `/api/exchange` is accepted and normalized, so it cannot double
-  up. Which host that is comes from the [network axis](#networks) — and a named
-  network keeps its own gateway path when `NEXUS_EXCHANGE_API_URL` only
-  redirects the host, so `NEXUS_EXCHANGE_NETWORK=local` with a URL still serves
-  both surfaces at the origin.
-- **Two surfaces, one base — so "the base URL" differs per SDK by design.**
-  Both surfaces are derived from the same deployment base, and which one a
-  request addresses is named by its **path** (`/api/v1/account` versus the bare
-  `/account`) rather than by a different host. A sibling SDK whose single base
-  URL reads `…/api/v1` and one whose reads `…/api/exchange` are therefore not in
-  conflict — they name different surfaces of the same deployment, and this
-  server holds both at once. If you are comparing configs across the SDKs,
-  compare the surface, not the string.
-- **HMAC signs the logical route** — e.g. `/api/v1/orders` for v1 routes, the
-  bare route (`/orders`) for legacy ones. The gateway path is part of the base
-  and is not signed over, so on a gatewayed deployment the signed path and the
-  wire path differ; see [Authentication](#authentication).
-- **`cancel_order` requires `market_id`** (the v1 route marks it required).
-  `cancel_all_orders` takes an optional `market_id` to scope a mass-cancel to
-  one market.
-- **Stay on the legacy gateway** (no `/api/v1` route): `fetch_markets`,
-  `fetch_market_risk_params`, `fetch_order` (v1 mounts only PATCH + DELETE on
-  `/orders/{id}`), `fetch_withdrawals`, `fetch_deposits`, `fetch_funding_history`,
-  `fetch_adl_history`, `fetch_adl_events`, `deposit`,
-  `create_deposit`, `claim_faucet`, `add_margin`, the agent /
-  api-key / admin-tier tools, `create_ws_token*`, `fetch_status`, and the
-  `demo/*` reads. (The cancel-on-disconnect and bridge tools are v1-native.)
+- **One base.** `https://api.testnet.nexus.xyz/v1` on testnet, and the bare
+  origin (`http://localhost:9090`) on an indexer that serves at its root, like
+  `local`. The `/v1` is the published prefix the edge strips before the indexer
+  sees the request, so copy the base whole rather than trimming it to the
+  hostname: the bare host routes nothing and answers 404. A
+  `NEXUS_EXCHANGE_API_URL` that still ends in `/api/exchange` is accepted and
+  normalized, so it cannot double up. Which host that is comes from the
+  [network axis](#networks), and a named network keeps its own gateway path when
+  `NEXUS_EXCHANGE_API_URL` only redirects the host.
+- **HMAC signs the bare path** (`/orders`). The base's own prefix is not signed
+  over, so the signed path and the wire path differ by that prefix; see
+  [Authentication](#authentication).
+- **The bridge is the one exception.** The pinned spec (v0.8.1) declares the
+  bridge operations only under `/api/v1/bridge/*`, so those tools still send
+  `/v1/api/v1/bridge/...` and sign `/api/v1/bridge/...`, which routes and
+  verifies. They move to bare paths once a published spec carries the bare
+  twins (ENG-18318 added them upstream).
+- **`cancel_order` requires `market_id`**. `cancel_all_orders` takes an
+  optional `market_id` to scope a mass-cancel to one market.
 
 ### API-surface coverage
 
@@ -212,10 +179,10 @@ server already maps, and the additions it does not expose are listed after the
 list below. Below, the spec version each addition shipped in is noted:
 
 - **Portfolio parity** (v0.7.2) — `fetch_portfolio_history`
-  (`GET /api/v1/account/portfolio-history`: equity + PnL + volume series over a
+  (`GET /account/portfolio-history`: equity + PnL + volume series over a
   `day`/`week`/`month`/`all` window), `fetch_account_state`
-  (`GET /api/v1/account/state`: summary + open positions from one coherent
-  read), and `fetch_trading_fees` (`GET /api/v1/account/fees`: effective
+  (`GET /account/state`: summary + open positions from one coherent
+  read), and `fetch_trading_fees` (`GET /account/fees`: effective
   maker/taker bps, tier, rolling 30d volume, discounts). The same release
   enriched the `Position` schema — `notional_value`, `margin_used`, `roe`,
   `max_leverage`, and `leverage`, each nullable with a `<field>_error`
@@ -226,7 +193,7 @@ list below. Below, the spec version each addition shipped in is noted:
   return them (`fetch_balance`, `fetch_positions`, `fetch_account_state`,
   `fetch_account_summary`) call them out in their descriptions instead.
 - **Account cancel-on-disconnect** (v0.7.1) — `fetch_cancel_on_disconnect` /
-  `set_cancel_on_disconnect` (`GET` / `PUT /api/v1/account/cancel-on-disconnect`).
+  `set_cancel_on_disconnect` (`GET` / `PUT /account/cancel-on-disconnect`).
 - **`/api/v1/bridge` Phase A** (v0.7.1) — `fetch_bridge_assets` (public catalog),
   `create_bridge_deposit_address`, `list_bridge_deposit_addresses`,
   `fetch_bridge_deposits`, and `fetch_bridge_deposit` (five operations).
@@ -310,13 +277,13 @@ longer documents — were **dropped** in favour of the surviving
 
 Five list tools are cursor-paginated (spec v0.7.2, ENG-5506):
 
-| Tool                      | Endpoint                             | `limit` max |
-| ------------------------- | ------------------------------------ | ----------- |
-| `fetch_trades`            | `GET /api/v1/markets/{id}/trades`    | 1000        |
-| `fetch_my_trades`         | `GET /api/v1/fills`                  | 1000        |
-| `fetch_orders`            | `GET /api/v1/orders/history`         | 500         |
-| `fetch_positions_history` | `GET /api/v1/positions/closed`       | 200         |
-| `fetch_equity_history`    | `GET /api/v1/account/equity-history` | 720         |
+| Tool                      | Endpoint                      | `limit` max |
+| ------------------------- | ----------------------------- | ----------- |
+| `fetch_trades`            | `GET /markets/{id}/trades`    | 1000        |
+| `fetch_my_trades`         | `GET /fills`                  | 1000        |
+| `fetch_orders`            | `GET /orders/history`         | 500         |
+| `fetch_positions_history` | `GET /positions/closed`       | 200         |
+| `fetch_equity_history`    | `GET /account/equity-history` | 720         |
 
 Each returns an **envelope**, not a bare array:
 
@@ -645,13 +612,13 @@ Signed requests use the same canonical HMAC-SHA256 scheme the indexer verifies
 signed with the hex-decoded secret and sent as `x-signature` alongside
 `x-api-key` and `x-timestamp`.
 
-For `/api/v1` routes the signed path includes the prefix (e.g. `/api/v1/orders`);
+For `/api/v1` routes the signed path includes the prefix (e.g. `/orders`);
 for legacy gateway routes it is the bare path (e.g. `/orders`). What is signed is
 the **logical route** — the deployment's gateway path belongs to the base and is
 not signed over. On a bare indexer (`NEXUS_EXCHANGE_NETWORK=local`) the two
 coincide, so the client signs exactly what it sends. On a **route-prefixed**
 deployment they differ: on testnet the wire path is
-`/indexer/api/v1/orders` while the signature covers `/api/v1/orders`, so
+`/indexer/orders` while the signature covers `/orders`, so
 verification rests on the route stripping its own prefix before the indexer
 checks (the helm values say it does: `pathPrefix: "/indexer"`). That assumption is unverified
 against real credentials (ENG-6221) — if signed calls 401 on a gatewayed host
@@ -855,12 +822,12 @@ It **requires an explicit `NEXUS_EXCHANGE_API_URL`** and has no default
 (ENG-8092) — `fetch_markets_summary` is a read, and reads are never funds-guarded. The
 URL names the host; the **gateway path** decides where `/api/v1` lands under it
 (ENG-6221), and that comes from the network. So `NEXUS_EXCHANGE_API_URL` alone
-resolves `…/api/exchange/api/v1/…` and prints the bare-URL deprecation notice on
+resolves `…/api/exchange/…` and prints the bare-URL deprecation notice on
 stderr before proceeding, while `NEXUS_EXCHANGE_NETWORK=local` alongside it
 serves both surfaces at the origin and prints no notice — the network declared
 the target, so the URL only redirected the host. Pointing a bare
 `NEXUS_EXCHANGE_API_URL` at an indexer that serves at its root sends
-`/api/v1/*` under `/api/exchange`, where a bare indexer serves nothing; name the
+`/*` under `/api/exchange`, where a bare indexer serves nothing; name the
 network, or describe the stage with the full `custom` bundle (which is where
 `NEXUS_EXCHANGE_GATEWAY_PATH=/` is read — it is refused on its own). If the
 target answers with HTML rather than JSON, on a 404 or on a 200, the check says

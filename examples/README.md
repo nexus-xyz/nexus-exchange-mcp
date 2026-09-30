@@ -43,9 +43,9 @@ the environment by the server itself; see [`.env.example`](../.env.example).
   credentials are not honored there — see the top-level README
   "Authentication" section.
 - **Name the network, not just the URL.** The network carries the deployment
-  shape: a local indexer serves both surfaces at its origin, while a bare
+  shape: a local indexer serves the spec's paths at its origin, while a bare
   `NEXUS_EXCHANGE_API_URL` assumes the public-gateway shape and puts every
-  `/api/v1` route under `/api/exchange`, where that indexer serves nothing
+  route under `/api/exchange`, where that indexer serves nothing
   (ENG-6221). It is also what declares whose money is behind the URL, so
   without it the tools that cannot be undone refuse rather than assume play
   funds — see the top-level README "Undeclared funds" section.

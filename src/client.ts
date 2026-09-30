@@ -211,20 +211,16 @@ export type AuthMode = "hmac" | "bearer" | "admin";
 interface RequestOptions {
   method?: "GET" | "POST" | "DELETE" | "PATCH" | "PUT";
   /**
-   * Full path from the chosen base's origin, leading slash, no query.
-   * For the direct v1 surface this INCLUDES the version prefix, e.g.
-   * "/api/v1/orders"; for the legacy gateway it is the bare route, e.g.
-   * "/orders".
+   * The spec's path, leading slash, no query, appended to the one base
+   * (`ExchangeConfig.baseUrl`). A bare path (`/orders`) for every route except
+   * the bridge reads, which keep `/api/v1/bridge/...` until the pinned spec
+   * declares their bare twins (see {@link V1_ONLY_PATH}).
    *
-   * This LOGICAL path is what gets HMAC-signed; the deployment's gateway path
-   * belongs to the base and is not signed over. So on a gatewayed deployment
-   * the wire path (`/api/exchange/api/v1/orders`) and the signed path
-   * (`/api/v1/orders`) differ, and verification rests on the gateway stripping
-   * its own prefix before the indexer checks. On a bare indexer
-   * (`gatewayPath: ""`) the two coincide — the shape nexus-exchange-api#41
-   * describes ("the caller signs the full request path, not the stripped
-   * path") — and what is passed here must match what that indexer verifies
-   * over.
+   * This path is what gets HMAC-signed; the base's own prefix (`/v1` on the
+   * public hosts) is not signed over, because the edge strips it before the
+   * indexer verifies (EDR-006). So the wire path (`/v1/orders`) and the signed
+   * path (`/orders`) differ, and what is passed here must match what the
+   * indexer verifies over.
    */
   path: string;
   /** Query string without the leading "?". e.g. "limit=50" */
@@ -239,31 +235,15 @@ interface RequestOptions {
    * with `signed`. Omit for public requests.
    */
   auth?: AuthMode;
-  /**
-   * Which surface this route belongs to: "v1" (default) for the `/api/v1/*`
-   * routes, "gateway" for the legacy routes without a v1 equivalent.
-   *
-   * A DECLARATION, not a router. Since ENG-6221 both surfaces hang off the same
-   * deployment base (`directBaseUrl === gatewayBaseUrl` by construction — see
-   * `deriveBases`), so this value no longer changes the composed URL; the
-   * request path alone decides where a call lands.
-   *
-   * It therefore does not fail safe by itself. While the v1 base was the bare
-   * host root, defaulting to "v1" did: a bare route sent without this option
-   * 404'd at that root. Now it would compose the LIVE legacy route instead — and
-   * on the public host that proxy signs with the site's own frontend key (`GET
-   * /api/exchange/agents` answers `200` unauthenticated), so a misrouted
-   * *signed* call would resolve against the site identity rather than fail. The
-   * guard is therefore explicit: `send` rejects a non-v1 path that does not
-   * declare `"gateway"` — as its first statement, before anything is signed —
-   * and `test/client.test.ts` scans the source so a call site that omits it
-   * fails `npm test` rather than at runtime. That scan keys on the `path:`
-   * literal in the options object, not on the function that receives it, so a
-   * route reaching `send` through a helper (`fetchPage`) or through some future
-   * wrapper is checked exactly like a direct `client.request`.
-   */
-  surface?: "v1" | "gateway";
 }
+
+/**
+ * The routes that still carry `/api/v1` under the `/v1` base: the bridge. The
+ * pinned spec (`.api-version`) has no bare twins for them, and
+ * `/v1/api/v1/bridge/...` routes and verifies as `/api/v1/bridge/...`. Drop this
+ * once a published spec declares `/bridge/*` (ENG-18318 added them upstream).
+ */
+export const V1_ONLY_PATH = /^\/api\/v1\/bridge(?:\/|$)/;
 
 /**
  * Response header carrying the cursor for the next page of a list endpoint
@@ -422,27 +402,19 @@ export class ExchangeClient {
   private async send<T>(opts: RequestOptions): Promise<Page<T>> {
     const method = opts.method ?? "GET";
 
-    // Restores the fail-safe ENG-6221 removed. Both bases are now the same
-    // deployment base, so an undeclared bare route no longer 404s at a bare
-    // root — it composes the live legacy route, which on the public host is a
-    // proxy signing with the site's own key. That must be loud rather than
-    // silent. This is a programming error, not an operator one: every call site
-    // is in this repo and all of them declare it today, which
-    // `test/client.test.ts` pins by scanning the source.
-    //
-    // FIRST statement in `send`, before credentials are looked up and before
-    // anything is signed. Behind the credential block it was reachable only
-    // after `MissingCredentialsError`, so the same mistake reported an operator
-    // problem on an unconfigured machine and a programming problem on a
-    // configured one — and it computed an HMAC over the wrong-surface path
-    // before throwing. Ordering it first makes the diagnostic deterministic.
-    if (opts.surface !== "gateway" && !/^\/api\/v1(?:\/|$)/.test(opts.path)) {
+    // Every route is a bare spec path under one base (EDR-006). A leftover
+    // `/api/v1` prefix composes `/v1/api/v1/...` and signs a path that is not
+    // the spec's, so it is refused before anything is signed. The bridge reads
+    // are the only routes the pinned spec still spells under `/api/v1`, and
+    // they are the only ones allowed to keep it. This is a programming error,
+    // not an operator one: every call site is in this repo, and
+    // `test/client.test.ts` scans the source for it.
+    if (/^\/api\/v1(?:\/|$)/.test(opts.path) && !V1_ONLY_PATH.test(opts.path)) {
       throw new Error(
-        `client: ${method} ${opts.path} is not an /api/v1 route, so it must ` +
-          `declare surface: "gateway". Both surfaces hang off one deployment ` +
-          `base (ENG-6221), so an undeclared bare route is sent to the legacy ` +
-          `gateway proxy instead of failing — and that proxy signs with the ` +
-          `site's own key on the public host.`,
+        `client: ${method} ${opts.path} carries the /api/v1 prefix. Requests ` +
+          `use the spec's bare path under the /v1 base (EDR-006, ENG-18323); ` +
+          `only the bridge routes keep /api/v1 until the pinned spec declares ` +
+          `their bare twins.`,
       );
     }
 
@@ -494,11 +466,7 @@ export class ExchangeClient {
       headers["authorization"] = `Bearer ${this.cfg.adminSecret}`;
     }
 
-    const base =
-      opts.surface === "gateway"
-        ? this.cfg.gatewayBaseUrl
-        : this.cfg.directBaseUrl;
-    const url = `${base}${opts.path}${query ? `?${query}` : ""}`;
+    const url = `${this.cfg.baseUrl}${opts.path}${query ? `?${query}` : ""}`;
     const res = await fetch(url, {
       method,
       headers,

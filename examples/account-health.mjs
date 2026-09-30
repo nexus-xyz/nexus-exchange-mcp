@@ -14,7 +14,7 @@
 //                                for a local indexer). Required here even though
 //                                this script only READS: the network carries the
 //                                deployment shape, and a bare URL assumes the
-//                                public-gateway one, which puts every /api/v1
+//                                public-gateway one, which puts every
 //                                route under /api/exchange where a local indexer
 //                                serves nothing (ENG-6221).
 //

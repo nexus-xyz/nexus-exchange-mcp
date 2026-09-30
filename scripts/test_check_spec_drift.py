@@ -897,9 +897,9 @@ class TestAgainstRealSource(unittest.TestCase):
         self.assertEqual(found["local"][1], "")
         self.assertEqual(found["testnet"][1], "")
         self.assertEqual(found["mainnet"][1], "/api/exchange")
-        # Testnet's prefix did not vanish, it moved fields. Pin that, so folding
-        # it into `baseUrl` cannot later be undone by half.
-        self.assertEqual(found["testnet"][0], "https://api.testnet.nexus.xyz/indexer")
+        # Testnet's `/v1` prefix lives in `baseUrl`, not `gatewayPath`. Pin that,
+        # so folding it in cannot later be undone by half.
+        self.assertEqual(found["testnet"][0], "https://api.testnet.nexus.xyz/v1")
 
     def test_generated_manifest_is_committed(self):
         with open(csd.MANIFEST) as f:

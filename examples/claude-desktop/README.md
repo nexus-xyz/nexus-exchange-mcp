@@ -57,8 +57,8 @@ Two things to know:
   target has not declared whose money is behind it, and the tools that cannot be
   undone refuse to run (top-level README, "Undeclared funds"). It also carries
   the deployment shape: it is what tells the server that a local indexer serves
-  BOTH surfaces at its origin, rather than assuming the public-gateway shape and
-  sending every `/api/v1` route under `/api/exchange` (ENG-6221).
+  the spec's paths at its origin, rather than assuming the public-gateway shape and
+  sending every route under `/api/exchange` (ENG-6221).
 - `NEXUS_EXCHANGE_API_URL` must point at a **direct** indexer gateway that
   verifies client HMAC. The public production host proxies authenticated
   requests under the site's own key, so per-caller credentials are not honored

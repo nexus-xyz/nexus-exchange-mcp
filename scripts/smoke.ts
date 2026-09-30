@@ -66,7 +66,7 @@ export function resolveTarget(env: NodeJS.ProcessEnv): string {
         `(ENG-8092). Point it at a host that serves the Exchange API, and name ` +
         `the network alongside it so /api/v1 is composed the way that ` +
         `deployment serves it:\n` +
-        `  NEXUS_EXCHANGE_NETWORK=testnet ${BASE_URL_ENV}=https://api.testnet.nexus.xyz/indexer npm run smoke\n` +
+        `  NEXUS_EXCHANGE_NETWORK=testnet ${BASE_URL_ENV}=https://api.testnet.nexus.xyz/v1 npm run smoke\n` +
         `  NEXUS_EXCHANGE_NETWORK=local ${BASE_URL_ENV}=http://localhost:9090 npm run smoke\n` +
         `This variable ALONE assumes the retired public-gateway shape and ` +
         `appends /api/exchange, which is wrong for both of the above.`,

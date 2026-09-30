@@ -81,6 +81,17 @@ INVARIANTS
    names. Where the canonical operationId has not reached the pinned spec yet, it
    comes from OPERATION_IDS_AHEAD_OF_PIN, stale-checked like SPEC_LEADING_BASES.
 
+6. tool enums == spec enums   (ENG-18805, the MCP slice of ENG-18800)
+   Names can stay green while an enum gains a member: oasdiff calls a new enum
+   value non-breaking, yet a tool whose z.enum lacks it cannot send it, and a
+   tool member the spec lacks sends a value the API rejects. Every `z.enum(...)`
+   in src/tools/index.ts is mapped in ENUM_CHECKS to the spec enum its WIRE
+   values feed (after any friendly-to-wire map, e.g. `limit` -> `Limit`), and the
+   two sets must be equal BOTH ways, as rs does (ENG-5474). An unmapped z.enum,
+   an unreadable `.enum(` shape, or a map missing a friendly value aborts or
+   fails; ENUMS_WITHOUT_SPEC_ENUM (no spec enum at the pin) and
+   ENUM_MEMBERS_AHEAD_OF_SPEC are stale-checked like the other allowlists.
+
 ALLOWLISTS
 ----------
 ONE named set holds the deliberate operation exceptions — an operation is only
@@ -566,6 +577,7 @@ def parse_tools(path=TOOLS_TS):
                     "requested": requested,
                     "sites": sites,
                     "lineno": _lineno(src, j),
+                    "span": (j, obj_end),
                 }
             )
             j = obj_end
@@ -880,6 +892,227 @@ def check_tool_names(tools, spec):
             f"\nOK: every tool is named snake_case(operationId) of the operation "
             f"it calls ({len(OPERATION_IDS_AHEAD_OF_PIN)} operationId(s) read "
             f"from OPERATION_IDS_AHEAD_OF_PIN until the pin catches up)."
+        )
+    return errors
+
+
+# --- Invariant 6: tool enums <-> spec enums (ENG-18805) ----------------------
+
+# Every `z.enum(...)` in src/tools/index.ts, keyed (owner, field) where owner is
+# the enclosing tool name, or the `const` it sits in outside the tools array.
+# Each maps to the spec enum its WIRE values must equal. `wire` names how the
+# tool turns the friendly value into the one it sends: None (sent as-is), the
+# name of a `Record<...>` const whose values are sent, or "ternary" for a
+# `field: a.field === "x" ? "X" : "Y"` line in toWireOrder. `spec` locates the
+# spec enum: ("schema", Schema, property) | ("param", "METHOD /path", name).
+ENUM_CHECKS = {
+    ("friendlyOrderSchema", "side"): {
+        "wire": "ternary",
+        "spec": ("schema", "OrderRequest", "side"),
+    },
+    ("friendlyOrderSchema", "type"): {
+        "wire": "ORDER_TYPE_WIRE",
+        "spec": ("schema", "OrderRequest", "order_type"),
+    },
+    ("friendlyOrderSchema", "time_in_force"): {
+        "wire": None,
+        "spec": ("schema", "OrderRequest", "time_in_force"),
+    },
+    ("fetch_ohlcv", "timeframe"): {
+        "wire": None,
+        "spec": ("param", "GET /markets/{market_id}/candles", "timeframe"),
+    },
+    ("fetch_portfolio_history", "window"): {
+        "wire": None,
+        "spec": ("param", "GET /account/portfolio-history", "window"),
+    },
+    ("fetch_bridge_deposits", "asset"): {
+        "wire": None,
+        "spec": ("param", "GET /api/v1/bridge/deposits", "asset"),
+    },
+    ("fetch_bridge_deposits", "status"): {
+        "wire": None,
+        "spec": ("param", "GET /api/v1/bridge/deposits", "status"),
+    },
+}
+
+# Tool enums whose spec counterpart carries no `enum` at the pinned version, so
+# there is nothing to diff yet: (owner, field) -> (spec locator, why). Stale-
+# checked: once the pin defines an enum there, the entry fails until it moves
+# into ENUM_CHECKS.
+ENUMS_WITHOUT_SPEC_ENUM = {
+    ("add_margin", "direction"): (
+        ("body", "POST /account/margin", "direction"),
+        "v0.8.1 documents the POST /account/margin body by example only",
+    ),
+}
+
+# ((owner, field), wire_member) pairs a tool sends AHEAD OF the pinned spec, the
+# MCP analogue of rs's ENUM_MEMBERS_AHEAD_OF_SPEC. Stale-checked. Empty today.
+ENUM_MEMBERS_AHEAD_OF_SPEC = set()
+
+_ZOD_ENUM_RE = re.compile(r"(\w+)\s*:\s*z\s*\.enum\(\s*(\[[^\]]*\]|[A-Za-z_]\w*)")
+_CONST_RE = re.compile(r"^(?:export\s+)?const\s+(\w+)", re.M)
+_STR_RE = re.compile(r"\"([^\"]*)\"")
+
+
+def _const_list(src, name):
+    m = re.search(rf"const\s+{name}\s*=\s*(\[[^\]]*\])", src)
+    if not m:
+        fail(f"{TOOLS_TS}: z.enum({name}) but no `const {name} = [...]` to read.")
+    return _STR_RE.findall(m.group(1))
+
+
+def parse_tool_enums(tools, path=None):
+    """Return {(owner, field): {"members": [...], "offset": int}} for every
+    `z.enum(...)` in the tool source. Aborts if any `.enum(` call is not in a
+    shape it can read, so a new enum can never be skipped silently."""
+    path = path or TOOLS_TS
+    with open(path) as f:
+        src = f.read()
+    blanked = _blank_out(src)
+    enums = {}
+    for m in _ZOD_ENUM_RE.finditer(src):
+        if blanked[m.start()] == " ":  # inside a string or comment
+            continue
+        field, arg = m.group(1), m.group(2)
+        members = _STR_RE.findall(arg) if arg.startswith("[") else _const_list(src, arg)
+        owner = next(
+            (t["name"] for t in tools if t["span"][0] <= m.start() < t["span"][1]),
+            None,
+        )
+        if owner is None:
+            consts = [c.group(1) for c in _CONST_RE.finditer(src, 0, m.start())]
+            owner = consts[-1] if consts else "?"
+        enums[(owner, field)] = {"members": members, "offset": m.start()}
+    calls = len(re.findall(r"\.enum\(", blanked))
+    if calls != len(enums):
+        fail(
+            f"{path}: {calls} `.enum(` call(s) but {len(enums)} read as "
+            f"`field: z.enum([...])`. An enum in another shape would be skipped "
+            f"by invariant 6; extend _ZOD_ENUM_RE instead of trusting the count."
+        )
+    return enums
+
+
+def _wire_members(src, key, check, members):
+    """The values the tool sends for a friendly enum, or aborts."""
+    wire = check["wire"]
+    if wire is None:
+        return set(members)
+    if wire == "ternary":
+        field = key[1]
+        m = re.search(
+            rf"{field}:\s*a\.{field}\s*===\s*\"(\w+)\"\s*\?\s*\"(\w+)\"\s*:\s*\"(\w+)\"",
+            src,
+        )
+        if not m or len(members) != 2 or m.group(1) not in members:
+            fail(f"{TOOLS_TS}: cannot read the `{field}` ternary for {key}.")
+        return {m.group(2), m.group(3)}
+    m = re.search(rf"const\s+{wire}\b[^=]*=\s*\{{([^}}]*)\}}", src)
+    if not m:
+        fail(f"{TOOLS_TS}: no `const {wire} = {{...}}` map for {key}.")
+    pairs = dict(re.findall(r"(\w+)\s*:\s*\"([^\"]*)\"", m.group(1)))
+    if set(pairs) != set(members):
+        fail(
+            f"{TOOLS_TS}: {wire} keys {sorted(pairs)} != z.enum members "
+            f"{sorted(members)} for {key}; a friendly value would map to nothing."
+        )
+    return set(pairs.values())
+
+
+def _deref(spec, node):
+    while isinstance(node, dict):
+        if "$ref" in node:
+            cur = spec
+            for part in node["$ref"].lstrip("#/").split("/"):
+                cur = cur[part]
+            node = cur
+        elif len(node.get("allOf", [])) == 1 and "enum" not in node:
+            node = node["allOf"][0]
+        else:
+            break
+    return node
+
+
+def spec_enum(spec, locator):
+    """The enum list at a locator, or None when the pinned spec has none there."""
+    kind, where, name = locator
+    try:
+        if kind == "schema":
+            prop = spec["components"]["schemas"][where]["properties"][name]
+            return _deref(spec, prop).get("enum")
+        method, path = where.split()
+        op = spec["paths"][path][method.lower()]
+        if kind == "param":
+            for p in op.get("parameters", []):
+                p = _deref(spec, p)
+                if p.get("name") == name:
+                    return _deref(spec, p.get("schema", {})).get("enum")
+            return None
+        body = op.get("requestBody", {}).get("content", {}).get("application/json", {})
+        props = _deref(spec, body.get("schema", {})).get("properties", {})
+        return _deref(spec, props[name]).get("enum") if name in props else None
+    except KeyError:
+        return None
+
+
+def check_enums(tools, spec, path=None):
+    """Invariant 6: each tool enum's wire members equal its spec enum, both ways.
+    Returns the number of errors printed."""
+    path = path or TOOLS_TS
+    with open(path) as f:
+        src = f.read()
+    enums = parse_tool_enums(tools, path)
+    errors = 0
+
+    def err(msg):
+        nonlocal errors
+        errors += 1
+        print(f"ERROR (enums): {msg}")
+
+    for key in sorted(enums):
+        if key not in ENUM_CHECKS and key not in ENUMS_WITHOUT_SPEC_ENUM:
+            err(
+                f"{key[0]}.{key[1]} is a z.enum with no entry in ENUM_CHECKS: map it "
+                f"to the spec enum it feeds (or ENUMS_WITHOUT_SPEC_ENUM if the pin "
+                f"has none)."
+            )
+    for key in sorted(set(ENUM_CHECKS) | set(ENUMS_WITHOUT_SPEC_ENUM)):
+        if key not in enums:
+            err(f"stale entry {key}: no such z.enum in {os.path.basename(path)}.")
+
+    for key, (locator, _why) in sorted(ENUMS_WITHOUT_SPEC_ENUM.items()):
+        if key in enums and spec_enum(spec, locator) is not None:
+            err(
+                f"{key} is listed in ENUMS_WITHOUT_SPEC_ENUM but the pinned spec now "
+                f"defines an enum at {locator}; move it into ENUM_CHECKS."
+            )
+
+    ahead_used = set()
+    for key, check in sorted(ENUM_CHECKS.items()):
+        if key not in enums:
+            continue
+        spec_members = spec_enum(spec, check["spec"])
+        if spec_members is None:
+            err(f"{key}: the pinned spec has no enum at {check['spec']}.")
+            continue
+        wire = _wire_members(src, key, check, enums[key]["members"])
+        spec_set = set(spec_members)
+        for member in sorted(spec_set - wire):
+            err(f"{key}: spec member {member!r} ({check['spec']}) cannot be sent by the tool.")
+        for member in sorted(wire - spec_set):
+            if (key, member) in ENUM_MEMBERS_AHEAD_OF_SPEC:
+                ahead_used.add((key, member))
+            else:
+                err(f"{key}: the tool sends {member!r}, which {check['spec']} does not define.")
+    for entry in sorted(ENUM_MEMBERS_AHEAD_OF_SPEC - ahead_used):
+        err(f"stale ENUM_MEMBERS_AHEAD_OF_SPEC entry {entry}: the spec defines it or no tool sends it.")
+
+    if not errors:
+        print(
+            f"\nOK: {len(ENUM_CHECKS)} tool enum(s) match their spec enum both ways "
+            f"({len(ENUMS_WITHOUT_SPEC_ENUM)} with no spec enum at the pin)."
         )
     return errors
 
@@ -1289,6 +1522,7 @@ def main():
     failures += check_allowlists(tools, available)
     failures += check_network_gateway_bases(spec)
     failures += check_tool_names(tools, spec)
+    failures += check_enums(tools, spec)
 
     report_coverage(tools, manifest, available, version)
 

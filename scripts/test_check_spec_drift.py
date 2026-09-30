@@ -8,9 +8,9 @@ defeated", and the gap rs's own test suite exists to close.
 
 Three groups:
 
-* **The invariants.** For each of the five (manifest -> spec, manifest ==
+* **The invariants.** For each of the six (manifest -> spec, manifest ==
   declarations, declarations == code, network map -> spec `servers`, tool name
-  == snake_case(operationId)) a synthetic
+  == snake_case(operationId), tool enums == spec enums) a synthetic
   tool source, network map or spec is built that breaks exactly that one, and the
   check must report a non-zero error count. Passing cases are asserted too, so a
   checker that simply always fails would not satisfy this file either.
@@ -841,6 +841,130 @@ class TestInvariant5ToolNames(unittest.TestCase):
         self.assertGreater(self.check(tool, ahead={("GET", "/gone"): "fetchGone"}), 0)
 
 
+ENUM_SOURCE = """\
+const SIDES = ["buy", "sell"] as const;
+const KIND_WIRE: Record<Kind, string> = {
+  limit: "Limit",
+  market: "Market",
+};
+const orderSchema = z.object({
+  side: z.enum(SIDES),
+  kind: z.enum(["limit", "market"]),
+});
+function toWire(a) {
+  return { side: a.side === "buy" ? "Buy" : "Sell", kind: KIND_WIRE[a.kind] };
+}
+export const tools: ToolDef[] = [
+  {
+    name: "fetch_candles",
+    ops: ["GET /candles"],
+    zod: z.object({
+      timeframe: z
+        .enum(["1m", "5m"])
+        .optional(),
+    }),
+    handler: (client, args) => {
+      client.request({ path: "/candles" });
+    },
+  },
+];
+"""
+
+ENUM_CHECKS_FIXTURE = {
+    ("orderSchema", "side"): {"wire": "ternary", "spec": ("schema", "Order", "side")},
+    ("orderSchema", "kind"): {"wire": "KIND_WIRE", "spec": ("schema", "Order", "kind")},
+    ("fetch_candles", "timeframe"): {
+        "wire": None,
+        "spec": ("param", "GET /candles", "timeframe"),
+    },
+}
+
+
+def enum_spec(side=("Buy", "Sell"), kind=("Limit", "Market"), timeframe=("1m", "5m")):
+    return {
+        "components": {
+            "schemas": {
+                "Order": {
+                    "properties": {
+                        "side": {"type": "string", "enum": list(side)},
+                        "kind": {"allOf": [{"$ref": "#/components/schemas/Kind"}]},
+                    }
+                },
+                "Kind": {"type": "string", "enum": list(kind)},
+            }
+        },
+        "paths": {
+            "/candles": {
+                "get": {
+                    "parameters": [
+                        {"name": "timeframe", "in": "query",
+                         "schema": {"type": "string", "enum": list(timeframe)}}
+                    ]
+                }
+            }
+        },
+    }
+
+
+class TestInvariant6Enums(unittest.TestCase):
+    """Each tool enum's wire members must equal its spec enum, both ways
+    (ENG-18805, the MCP port of rs's ENG-5474)."""
+
+    def check(self, spec, source=ENUM_SOURCE, checks=None, without=None, ahead=frozenset()):
+        with as_tool_source(source) as path:
+            with contextlib.redirect_stdout(io.StringIO()):
+                tools = csd.parse_tools(path)
+            with patched("ENUM_CHECKS", checks or dict(ENUM_CHECKS_FIXTURE)), \
+                    patched("ENUMS_WITHOUT_SPEC_ENUM", without or {}), \
+                    patched("ENUM_MEMBERS_AHEAD_OF_SPEC", set(ahead)):
+                return _quiet(csd.check_enums, tools, spec, path)
+
+    def test_matching_enums_pass(self):
+        self.assertEqual(self.check(enum_spec()), 0)
+
+    def test_spec_gains_a_member_the_tool_lacks_fails(self):
+        self.assertGreater(self.check(enum_spec(timeframe=("1m", "5m", "1h"))), 0)
+
+    def test_tool_sends_a_member_the_spec_lacks_fails(self):
+        self.assertGreater(self.check(enum_spec(kind=("Limit",))), 0)
+
+    def test_mapped_wire_values_are_compared_not_friendly_ones(self):
+        # The friendly "buy" never reaches the wire; the spec's "Buy" does.
+        self.assertGreater(self.check(enum_spec(side=("buy", "sell"))), 0)
+
+    def test_allowlisted_member_passes_and_goes_stale(self):
+        spec = enum_spec(kind=("Limit",))
+        ahead = {(("orderSchema", "kind"), "Market")}
+        self.assertEqual(self.check(spec, ahead=ahead), 0)
+        self.assertGreater(self.check(enum_spec(), ahead=ahead), 0)
+
+    def test_unmapped_enum_fails(self):
+        checks = dict(ENUM_CHECKS_FIXTURE)
+        del checks[("fetch_candles", "timeframe")]
+        self.assertGreater(self.check(enum_spec(), checks=checks), 0)
+
+    def test_stale_check_entry_fails(self):
+        checks = dict(ENUM_CHECKS_FIXTURE)
+        checks[("fetch_candles", "gone")] = {"wire": None, "spec": ("param", "GET /candles", "gone")}
+        self.assertGreater(self.check(enum_spec(), checks=checks), 0)
+
+    def test_no_spec_enum_entry_goes_stale_once_the_spec_has_one(self):
+        checks = dict(ENUM_CHECKS_FIXTURE)
+        del checks[("fetch_candles", "timeframe")]
+        without = {("fetch_candles", "timeframe"): (("param", "GET /candles", "timeframe"), "t")}
+        self.assertGreater(self.check(enum_spec(), checks=checks, without=without), 0)
+
+    def test_wire_map_missing_a_friendly_value_aborts(self):
+        source = ENUM_SOURCE.replace('  market: "Market",\n', "")
+        with expect_abort(self):
+            self.check(enum_spec(), source=source)
+
+    def test_enum_in_an_unreadable_shape_aborts(self):
+        source = ENUM_SOURCE.replace("kind: z.enum(", "kind: z.string().pipe(z.enum(")
+        with expect_abort(self):
+            self.check(enum_spec(), source=source)
+
+
 class TestAgainstRealSource(unittest.TestCase):
     """The real src/tools/index.ts, so the synthetic fixtures above cannot pass
     while the file they stand in for has drifted."""
@@ -849,6 +973,13 @@ class TestAgainstRealSource(unittest.TestCase):
     def setUpClass(cls):
         with contextlib.redirect_stdout(io.StringIO()):
             cls.tools = csd.parse_tools()
+
+    def test_every_real_enum_is_mapped(self):
+        # Hermetic: the spec side needs the pinned download, but the mapping's
+        # completeness is a property of the source alone.
+        with contextlib.redirect_stdout(io.StringIO()):
+            found = set(csd.parse_tool_enums(self.tools))
+        self.assertEqual(found, set(csd.ENUM_CHECKS) | set(csd.ENUMS_WITHOUT_SPEC_ENUM))
 
     def test_every_tool_parses_with_a_declaration(self):
         self.assertGreater(len(self.tools), 50)

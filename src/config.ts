@@ -37,41 +37,29 @@ export type CredentialSource = "env" | "headers";
 
 export interface ExchangeConfig {
   /**
-   * Deployment base for the `/api/v1` surface, no trailing slash (e.g.
-   * `https://api.testnet.nexus.xyz/indexer`, or `http://localhost:9090` for a
-   * bare indexer). Tools with a v1 route hit `${directBaseUrl}/api/v1/...`.
+   * The one base every request goes to, no trailing slash (e.g.
+   * `https://api.testnet.nexus.xyz/v1`, or `http://localhost:9090` for a bare
+   * indexer). A tool appends the spec's bare path (`/orders`) and signs that
+   * path; the base's own path prefix (`/v1` on the public hosts) is stripped by
+   * the edge before the indexer verifies, so it is never signed over (EDR-006,
+   * ENG-18323). The bridge routes are the one exception to "bare path": the
+   * pinned spec has no bare twins for them yet, so they still spell
+   * `/api/v1/bridge/...` under this same base. See {@link deriveBases}.
    *
-   * NOT the bare host root on a deployment that mounts the API under a route
-   * prefix. ENG-4740 read the spec's per-path `servers` override as pinning
-   * `/api/v1` to the root; measured, the root of a prefixed deployment does not
-   * serve the API at all — that was the legacy gateway's marketing-app 404, and
-   * it is still true of `api.testnet.nexus.xyz`, where only `…/indexer/api/v1/*`
-   * reaches a route. See {@link deriveBases}.
+   * This replaced a `directBaseUrl` / `gatewayBaseUrl` pair that were equal by
+   * construction since ENG-6221; with the `/api/v1` prefix gone from every other
+   * route there is no surface left for a second field to name.
    *
-   * Equal to {@link ExchangeConfig.gatewayBaseUrl} by construction — one
-   * deployment, two surfaces that differ by path. Kept distinct so a call site
-   * still declares which surface it is addressing.
-   */
-  directBaseUrl: string;
-  /**
-   * Legacy gateway proxy base (`${origin}/api/exchange`), used only by the
-   * tools that do NOT have an `/api/v1` route: demo reads, market specs,
-   * fetch_order (GET by id), withdrawals, adl-history/events, ws-tokens, agents,
-   * api-key management, admin tiers, deposit, funding-payments, health. The
-   * gateway stays live dual-stack (ENG-4751) so these keep working.
-   *
-   * NOTE on authenticated legacy tools: the public `/api/exchange` entry is a
-   * proxy that signs with the site's own frontend key, so per-caller HMAC
-   * headers are not honored there — authenticated reads/trades resolve to the
-   * site account, not yours. To act as a specific account against a legacy
-   * route, target a direct indexer gateway that verifies client HMAC
-   * (auth.rs::verify_hmac): `NEXUS_EXCHANGE_NETWORK=local` for the
+   * NOTE on a deployment behind the retired `/api/exchange` gateway: that proxy
+   * signs with the site's own frontend key, so per-caller HMAC headers are not
+   * honored there and authenticated calls resolve to the site account, not
+   * yours. To act as a specific account, target a deployment that verifies
+   * client HMAC (auth.rs::verify_hmac): `NEXUS_EXCHANGE_NETWORK=local` for the
    * `http://localhost:9090` from the exchange `docker-compose`, or the full
-   * `custom` bundle with `NEXUS_EXCHANGE_GATEWAY_PATH=/`. Naming the network is
-   * what carries the bare-origin shape — a bare `NEXUS_EXCHANGE_API_URL` assumes
-   * the public-gateway path. See the README "Authentication" section.
+   * `custom` bundle with `NEXUS_EXCHANGE_GATEWAY_PATH=/`. See the README
+   * "Authentication" section.
    */
-  gatewayBaseUrl: string;
+  baseUrl: string;
   /** HMAC API key id (header `x-api-key`). Optional — only needed for private tools. */
   apiKey?: string;
   /** HMAC secret (hex). Optional — only needed for private tools. */
@@ -130,7 +118,7 @@ export interface ExchangeConfig {
    * this is the network's published `durableWsUrl` (the spec's `ws_url` —
    * `wss://<host>/v1` on the public hosts, ENG-17132), so the socket URL is
    * written in exactly one place. For an explicit `NEXUS_EXCHANGE_API_URL` or a
-   * custom stage it is scheme-swapped from {@link ExchangeConfig.gatewayBaseUrl},
+   * custom stage it is scheme-swapped from {@link ExchangeConfig.baseUrl},
    * since the caller declared the host and nothing else knows its socket path.
    *
    * Before this existed the server could mint a WebSocket token but never told
@@ -180,73 +168,33 @@ export const API_SPEC_VERSION = "v0.8.1";
 export const DEFAULT_USER_AGENT = `nexus-exchange-mcp/${PACKAGE_VERSION}`;
 
 /**
- * Resolve a configured base URL into the bases the two REST surfaces hang off.
+ * Resolve a configured base URL into the one base every request hangs off.
  *
- * `gatewayPath` names the *deployment shape*, not just where the legacy routes
- * live: `/api/exchange` for a host behind the public gateway, `""` for a bare
- * indexer serving at its root. BOTH surfaces sit under it — the base names the
- * deployment, the path names the surface (`/api/v1/account` vs `/account`), and
- * the two are composed at request time.
+ * `gatewayPath` names the *deployment shape*: `/api/exchange` for a host behind
+ * the retired public gateway convention, `""` for a deployment that serves the
+ * spec's paths directly under its base (the public `/v1` hosts, and a bare
+ * indexer at its root). The request path (`/orders`) is composed onto the
+ * result at request time.
  *
- * This previously stripped `/api/exchange` when building the v1 base, on the
- * premise (ENG-4740, nexus-exchange-api#41) that the indexer serves `/api/v1`
- * at the host root. That premise was read faithfully off the spec — the
- * per-path `servers` override on `/api/v1/*` really does list a bare host — but
- * the SPEC IS WRONG about the public deployments. It holds for `local` and
- * fails wherever the API is mounted under a route prefix. Measured against the
- * legacy gateway, which is what motivated the fix:
- *
- *     /api/v1/account                 404, text/html   (Next.js frontend)
- *     /api/exchange/api/v1/account    401, application/json  (auth reached)
- *
- * and still true, in the same shape, of the durable host testnet moved to in
- * ENG-8869 — `api.testnet.nexus.xyz/api/v1/*` answers `404` (no route) while
- * `…/indexer/api/v1/*` reaches the indexer. Only the prefix's spelling changed.
- *
- * Note what that means for the strip itself: NO BUILT-IN NETWORK EXERCISES IT
- * ANY MORE. Testnet's prefix is `/indexer` and is carried in its `baseUrl`, so
- * the `/api/exchange` suffix is now purely backward-compatible normalization
- * for an operator whose `NEXUS_EXCHANGE_API_URL` still names the retired
- * gateway. It is deliberately not extended to `/indexer`: stripping that would
- * break the built-in testnet base, which legitimately ends in it.
- *
- * `local` is unaffected because its `gatewayPath` is `""`, so the deployment
- * base IS the origin and `/api/v1/...` still resolves at the root — the shape
- * the old premise described, now expressed as data rather than assumed.
- *
- * The signed path is unchanged either way: HMAC covers the logical path
- * (`/api/v1/account`), never the deployment prefix, because the gateway strips
- * its own prefix before the indexer verifies.
- *
- * DELIBERATE DIVERGENCE FROM THE PINNED SPEC — do not "correct" this back when
- * syncing. `scripts/check_spec_drift.py` invariant 4/5 checks the GATEWAY base
- * against the spec's ROOT servers, which still agree, and nothing there checks
- * the v1 base against the per-path override — so a sync that restores the old
- * stripping passes `spec:drift` green. What catches it is `npm test`:
- * "deriveBases hangs both surfaces off one deployment base" pins the composed v1
- * base, so restoring the stripping fails a required check rather than only
- * contradicting a comment. The upstream fix belongs in nexus-exchange-api's
- * per-path `servers` list; until it lands, reality wins over the contract here.
+ * The signed path is the request path only, never the base's own prefix: on the
+ * public hosts the edge strips `/v1` before the indexer verifies, and a gateway
+ * strips its own prefix the same way. So a base is valid exactly when its
+ * deployment strips whatever path the base carries.
  *
  * Either form of `NEXUS_EXCHANGE_API_URL` is still accepted so existing configs
  * keep working: a bare origin, or a value that still carries the `/api/exchange`
- * suffix — the suffix is normalized off the origin before `gatewayPath` is
- * applied, so passing it cannot double up.
+ * suffix. The suffix is normalized off before `gatewayPath` is applied, so
+ * passing it cannot double up. It is deliberately not extended to `/v1`:
+ * stripping that would break the built-in testnet base, which legitimately ends
+ * in it.
  */
 export function deriveBases(
   raw: string,
   gatewayPath: string = "/api/exchange",
-): {
-  directBaseUrl: string;
-  gatewayBaseUrl: string;
-} {
+): string {
   const trimmed = raw.replace(/\/+$/, "");
   const origin = trimmed.replace(/\/api\/exchange$/, "");
-  // One deployment base, two surfaces. These are equal by construction and the
-  // distinction between them lives in the request path; they are kept as
-  // separate fields so call sites still say which surface they mean.
-  const deploymentBase = `${origin}${gatewayPath}`;
-  return { directBaseUrl: deploymentBase, gatewayBaseUrl: deploymentBase };
+  return `${origin}${gatewayPath}`;
 }
 
 /**
@@ -271,7 +219,7 @@ export function normalizeBaseUrl(raw: string): string {
   } catch {
     throw new Error(
       `NEXUS_EXCHANGE_API_URL is not a valid absolute URL: ${JSON.stringify(raw)}. ` +
-        `Expected something like "https://api.testnet.nexus.xyz/indexer".`,
+        `Expected something like "https://api.testnet.nexus.xyz/v1".`,
     );
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
@@ -349,7 +297,7 @@ function warnIfPlaintext(baseUrl: string): void {
 const BARE_URL_DEPRECATION_NOTICE =
   "nexus-exchange-mcp: NOTICE: NEXUS_EXCHANGE_API_URL on its own is deprecated " +
   "and still works. On its own it also assumes the PUBLIC-GATEWAY shape, so " +
-  "/api/v1 resolves under /api/exchange; for an indexer that serves at its " +
+  "every route resolves under /api/exchange; for an indexer that serves at its " +
   "root, add NEXUS_EXCHANGE_NETWORK=local, or describe the deployment with the " +
   "full custom bundle — NEXUS_EXCHANGE_NETWORK=custom plus " +
   "NEXUS_EXCHANGE_NETWORK_LABEL, NEXUS_EXCHANGE_FUNDS and " +
@@ -556,13 +504,11 @@ function resolveTarget(env: NodeJS.ProcessEnv): TargetSelection {
       faucet: desc?.faucet ?? false,
       restBase: normalizeBaseUrl(override),
       // A named network keeps its own deployment SHAPE; the URL only redirects
-      // the HOST. `local` serves both surfaces at its origin (`gatewayPath:
-      // ""`), so taking the URL and discarding the shape would send
-      // `/api/v1/*` to `…/api/exchange/api/v1/*` on a bare indexer that serves
-      // nothing under that prefix. This field used to move only the LEGACY
-      // base, which is why hardcoding it here was invisible; now that both
-      // surfaces hang off it (see {@link deriveBases}) it decides where v1
-      // lands too, and a hardcode silently 404s every v1 tool.
+      // the HOST. `local` serves the spec's paths at its origin (`gatewayPath:
+      // ""`), so taking the URL and discarding the shape would send `/orders`
+      // to `…/api/exchange/orders` on a bare indexer that serves nothing under
+      // that prefix. Every request hangs off this base (see
+      // {@link deriveBases}), so a hardcode here silently 404s every tool.
       //
       // With no network named — the deprecated bare-URL form — there is no
       // descriptor to read a shape from, so the public-gateway convention
@@ -609,24 +555,19 @@ export function loadConfig(
   // Applies to a custom stage exactly as it does to a named network: a private
   // deployment on plain http is precisely the case this warning exists for.
   warnIfPlaintext(target.restBase);
-  const { directBaseUrl, gatewayBaseUrl } = deriveBases(
-    target.restBase,
-    target.gatewayPath,
-  );
+  const baseUrl = deriveBases(target.restBase, target.gatewayPath);
   // A named network publishes its socket base (`durableWsUrl`), and that string
-  // is used verbatim so the durable and derived values cannot disagree — on
-  // testnet it is `/v1` while the REST base is still `/indexer`, both stripped
-  // to `/` at the edge (ENG-17132). With a URL override there is no published
-  // value for that host, so `/ws`, `/stream`, `/ws/token` and `/ws-tokens`
-  // resolve against the gateway base, which the spec puts them on (no per-path
-  // `servers` override), with the scheme swapped.
-  const wsUrl = publishedWsUrl ?? gatewayBaseUrl.replace(/^http/, "ws");
+  // is used verbatim so the durable and derived values cannot disagree (on the
+  // public hosts it is the REST base with the scheme swapped, `/v1` included,
+  // ENG-17132). With a URL override there is no published value for that host,
+  // so `/ws` and `/stream` resolve against the REST base with the scheme
+  // swapped.
+  const wsUrl = publishedWsUrl ?? baseUrl.replace(/^http/, "ws");
 
   // Frozen: a tool handler receives this object, and a base URL that can be
   // rewritten at runtime is a redirect for every signed request that follows.
   return Object.freeze({
-    directBaseUrl,
-    gatewayBaseUrl,
+    baseUrl,
     // Already frozen by `defineTarget` — `Object.freeze` is shallow, so the
     // target has to carry its own immutability rather than inherit it here.
     target,

@@ -626,18 +626,18 @@ export const tools: ToolDef[] = [
   // ── Public market data (no credentials) ──────────────────────────────────
   {
     name: "fetch_markets_summary",
-    ops: ["GET /api/v1/markets/summary"],
+    ops: ["GET /markets/summary"],
     description:
       "List all tradable markets with their current summary (mark price, 24h " +
       "change, volume, open interest, funding). Public — no credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/api/v1/markets/summary" }),
+    handler: (client) => client.request({ path: "/markets/summary" }),
   },
   {
     name: "fetch_ticker",
-    ops: ["GET /api/v1/markets/{market_id}/ticker"],
+    ops: ["GET /markets/{market_id}/ticker"],
     description:
       "Get the ticker (last price, bid/ask, 24h stats) for one market, e.g. " +
       '"BTC-USDX-PERP". Public — no credentials needed.',
@@ -655,13 +655,13 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(market_id)}/ticker`,
+        path: `/markets/${encodeURIComponent(market_id)}/ticker`,
       });
     },
   },
   {
     name: "fetch_order_book",
-    ops: ["GET /api/v1/markets/{market_id}/orderbook"],
+    ops: ["GET /markets/{market_id}/orderbook"],
     description:
       "Get the current order book (bids/asks with price + size) for one market. " +
       "Public — no credentials needed.",
@@ -679,7 +679,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(market_id)}/orderbook`,
+        path: `/markets/${encodeURIComponent(market_id)}/orderbook`,
       });
     },
   },
@@ -695,23 +695,22 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/markets" }),
+    handler: (client) => client.request({ path: "/markets" }),
   },
   {
     name: "fetch_tickers",
-    ops: ["GET /api/v1/tickers"],
+    ops: ["GET /tickers"],
     description:
       "Get tickers (last price, bid/ask, 24h stats) for ALL markets in one " +
       "call. Public — no credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/api/v1/tickers" }),
+    handler: (client) => client.request({ path: "/tickers" }),
   },
   {
     name: "fetch_mark_price",
-    ops: ["GET /api/v1/markets/{market_id}/mark-price"],
+    ops: ["GET /markets/{market_id}/mark-price"],
     description:
       "Get the current mark price for one market. Public — no credentials needed.",
     inputSchema: jsonSchema(
@@ -728,13 +727,13 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(market_id)}/mark-price`,
+        path: `/markets/${encodeURIComponent(market_id)}/mark-price`,
       });
     },
   },
   {
     name: "fetch_market_status",
-    ops: ["GET /api/v1/markets/{market_id}/status"],
+    ops: ["GET /markets/{market_id}/status"],
     description:
       "Get a market's trading status and halt info (whether trading is open, " +
       "halted, or in auction). Public — no credentials needed.",
@@ -752,13 +751,13 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(market_id)}/status`,
+        path: `/markets/${encodeURIComponent(market_id)}/status`,
       });
     },
   },
   {
     name: "fetch_trades",
-    ops: ["GET /api/v1/markets/{market_id}/trades"],
+    ops: ["GET /markets/{market_id}/trades"],
     description:
       "Get recent public trades (prints) for one market, newest first. " +
       `${PAGINATION_NOTE} Public — no credentials needed.`,
@@ -787,14 +786,14 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const a = args as { market_id: string; limit?: number; cursor?: string };
       return fetchPage(client, a.cursor, {
-        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/trades`,
+        path: `/markets/${encodeURIComponent(a.market_id)}/trades`,
         query: pagedQuery(a),
       });
     },
   },
   {
     name: "fetch_ohlcv",
-    ops: ["GET /api/v1/markets/{market_id}/candles"],
+    ops: ["GET /markets/{market_id}/candles"],
     description:
       "Get OHLCV candles for one market. Public — no credentials needed. " +
       "Timeframe is one of 1s, 1m, 5m, 1h (default 1m).",
@@ -834,14 +833,14 @@ export const tools: ToolDef[] = [
       if (a.timeframe) params.set("timeframe", a.timeframe);
       if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/candles`,
+        path: `/markets/${encodeURIComponent(a.market_id)}/candles`,
         query: params.toString(),
       });
     },
   },
   {
     name: "fetch_funding_rate_history",
-    ops: ["GET /api/v1/markets/{market_id}/funding"],
+    ops: ["GET /markets/{market_id}/funding"],
     description:
       "Get the funding-rate history for one perpetual market. Public — no " +
       "credentials needed.",
@@ -872,7 +871,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/funding`,
+        path: `/markets/${encodeURIComponent(a.market_id)}/funding`,
         query,
       });
     },
@@ -880,7 +879,7 @@ export const tools: ToolDef[] = [
 
   {
     name: "fetch_funding_samples",
-    ops: ["GET /api/v1/markets/{market_id}/funding-samples"],
+    ops: ["GET /markets/{market_id}/funding-samples"],
     description:
       "Get the dense per-tick funding premium-index samples for one perpetual " +
       "market (60s cadence, up to 480 points = 8h). Finer-grained than " +
@@ -911,7 +910,7 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        path: `/api/v1/markets/${encodeURIComponent(a.market_id)}/funding-samples`,
+        path: `/markets/${encodeURIComponent(a.market_id)}/funding-samples`,
         query,
       });
     },
@@ -937,7 +936,6 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const { market_id } = args as { market_id: string };
       return client.request({
-        surface: "gateway",
         path: `/markets/${encodeURIComponent(market_id)}/risk-params`,
       });
     },
@@ -946,25 +944,25 @@ export const tools: ToolDef[] = [
   // ── Public venue statistics (no credentials) ──────────────────────────────
   {
     name: "fetch_stats",
-    ops: ["GET /api/v1/stats"],
+    ops: ["GET /stats"],
     description:
       "Get aggregate venue statistics (volume, trades, throughput) plus " +
       "rolling unique-trader counts. Public — no credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/api/v1/stats" }),
+    handler: (client) => client.request({ path: "/stats" }),
   },
   {
     name: "fetch_stats_history",
-    ops: ["GET /api/v1/stats/history"],
+    ops: ["GET /stats/history"],
     description:
       "Get the venue's per-second throughput history (ring buffer, up to 3600 " +
       "points). Public — no credentials needed.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) => client.request({ path: "/api/v1/stats/history" }),
+    handler: (client) => client.request({ path: "/stats/history" }),
   },
 
   // ── Public demo account (no credentials) ──────────────────────────────────
@@ -981,8 +979,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/demo/account" }),
+    handler: (client) => client.request({ path: "/demo/account" }),
   },
   {
     name: "get_demo_positions",
@@ -992,8 +989,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/demo/positions" }),
+    handler: (client) => client.request({ path: "/demo/positions" }),
   },
   {
     name: "get_demo_orders",
@@ -1003,26 +999,24 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/demo/orders" }),
+    handler: (client) => client.request({ path: "/demo/orders" }),
   },
 
   // ── Account reads (require credentials) ───────────────────────────────────
   {
     name: "fetch_balance",
-    ops: ["GET /api/v1/account"],
+    ops: ["GET /account"],
     description:
       "Get the authenticated account snapshot: collateral balance, equity, and " +
       `positions. ${ENRICHED_POSITION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({ path: "/api/v1/account", signed: true }),
+    handler: (client) => client.request({ path: "/account", signed: true }),
   },
   {
     name: "fetch_account_summary",
-    ops: ["GET /api/v1/account/summary"],
+    ops: ["GET /account/summary"],
     description:
       "Get the authenticated account's portfolio summary (equity, margin " +
       "usage, PnL rollup) — a richer view than `fetch_balance`. Includes " +
@@ -1037,11 +1031,11 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/api/v1/account/summary", signed: true }),
+      client.request({ path: "/account/summary", signed: true }),
   },
   {
     name: "fetch_account_state",
-    ops: ["GET /api/v1/account/state"],
+    ops: ["GET /account/state"],
     description:
       "Get the authenticated account's full state in ONE call: the portfolio " +
       "summary aggregates plus every open position (`{ summary, positions }`). " +
@@ -1056,11 +1050,11 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/api/v1/account/state", signed: true }),
+      client.request({ path: "/account/state", signed: true }),
   },
   {
     name: "fetch_trading_fees",
-    ops: ["GET /api/v1/account/fees"],
+    ops: ["GET /account/fees"],
     description:
       "Get the authenticated account's effective fee schedule: maker/taker " +
       "rate in basis points (a NEGATIVE maker rate is a rebate paid TO the " +
@@ -1073,7 +1067,7 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/api/v1/account/fees", signed: true }),
+      client.request({ path: "/account/fees", signed: true }),
   },
   // The HEAVY-read weighting below is edge-internal and deliberately absent
   // from the OpenAPI contract, so it can't be cited from the spec: the gateway
@@ -1090,7 +1084,7 @@ export const tools: ToolDef[] = [
   // changing the number an agent is told to budget against.
   {
     name: "fetch_portfolio_history",
-    ops: ["GET /api/v1/account/portfolio-history"],
+    ops: ["GET /account/portfolio-history"],
     description:
       "Get the authenticated account's portfolio time-series — equity, " +
       "cumulative trading PnL, and cumulative traded volume — over a " +
@@ -1137,7 +1131,7 @@ export const tools: ToolDef[] = [
       if (a.window) params.set("window", a.window);
       if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
-        path: "/api/v1/account/portfolio-history",
+        path: "/account/portfolio-history",
         query: params.toString(),
         signed: true,
       });
@@ -1145,7 +1139,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_equity_history",
-    ops: ["GET /api/v1/account/equity-history"],
+    ops: ["GET /account/equity-history"],
     description:
       "Get the authenticated account's equity time-series (5s cadence, ~1h " +
       "window), oldest first. For a longer window, or for PnL and volume " +
@@ -1168,7 +1162,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const a = args as { limit?: number; cursor?: string };
       return fetchPage(client, a.cursor, {
-        path: "/api/v1/account/equity-history",
+        path: "/account/equity-history",
         query: pagedQuery(a),
         signed: true,
       });
@@ -1176,19 +1170,18 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_positions",
-    ops: ["GET /api/v1/positions"],
+    ops: ["GET /positions"],
     description:
       "Get the authenticated account's open positions. " +
       `${ENRICHED_POSITION_NOTE} Requires API credentials.`,
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({ path: "/api/v1/positions", signed: true }),
+    handler: (client) => client.request({ path: "/positions", signed: true }),
   },
   {
     name: "fetch_positions_history",
-    ops: ["GET /api/v1/positions/closed"],
+    ops: ["GET /positions/closed"],
     description:
       "Get the authenticated account's closed positions (realized PnL per " +
       `position). ${PAGINATION_NOTE} Requires API credentials.`,
@@ -1209,7 +1202,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const a = args as { limit?: number; cursor?: string };
       return fetchPage(client, a.cursor, {
-        path: "/api/v1/positions/closed",
+        path: "/positions/closed",
         query: pagedQuery(a),
         signed: true,
       });
@@ -1217,14 +1210,13 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_open_orders",
-    ops: ["GET /api/v1/orders"],
+    ops: ["GET /orders"],
     description:
       "Get the authenticated account's resting (open) orders. Requires API credentials.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({ path: "/api/v1/orders", signed: true }),
+    handler: (client) => client.request({ path: "/orders", signed: true }),
   },
   {
     name: "fetch_order",
@@ -1262,7 +1254,6 @@ export const tools: ToolDef[] = [
         ? `market_id=${encodeURIComponent(a.market_id)}`
         : "";
       return client.request({
-        surface: "gateway",
         path: `/orders/${encodeURIComponent(a.order_id)}`,
         query,
         signed: true,
@@ -1271,7 +1262,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_orders",
-    ops: ["GET /api/v1/orders/history"],
+    ops: ["GET /orders/history"],
     description:
       "Get the authenticated account's terminal-status order history (filled / " +
       `cancelled / rejected / expired), newest first. ${PAGINATION_NOTE} ` +
@@ -1293,7 +1284,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const a = args as { limit?: number; cursor?: string };
       return fetchPage(client, a.cursor, {
-        path: "/api/v1/orders/history",
+        path: "/orders/history",
         query: pagedQuery(a),
         signed: true,
       });
@@ -1301,7 +1292,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_my_trades",
-    ops: ["GET /api/v1/fills"],
+    ops: ["GET /fills"],
     description:
       "List the authenticated account's fills (executed trades), newest first. " +
       `${PAGINATION_NOTE} Requires API credentials.`,
@@ -1322,7 +1313,7 @@ export const tools: ToolDef[] = [
     handler: (client, args) => {
       const a = args as { limit?: number; cursor?: string };
       return fetchPage(client, a.cursor, {
-        path: "/api/v1/fills",
+        path: "/fills",
         query: pagedQuery(a),
         signed: true,
       });
@@ -1359,7 +1350,6 @@ export const tools: ToolDef[] = [
       if (a.market_id) params.set("market_id", a.market_id);
       if (a.limit !== undefined) params.set("limit", String(a.limit));
       return client.request({
-        surface: "gateway",
         path: "/funding",
         query: params.toString(),
         signed: true,
@@ -1387,7 +1377,6 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        surface: "gateway",
         path: "/withdrawals",
         query,
         signed: true,
@@ -1415,7 +1404,6 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        surface: "gateway",
         path: "/deposits",
         query,
         signed: true,
@@ -1424,7 +1412,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "fetch_rate_limit_status",
-    ops: ["GET /api/v1/account/rate-limit"],
+    ops: ["GET /account/rate-limit"],
     description:
       "Get the authenticated account's current rate-limit status (remaining " +
       "request budget). Useful for an agent to pace itself. Requires API " +
@@ -1433,7 +1421,7 @@ export const tools: ToolDef[] = [
     zod: z.object({}).strict(),
     requiresAuth: true,
     handler: (client) =>
-      client.request({ path: "/api/v1/account/rate-limit", signed: true }),
+      client.request({ path: "/account/rate-limit", signed: true }),
   },
   {
     name: "fetch_adl_history",
@@ -1467,7 +1455,6 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        surface: "gateway",
         path: `/account/${encodeURIComponent(a.address)}/adl-history`,
         query,
         signed: true,
@@ -1478,7 +1465,7 @@ export const tools: ToolDef[] = [
   // ── Cancel-on-disconnect (dead man's switch; requires credentials) ────────
   {
     name: "fetch_cancel_on_disconnect",
-    ops: ["GET /api/v1/account/cancel-on-disconnect"],
+    ops: ["GET /account/cancel-on-disconnect"],
     description:
       "Get the authenticated account's cancel-on-disconnect (COD) status. COD " +
       "is an opt-in dead man's switch: when the account's last authenticated " +
@@ -1494,13 +1481,13 @@ export const tools: ToolDef[] = [
     requiresAuth: true,
     handler: (client) =>
       client.request({
-        path: "/api/v1/account/cancel-on-disconnect",
+        path: "/account/cancel-on-disconnect",
         signed: true,
       }),
   },
   {
     name: "set_cancel_on_disconnect",
-    ops: ["PUT /api/v1/account/cancel-on-disconnect"],
+    ops: ["PUT /account/cancel-on-disconnect"],
     description:
       "Enable or disable cancel-on-disconnect (COD) for the authenticated " +
       "account. Pass `enabled: true` to arm the dead man's switch (the " +
@@ -1525,7 +1512,7 @@ export const tools: ToolDef[] = [
       const { enabled } = args as { enabled: boolean };
       return client.request({
         method: "PUT",
-        path: "/api/v1/account/cancel-on-disconnect",
+        path: "/account/cancel-on-disconnect",
         body: { enabled },
         signed: true,
       });
@@ -1535,7 +1522,7 @@ export const tools: ToolDef[] = [
   // ── Trade actions (require credentials) ───────────────────────────────────
   {
     name: "create_order",
-    ops: ["POST /api/v1/orders"],
+    ops: ["POST /orders"],
     description:
       "Place an order on a market, buy/sell. Supports limit, market, stop-loss " +
       "(stop_limit / stop_market), take-profit (take_profit_limit / " +
@@ -1552,7 +1539,7 @@ export const tools: ToolDef[] = [
       const body = toWireOrder(args as FriendlyOrder);
       return client.request({
         method: "POST",
-        path: "/api/v1/orders",
+        path: "/orders",
         body,
         signed: true,
       });
@@ -1560,7 +1547,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "create_orders",
-    ops: ["POST /api/v1/orders/batch"],
+    ops: ["POST /orders/batch"],
     description:
       "Submit multiple orders in one request. Each order has the same shape as " +
       "`create_order` (market_id, side, type, size, and the type-dependent " +
@@ -1591,7 +1578,7 @@ export const tools: ToolDef[] = [
       const body = a.orders.map(toWireOrder);
       return client.request({
         method: "POST",
-        path: "/api/v1/orders/batch",
+        path: "/orders/batch",
         body,
         signed: true,
       });
@@ -1599,7 +1586,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "cancel_order",
-    ops: ["DELETE /api/v1/orders/{order_id}"],
+    ops: ["DELETE /orders/{order_id}"],
     description:
       "Cancel ONE resting order by `order_id`. `market_id` is required (the " +
       "route uses it for routing). This tool only ever cancels the single " +
@@ -1629,7 +1616,7 @@ export const tools: ToolDef[] = [
       const a = args as { order_id: string; market_id: string };
       return client.request({
         method: "DELETE",
-        path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
+        path: `/orders/${encodeURIComponent(a.order_id)}`,
         query: `market_id=${encodeURIComponent(a.market_id)}`,
         signed: true,
       });
@@ -1637,7 +1624,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "cancel_all_orders",
-    ops: ["DELETE /api/v1/orders"],
+    ops: ["DELETE /orders"],
     description:
       "Cancel ALL of the authenticated account's open orders, optionally " +
       "scoped to one market with `market_id`. Destructive: you must pass " +
@@ -1675,7 +1662,7 @@ export const tools: ToolDef[] = [
         : "";
       return client.request({
         method: "DELETE",
-        path: "/api/v1/orders",
+        path: "/orders",
         query,
         signed: true,
       });
@@ -1683,7 +1670,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "edit_order",
-    ops: ["PATCH /api/v1/orders/{order_id}"],
+    ops: ["PATCH /orders/{order_id}"],
     description:
       "Amend a resting order's price and/or size in one atomic cancel-replace " +
       "operation. At least one of `price` or `size` is required; a pre-trade " +
@@ -1743,7 +1730,7 @@ export const tools: ToolDef[] = [
       if (a.size !== undefined) body.size = a.size;
       return client.request({
         method: "PATCH",
-        path: `/api/v1/orders/${encodeURIComponent(a.order_id)}`,
+        path: `/orders/${encodeURIComponent(a.order_id)}`,
         query: `market_id=${encodeURIComponent(a.market_id)}`,
         body,
         signed: true,
@@ -1752,7 +1739,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "preview_order",
-    ops: ["POST /api/v1/orders/preview"],
+    ops: ["POST /orders/preview"],
     description:
       "Preview an order without submitting it: projects the margin, equity, " +
       "and fee impact of the order. Takes the same arguments as `create_order`. " +
@@ -1764,7 +1751,7 @@ export const tools: ToolDef[] = [
       const body = toWireOrder(args as FriendlyOrder);
       return client.request({
         method: "POST",
-        path: "/api/v1/orders/preview",
+        path: "/orders/preview",
         body,
         signed: true,
       });
@@ -1804,7 +1791,6 @@ export const tools: ToolDef[] = [
       const query =
         a.limit !== undefined ? `limit=${encodeURIComponent(a.limit)}` : "";
       return client.request({
-        surface: "gateway",
         path: `/markets/${encodeURIComponent(a.market_id)}/adl-events`,
         query,
         signed: true,
@@ -1837,7 +1823,6 @@ export const tools: ToolDef[] = [
       const { amount } = args as { amount: string };
       return client.request({
         method: "POST",
-        surface: "gateway",
         path: "/account/deposit",
         body: { amount },
         signed: true,
@@ -1846,7 +1831,7 @@ export const tools: ToolDef[] = [
   },
   {
     name: "claim_credit",
-    ops: ["POST /api/v1/account/credit"],
+    ops: ["POST /account/credit"],
     description:
       "Claim synthetic USDX credit from the testnet faucet, up to a per-key " +
       "daily allowance (default 500 USDX, resets midnight UTC). Pass `amount` " +
@@ -1871,7 +1856,7 @@ export const tools: ToolDef[] = [
       const body = a.amount !== undefined ? { amount: a.amount } : {};
       return client.request({
         method: "POST",
-        path: "/api/v1/account/credit",
+        path: "/account/credit",
         body,
         signed: true,
       });
@@ -1913,7 +1898,6 @@ export const tools: ToolDef[] = [
       if (a.asset !== undefined) body.asset = a.asset;
       return client.request({
         method: "POST",
-        surface: "gateway",
         path: "/deposits",
         body,
         signed: true,
@@ -1935,7 +1919,6 @@ export const tools: ToolDef[] = [
     handler: (client) =>
       client.request({
         method: "POST",
-        surface: "gateway",
         path: "/faucet",
         signed: true,
       }),
@@ -1987,7 +1970,6 @@ export const tools: ToolDef[] = [
       };
       return client.request({
         method: "POST",
-        surface: "gateway",
         path: "/account/margin",
         body: {
           market_id: a.market_id,
@@ -2319,8 +2301,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/agents", signed: true }),
+    handler: (client) => client.request({ path: "/agents", signed: true }),
   },
   {
     name: "register_agent",
@@ -2398,7 +2379,6 @@ export const tools: ToolDef[] = [
       if (a.label !== undefined) body.label = a.label;
       return client.request({
         method: "POST",
-        surface: "gateway",
         path: "/agents/register",
         body,
       });
@@ -2440,7 +2420,6 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
-        surface: "gateway",
         path: `/agents/${encodeURIComponent(a.address)}`,
         signed: true,
       });
@@ -2483,7 +2462,6 @@ export const tools: ToolDef[] = [
       const a = args as { signature: string; message?: string };
       return client.request({
         method: "POST",
-        surface: "gateway",
         path: "/auth/login",
         body: {
           message: a.message ?? "Sign in to Nexus Exchange",
@@ -2502,8 +2480,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/keys", auth: "bearer" }),
+    handler: (client) => client.request({ path: "/keys", auth: "bearer" }),
   },
   {
     name: "create_api_key",
@@ -2519,7 +2496,6 @@ export const tools: ToolDef[] = [
     handler: (client) =>
       client.request({
         method: "POST",
-        surface: "gateway",
         path: "/keys",
         auth: "bearer",
       }),
@@ -2560,7 +2536,6 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
-        surface: "gateway",
         path: `/keys/${encodeURIComponent(a.key_id)}`,
         auth: "bearer",
       });
@@ -2584,7 +2559,6 @@ export const tools: ToolDef[] = [
     handler: async (client) => {
       const minted = await client.request({
         method: "POST",
-        surface: "gateway",
         path: "/ws/token",
         signed: true,
       });
@@ -2606,7 +2580,6 @@ export const tools: ToolDef[] = [
     handler: async (client) => {
       const minted = await client.request({
         method: "POST",
-        surface: "gateway",
         path: "/ws-tokens",
         signed: true,
       });
@@ -2629,8 +2602,7 @@ export const tools: ToolDef[] = [
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: false,
-    handler: (client) =>
-      client.request({ surface: "gateway", path: "/status" }),
+    handler: (client) => client.request({ path: "/status" }),
   },
 
   // ── Admin tier management (operator-only; gated off by default) ────────────
@@ -2649,7 +2621,6 @@ export const tools: ToolDef[] = [
     adminOnly: true,
     handler: (client) =>
       client.request({
-        surface: "gateway",
         path: "/admin/tiers",
         auth: "admin",
       }),
@@ -2683,7 +2654,6 @@ export const tools: ToolDef[] = [
       const a = args as { address: string; tier: string };
       return client.request({
         method: "PUT",
-        surface: "gateway",
         path: "/admin/tiers",
         body: { address: a.address, tier: a.tier },
         auth: "admin",
@@ -2726,7 +2696,6 @@ export const tools: ToolDef[] = [
       }
       return client.request({
         method: "DELETE",
-        surface: "gateway",
         path: `/admin/tiers/${encodeURIComponent(a.address)}`,
         auth: "admin",
       });

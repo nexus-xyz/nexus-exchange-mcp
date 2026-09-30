@@ -12,7 +12,7 @@
 //                                for a local indexer). Required twice over: it
 //                                carries the deployment shape, so without it a
 //                                bare URL assumes the public-gateway one and
-//                                every /api/v1 route lands under /api/exchange
+//                                every route lands under /api/exchange
 //                                (ENG-6221); and an undeclared target refuses
 //                                the tools that move funds rather than assume
 //                                play money (ENG-9828).

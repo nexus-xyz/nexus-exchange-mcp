@@ -699,19 +699,9 @@ def parse_networks():
 # derived base matches the recorded string EXACTLY, so any further drift still
 # fails, and the entry is stale-checked below so it cannot rot into a permanent
 # exemption once the spec catches up. Same philosophy as the operation
-# allowlists above, and the same "reality wins over the contract" precedent
-# `deriveBases` already sets in src/config.ts.
-SPEC_LEADING_BASES = {
-    "testnet": (
-        "https://api.testnet.nexus.xyz/indexer",
-        "ENG-8869: repointed off the decommissioned exchange.nexus.xyz gateway "
-        "(ENG-14039, 500s on every route) onto the durable host. The pinned "
-        "spec publishes '/v1'-rooted durable bases, a layout ENG-9134 settled "
-        "against, and it does not know the '/indexer' route prefix the "
-        "deployment actually mounts the indexer under. Correcting the spec is "
-        "ENG-9962; delete this entry when it lands.",
-    ),
-}
+# allowlists above.
+# Empty since ENG-18323: testnet's base is the spec's `/v1` root server again.
+SPEC_LEADING_BASES = {}
 
 
 def check_network_gateway_bases(spec):
@@ -793,19 +783,19 @@ def check_network_gateway_bases(spec):
 # no longer defines, or whose pinned operationId now equals the value, fails until
 # it is deleted. So the spec-autobump PR that carries ENG-17740 empties this map.
 OPERATION_IDS_AHEAD_OF_PIN = {
-    ("GET", "/api/v1/account/fees"): "fetchTradingFeesV1",
-    ("POST", "/api/v1/account/credit"): "claimCreditV1",
+    ("GET", "/account/fees"): "fetchTradingFees",
+    ("POST", "/account/credit"): "claimCredit",
     ("POST", "/account/margin"): "addMargin",
     ("GET", "/admin/tiers"): "fetchTiers",
     ("GET", "/agents"): "fetchAgents",
     ("GET", "/api/v1/bridge/assets"): "fetchBridgeAssets",
     ("GET", "/api/v1/bridge/deposits"): "fetchBridgeDeposits",
     ("GET", "/api/v1/bridge/deposits/{id}"): "fetchBridgeDeposit",
-    ("GET", "/api/v1/fills"): "fetchMyTradesV1",
-    ("GET", "/api/v1/markets/{market_id}/funding"): "fetchFundingRateHistoryV1",
-    ("POST", "/api/v1/orders/batch"): "createOrdersV1",
-    ("GET", "/api/v1/orders/history"): "fetchOrdersV1",
-    ("GET", "/api/v1/positions/closed"): "fetchPositionsHistoryV1",
+    ("GET", "/fills"): "fetchMyTrades",
+    ("GET", "/markets/{market_id}/funding"): "fetchFundingRateHistory",
+    ("POST", "/orders/batch"): "createOrders",
+    ("GET", "/orders/history"): "fetchOrders",
+    ("GET", "/positions/closed"): "fetchPositionsHistory",
     ("GET", "/funding"): "fetchFundingHistory",
     ("GET", "/keys"): "fetchApiKeys",
 }

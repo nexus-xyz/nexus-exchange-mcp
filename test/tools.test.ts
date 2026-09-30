@@ -35,8 +35,7 @@ const PLAY_TARGET = defineTarget({
 /** A client with full creds (HMAC + session + admin) for happy-path mapping. */
 function fullClient(overrides: Partial<ExchangeConfig> = {}): ExchangeClient {
   return new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
     target: PLAY_TARGET,
     apiKey: "nx_test",
     apiSecret: "00",
@@ -95,8 +94,7 @@ test("fetch_adl_events encodes market id and forwards limit, signed", async () =
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 
   const noCreds = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
   });
   await assert.rejects(
     () =>
@@ -129,7 +127,7 @@ test("claim_credit sends {amount} when given and {} when omitted", async () => {
   const withAmount = await capture(fullClient(), (c) =>
     findTool("claim_credit")!.handler(c, { amount: "250" }),
   );
-  assert.equal(withAmount[0].url, `${BASE}/api/v1/account/credit`);
+  assert.equal(withAmount[0].url, `${BASE}/account/credit`);
   assert.deepEqual(withAmount[0].body, { amount: "250" });
 
   const full = await capture(fullClient(), (c) =>
@@ -151,8 +149,7 @@ test("fetch_agents GETs /agents signed", async () => {
 test("register_agent POSTs the signature body and needs no credentials", async () => {
   // No HMAC creds: registration is authorized by the wallet signature.
   const client = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
   });
   const calls = await capture(client, (c) =>
     findTool("register_agent")!.handler(c, {
@@ -177,8 +174,7 @@ test("register_agent POSTs the signature body and needs no credentials", async (
 
 test("register_agent omits optional fields when not provided", async () => {
   const client = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
   });
   const calls = await capture(client, (c) =>
     findTool("register_agent")!.handler(c, {
@@ -221,8 +217,7 @@ test("revoke_agent refuses without confirm, then DELETEs with confirm", async ()
 
 test("login POSTs default message + signature, unsigned", async () => {
   const client = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
   });
   const calls = await capture(client, (c) =>
     findTool("login")!.handler(c, { signature: "0xsig" }),
@@ -255,8 +250,7 @@ test("fetch_api_keys / create_api_key use the Bearer session token", async () =>
 
 test("bearer tools without a session token throw MissingSessionTokenError", async () => {
   const noSession = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
     apiKey: "k",
     apiSecret: "00",
   });
@@ -313,8 +307,7 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
   );
 
   const noAdmin = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
     apiKey: "k",
     apiSecret: "00",
   });
@@ -339,8 +332,8 @@ test("delete_tier refuses without confirm and needs the admin secret", async () 
 
 test("public stats / status tools hit the right unsigned paths", async () => {
   const cases: Array<[string, string]> = [
-    ["fetch_stats", `${BASE}/api/v1/stats`],
-    ["fetch_stats_history", `${BASE}/api/v1/stats/history`],
+    ["fetch_stats", `${BASE}/stats`],
+    ["fetch_stats_history", `${BASE}/stats/history`],
     ["fetch_status", `${BASE}/status`],
   ];
   for (const [name, url] of cases) {
@@ -364,7 +357,7 @@ test("fetch_funding_samples encodes the market id and caps limit at 480", async 
   );
   assert.equal(
     calls[0].url,
-    `${BASE}/api/v1/markets/BTC-USDX-PERP/funding-samples?limit=120`,
+    `${BASE}/markets/BTC-USDX-PERP/funding-samples?limit=120`,
   );
   assert.equal(calls[0].headers.get("x-api-key"), null, "public");
 
@@ -392,18 +385,18 @@ test("fetch_market_risk_params GETs the legacy risk-params route unsigned", asyn
 
 test("account summary / equity / closed positions / order history sign v1 GETs", async () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["fetch_account_summary", {}, `${BASE}/api/v1/account/summary`],
+    ["fetch_account_summary", {}, `${BASE}/account/summary`],
     [
       "fetch_equity_history",
       { limit: 60 },
-      `${BASE}/api/v1/account/equity-history?limit=60`,
+      `${BASE}/account/equity-history?limit=60`,
     ],
     [
       "fetch_positions_history",
       { limit: 10 },
-      `${BASE}/api/v1/positions/closed?limit=10`,
+      `${BASE}/positions/closed?limit=10`,
     ],
-    ["fetch_orders", { limit: 200 }, `${BASE}/api/v1/orders/history?limit=200`],
+    ["fetch_orders", { limit: 200 }, `${BASE}/orders/history?limit=200`],
   ];
   for (const [name, args, url] of cases) {
     const calls = await capture(fullClient(), (c) =>
@@ -414,8 +407,7 @@ test("account summary / equity / closed positions / order history sign v1 GETs",
     assert.ok(calls[0].headers.get("x-signature"), `${name} is HMAC-signed`);
 
     const noCreds = new ExchangeClient({
-      directBaseUrl: BASE,
-      gatewayBaseUrl: BASE,
+      baseUrl: BASE,
     });
     await assert.rejects(
       () => findTool(name)!.handler(noCreds, {}) as Promise<unknown>,
@@ -550,7 +542,7 @@ test("edit_order PATCHes the v1 order route with market_id and a partial body", 
   assert.equal(calls[0].method, "PATCH");
   assert.equal(
     calls[0].url,
-    `${BASE}/api/v1/orders/abc%2F123?market_id=BTC-USDX-PERP`,
+    `${BASE}/orders/abc%2F123?market_id=BTC-USDX-PERP`,
   );
   assert.deepEqual(calls[0].body, { price: "61000" });
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
@@ -609,7 +601,7 @@ test("preview_order maps friendly args to the wire shape at /orders/preview", as
     }),
   );
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url, `${BASE}/api/v1/orders/preview`);
+  assert.equal(calls[0].url, `${BASE}/orders/preview`);
   assert.deepEqual(calls[0].body, {
     market_id: "BTC-USDX-PERP",
     side: "Sell",
@@ -727,12 +719,11 @@ test("fetch_cancel_on_disconnect GETs the signed v1 COD route", async () => {
     findTool("fetch_cancel_on_disconnect")!.handler(c, {}),
   );
   assert.equal(calls[0].method, "GET");
-  assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+  assert.equal(calls[0].url, `${BASE}/account/cancel-on-disconnect`);
   assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
 
   const noCreds = new ExchangeClient({
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
   });
   await assert.rejects(
     () =>
@@ -750,7 +741,7 @@ test("set_cancel_on_disconnect PUTs {enabled} and requires an explicit boolean",
       findTool("set_cancel_on_disconnect")!.handler(c, { enabled }),
     );
     assert.equal(calls[0].method, "PUT");
-    assert.equal(calls[0].url, `${BASE}/api/v1/account/cancel-on-disconnect`);
+    assert.equal(calls[0].url, `${BASE}/account/cancel-on-disconnect`);
     assert.deepEqual(calls[0].body, { enabled });
     assert.ok(calls[0].headers.get("x-signature"), "is HMAC-signed");
   }
@@ -982,7 +973,7 @@ test("create_order maps a trailing_limit order to the wire shape", async () => {
     }),
   );
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.equal(calls[0].url, `${BASE}/orders`);
   assert.deepEqual(calls[0].body, {
     market_id: "BTC-USDX-PERP",
     side: "Sell",
@@ -1110,7 +1101,7 @@ test("create_order maps a stop_market (stop-loss) order to the wire shape", asyn
     }),
   );
   assert.equal(calls[0].method, "POST");
-  assert.equal(calls[0].url, `${BASE}/api/v1/orders`);
+  assert.equal(calls[0].url, `${BASE}/orders`);
   assert.deepEqual(calls[0].body, {
     market_id: "BTC-USDX-PERP",
     side: "Sell",
@@ -1358,9 +1349,9 @@ test("dropped liveness tools are no longer registered", () => {
 
 test("portfolio-parity reads sign the v1 account routes", async () => {
   const cases: Array<[string, Record<string, unknown>, string]> = [
-    ["fetch_account_state", {}, `${BASE}/api/v1/account/state`],
-    ["fetch_trading_fees", {}, `${BASE}/api/v1/account/fees`],
-    ["fetch_portfolio_history", {}, `${BASE}/api/v1/account/portfolio-history`],
+    ["fetch_account_state", {}, `${BASE}/account/state`],
+    ["fetch_trading_fees", {}, `${BASE}/account/fees`],
+    ["fetch_portfolio_history", {}, `${BASE}/account/portfolio-history`],
   ];
   for (const [name, args, url] of cases) {
     const calls = await capture(fullClient(), (c) =>
@@ -1374,8 +1365,7 @@ test("portfolio-parity reads sign the v1 account routes", async () => {
     // Every one of these is account-scoped: no credentials must mean a hard
     // failure, never an unsigned request that would resolve to another account.
     const noCreds = new ExchangeClient({
-      directBaseUrl: BASE,
-      gatewayBaseUrl: BASE,
+      baseUrl: BASE,
     });
     await assert.rejects(
       () => findTool(name)!.handler(noCreds, args) as Promise<unknown>,
@@ -1394,7 +1384,7 @@ test("fetch_portfolio_history forwards window + limit, and omits them when unset
   );
   assert.equal(
     both[0].url,
-    `${BASE}/api/v1/account/portfolio-history?window=week&limit=168`,
+    `${BASE}/account/portfolio-history?window=week&limit=168`,
   );
 
   // Omitted args produce a bare path (no stray "?"), so the signed query
@@ -1402,14 +1392,14 @@ test("fetch_portfolio_history forwards window + limit, and omits them when unset
   const bare = await capture(fullClient(), (c) =>
     findTool("fetch_portfolio_history")!.handler(c, {}),
   );
-  assert.equal(bare[0].url, `${BASE}/api/v1/account/portfolio-history`);
+  assert.equal(bare[0].url, `${BASE}/account/portfolio-history`);
 
   const onlyWindow = await capture(fullClient(), (c) =>
     findTool("fetch_portfolio_history")!.handler(c, { window: "all" }),
   );
   assert.equal(
     onlyWindow[0].url,
-    `${BASE}/api/v1/account/portfolio-history?window=all`,
+    `${BASE}/account/portfolio-history?window=all`,
   );
 });
 
@@ -1599,13 +1589,11 @@ test("list_markets still returns the markets SUMMARY, never GET /markets", async
   // to `fetch_markets` (GET /markets, the static specs) would silently change
   // what an existing prompt gets back.
   assert.equal(DEPRECATED_ALIASES.list_markets, "fetch_markets_summary");
-  assert.deepEqual(findTool("list_markets")!.ops, [
-    "GET /api/v1/markets/summary",
-  ]);
+  assert.deepEqual(findTool("list_markets")!.ops, ["GET /markets/summary"]);
   const calls = await capture(fullClient(), (c) =>
     findTool("list_markets")!.handler(c, {}),
   );
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, `${BASE}/api/v1/markets/summary`);
+  assert.equal(calls[0].url, `${BASE}/markets/summary`);
   assert.deepEqual(findTool("fetch_markets")!.ops, ["GET /markets"]);
 });

@@ -48,7 +48,7 @@ carries an `ops` field naming the spec operations that tool calls:
 ```ts
 {
   name: "cancel_order",
-  ops: ["DELETE /api/v1/orders/{order_id}"],
+  ops: ["DELETE /orders/{order_id}"],
   ...
 }
 ```
@@ -97,8 +97,9 @@ one column, it is the operation count.
 
 **The denominator double-counts.** The spec documents many operations twice —
 once on the legacy gateway route (`/orders`) and once on the direct-indexer route
-(`/api/v1/orders`, ENG-4947 / ENG-4740). This server calls whichever surface it
-is meant to, so of the 35 operations it does not cover, **33 are the same route
+(`/api/v1/orders`, ENG-4947 / ENG-4740). This server calls the bare route under
+the `/v1` base (EDR-006; the bridge keeps `/api/v1` until the pinned spec has
+bare twins), so of the 35 operations it does not cover, **33 are the same route
 reached through its counterpart** and only 2 are genuinely uncovered:
 
 - `GET /stream` — deprecated SSE stream, superseded by the `/ws` upgrade.

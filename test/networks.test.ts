@@ -42,21 +42,20 @@ test("the default target is testnet on its durable host, play funds", () => {
   // play funds — and that half is still the regression this pins.
   //
   // The BASE has now moved twice, both times deliberately. ENG-6221 moved it
-  // off the bare origin, where `/api/v1/*` was the marketing app's 404. ENG-8869
+  // off the bare origin, where `/*` was the marketing app's 404. ENG-8869
   // moved the host: `exchange.nexus.xyz/api/exchange` proxies to a
   // decommissioned Cloud Run indexer and answers 500 on every route
   // (ENG-14039), so the shipped default was dead. `api.testnet.nexus.xyz` is
-  // the durable host, and `/indexer` is the route prefix the deployment mounts
-  // it under — the bare host 404s.
+  // the durable host, and `/v1` is the spec's REST base on it (ENG-18323) —
+  // the bare host 404s.
   const cfg = loadConfig(env());
-  assert.equal(cfg.directBaseUrl, "https://api.testnet.nexus.xyz/indexer");
-  assert.equal(cfg.gatewayBaseUrl, "https://api.testnet.nexus.xyz/indexer");
+  assert.equal(cfg.baseUrl, "https://api.testnet.nexus.xyz/v1");
   assert.equal(cfg.target?.id, "testnet");
   assert.equal(cfg.target?.funds, "play");
   assert.equal(DEFAULT_NETWORK, "testnet");
   // The retired gateway must not survive anywhere in the default target: it is
   // not a fallback, it is a host that 500s.
-  assert.ok(!cfg.directBaseUrl.includes("exchange.nexus.xyz/api/exchange"));
+  assert.ok(!cfg.baseUrl.includes("exchange.nexus.xyz/api/exchange"));
 });
 
 test("a set-but-empty override falls back to the network, not to an error", () => {
@@ -64,7 +63,7 @@ test("a set-but-empty override falls back to the network, not to an error", () =
   // as "", so an empty value must mean "unset" rather than reaching URL parsing.
   for (const blank of ["", "   ", "\n"]) {
     const cfg = loadConfig(env({ NEXUS_EXCHANGE_API_URL: blank }));
-    assert.equal(cfg.directBaseUrl, "https://api.testnet.nexus.xyz/indexer");
+    assert.equal(cfg.baseUrl, "https://api.testnet.nexus.xyz/v1");
     assert.equal(cfg.target?.id, "testnet");
   }
   // Same for the network variable itself.
@@ -75,29 +74,19 @@ test("a set-but-empty override falls back to the network, not to an error", () =
 test("mainnet is a named host, never interpolated from the network name", () => {
   // EDR-006: `api.{network}.nexus.xyz` resolves for every environment that can
   // be rehearsed and fails only on real funds. Guard the literal.
-  // Mainnet is untouched by ENG-8869 and keeps its `/v1`-in-base form. That
-  // form is known-stale (ENG-9134 settled the layout as path-versioned
-  // `/api/v1`), but it is deliberately NOT "corrected" here: `api.nexus.xyz`
-  // has no DNS record at all, so nothing about its shape can be measured, and
-  // testnet turning out to be `/indexer`-prefixed means host-root is not the
-  // obvious correction either. Recording an unverified real-funds base is the
-  // expensive mistake; it waits for ENG-8155's mainnet half.
+  // Both public hosts publish the spec's `/v1` REST base (EDR-006). Mainnet's
+  // has no DNS record yet (ENG-15183), so it stays informational.
   assert.equal(NETWORKS.mainnet.durableRestBase, "https://api.nexus.xyz/v1");
   assert.ok(
     !NETWORKS.mainnet.durableRestBase.includes("mainnet."),
     "mainnet host must not be api.mainnet.nexus.xyz",
   );
-  // Testnet's WAS `/v1`-rooted and is not any more: it is measured, so ENG-9134
-  // could be applied to it. It is also now the same string as `baseUrl`.
+  // Testnet's is live and is also the base this server talks to (ENG-18323).
   assert.equal(
     NETWORKS.testnet.durableRestBase,
-    "https://api.testnet.nexus.xyz/indexer",
+    "https://api.testnet.nexus.xyz/v1",
   );
   assert.equal(NETWORKS.testnet.durableRestBase, NETWORKS.testnet.baseUrl);
-  assert.ok(
-    !NETWORKS.testnet.durableRestBase.endsWith("/v1"),
-    "a /v1-in-base testnet value would compose /v1/api/v1/... (ENG-9134)",
-  );
   assert.equal(NETWORKS.mainnet.funds, "real");
   assert.equal(NETWORKS.mainnet.faucet, false);
 });
@@ -156,7 +145,7 @@ test("release channels are demoted to a URL override, not aliased", () => {
 
 test("local resolves to the indexer and is never a fallback", () => {
   const cfg = loadConfig(env({ NEXUS_EXCHANGE_NETWORK: "local" }));
-  assert.equal(cfg.directBaseUrl, "http://localhost:9090");
+  assert.equal(cfg.baseUrl, "http://localhost:9090");
   assert.equal(cfg.target?.id, "local");
   // Nothing may degrade to localhost: a failed public host must stay failed,
   // because silently succeeding against localhost hides a misconfigured client.
@@ -173,14 +162,12 @@ test("a URL override wins for transport and carries the declared network", () =>
     }),
   );
   // `mainnet.gatewayPath` is NOT dead code just because `baseUrl` is null: this
-  // is the path that reaches real money, and since ENG-6221 the field places
-  // BOTH surfaces, so it decides where every /api/v1 call lands here. The value
-  // is a convention, not a measurement — nothing is mapped onto api.nexus.xyz
-  // and its durable base is /v1-rooted — and the convention it follows is the
+  // is the path that reaches real money, and the field decides where every
+  // request lands here. The value is a convention, not a measurement — nothing
+  // is mapped onto api.nexus.xyz yet (ENG-15183) — and the convention it follows is the
   // one every other undeclared shape in this package resolves to. Pinned so
   // that stays a decision rather than a leftover.
-  assert.equal(cfg.directBaseUrl, "https://api.nexus.xyz/api/exchange");
-  assert.equal(cfg.gatewayBaseUrl, "https://api.nexus.xyz/api/exchange");
+  assert.equal(cfg.baseUrl, "https://api.nexus.xyz/api/exchange");
   assert.equal(cfg.target?.id, "mainnet");
   assert.equal(cfg.target?.funds, "real");
   // The network's own metadata rides along, so a faucet call still refuses here.
@@ -199,8 +186,7 @@ test("a URL override wins for transport and carries the declared network", () =>
       NEXUS_EXCHANGE_GATEWAY_PATH: "/",
     }),
   );
-  assert.equal(bareRoot.directBaseUrl, "https://api.nexus.xyz");
-  assert.equal(bareRoot.gatewayBaseUrl, "https://api.nexus.xyz");
+  assert.equal(bareRoot.baseUrl, "https://api.nexus.xyz");
   assert.equal(bareRoot.target?.funds, "real");
 });
 
@@ -287,7 +273,7 @@ test("ws endpoints are the published /v1 socket base, not the bare host", () => 
   assert.equal(local.wsUrl, "ws://localhost:9090");
   assert.equal(local.wsAuthenticatedUrl, "ws://localhost:9090/ws");
   assert.equal(local.wsMarketDataUrl, "ws://localhost:9090/stream");
-  assert.equal(local.gatewayBaseUrl, "http://localhost:9090");
+  assert.equal(local.baseUrl, "http://localhost:9090");
 });
 
 test("the gateway path is per-network, not appended unconditionally", () => {
@@ -301,41 +287,32 @@ test("the gateway path is per-network, not appended unconditionally", () => {
   // (it is gitignored and fetched by that job, so a unit test cannot read it);
   // here they are asserted as literals so the derivation itself is covered.
   //
-  // They are no longer all spec root servers. Testnet's is a recorded
-  // deliberate divergence (SPEC_LEADING_BASES in that script): the pinned spec
-  // still publishes a `/v1`-rooted durable base and knows nothing of the
-  // `/indexer` route prefix. Correcting the spec is ENG-9962.
-  //
-  // ENG-8869 note: testnet used to be the `/api/exchange` half of this pair.
-  // Its deployment is now route-prefixed and carries `/indexer` in `baseUrl`,
-  // so its `gatewayPath` is "" — the prefix moved fields, it did not vanish,
-  // and the composed base below still proves the derivation. Mainnet is the
-  // remaining non-empty shape.
+  // Testnet carries its `/v1` prefix in `baseUrl`, so its `gatewayPath` is ""
+  // and the composed base is the spec's root server itself (ENG-18323).
+  // Mainnet is the remaining non-empty shape.
   assert.equal(NETWORKS.testnet.gatewayPath, "");
   assert.equal(NETWORKS.local.gatewayPath, "");
   assert.equal(NETWORKS.mainnet.gatewayPath, "/api/exchange");
   assert.equal(
-    deriveBases(NETWORKS.testnet.baseUrl!, NETWORKS.testnet.gatewayPath)
-      .gatewayBaseUrl,
-    "https://api.testnet.nexus.xyz/indexer",
+    deriveBases(NETWORKS.testnet.baseUrl!, NETWORKS.testnet.gatewayPath),
+    "https://api.testnet.nexus.xyz/v1",
   );
   assert.equal(
-    deriveBases(NETWORKS.local.baseUrl!, NETWORKS.local.gatewayPath)
-      .gatewayBaseUrl,
+    deriveBases(NETWORKS.local.baseUrl!, NETWORKS.local.gatewayPath),
     "http://localhost:9090",
   );
   // The gatewayPath DEFAULT keeps the old behaviour, so an existing caller that
   // passes no shape is unchanged. Note this is the function's default argument,
   // not any network's value — no built-in network reaches it any more.
   assert.equal(
-    deriveBases("https://exchange.nexus.xyz").gatewayBaseUrl,
+    deriveBases("https://exchange.nexus.xyz"),
     "https://exchange.nexus.xyz/api/exchange",
   );
   // And the new base is passed through untouched: `deriveBases` strips only a
-  // trailing `/api/exchange`, so a `…/indexer` base must survive intact.
+  // trailing `/api/exchange`, so a `…/v1` base must survive intact.
   assert.equal(
-    deriveBases("https://api.testnet.nexus.xyz/indexer", "").gatewayBaseUrl,
-    "https://api.testnet.nexus.xyz/indexer",
+    deriveBases("https://api.testnet.nexus.xyz/v1", ""),
+    "https://api.testnet.nexus.xyz/v1",
   );
 });
 
@@ -370,18 +347,15 @@ test("the network map and the loaded config are frozen", () => {
   } catch {
     /* strict mode throws; non-strict silently ignores — assert the value below */
   }
-  assert.equal(
-    NETWORKS.testnet.baseUrl,
-    "https://api.testnet.nexus.xyz/indexer",
-  );
+  assert.equal(NETWORKS.testnet.baseUrl, "https://api.testnet.nexus.xyz/v1");
 
   const cfg = loadConfig(env());
   try {
-    (cfg as { directBaseUrl: string }).directBaseUrl = "http://evil";
+    (cfg as { baseUrl: string }).baseUrl = "http://evil";
   } catch {
     /* as above */
   }
-  assert.equal(cfg.directBaseUrl, "https://api.testnet.nexus.xyz/indexer");
+  assert.equal(cfg.baseUrl, "https://api.testnet.nexus.xyz/v1");
 });
 
 test("every declared network id has a descriptor and vice versa", () => {
@@ -494,32 +468,9 @@ test("the socket base is the REST base with the scheme swapped", () => {
       `${id}: durableWsUrl is not the spec REST base with the scheme swapped`,
     );
   }
-  // Against THIS file's REST base it holds exactly for mainnet and local.
-  assert.equal(
-    NETWORKS.mainnet.durableWsUrl,
-    swap(NETWORKS.mainnet.durableRestBase),
-  );
-  assert.equal(
-    NETWORKS.local.durableWsUrl,
-    swap(NETWORKS.local.durableRestBase),
-  );
-
-  // Testnet is the recorded exception: its REST base is still `/indexer`
-  // (moving REST to `/v1` is a separate change). Both prefixes are stripped to
-  // `/` at the edge on the same host, so the token binding still holds — the
-  // origin must match exactly. When REST moves, the first assertion flips and
-  // this block should collapse into the exact equality above.
-  assert.equal(
-    NETWORKS.testnet.durableRestBase,
-    "https://api.testnet.nexus.xyz/indexer",
-  );
-  const origin = (u: string) => new URL(u).host;
-  assert.equal(
-    origin(NETWORKS.testnet.durableWsUrl),
-    origin(NETWORKS.testnet.durableRestBase),
-  );
-  assert.equal(
-    origin(loadConfig(env()).wsUrl!),
-    origin(loadConfig(env()).gatewayBaseUrl),
-  );
+  // Against THIS file's REST base it holds exactly for every network, testnet
+  // included now that its REST base is `/v1` too (ENG-18323).
+  for (const id of ["mainnet", "local", "testnet"] as const) {
+    assert.equal(NETWORKS[id].durableWsUrl, swap(NETWORKS[id].durableRestBase));
+  }
 });

@@ -52,8 +52,7 @@ interface PagedResult {
 
 function fullClient(): ExchangeClient {
   const cfg: ExchangeConfig = {
-    directBaseUrl: BASE,
-    gatewayBaseUrl: BASE,
+    baseUrl: BASE,
     apiKey: "nx_test",
     apiSecret: "00",
     enableAdminTools: false,
@@ -113,7 +112,7 @@ test("a paginated tool returns items plus the X-Next-Cursor value", async () => 
   assert.deepEqual(result.items, [{ id: "f1" }]);
   assert.equal(result.next_cursor, "cur-2");
   assert.equal(result.pagination_error, undefined);
-  assert.equal(calls[0].url, `${BASE}/api/v1/fills?limit=2`);
+  assert.equal(calls[0].url, `${BASE}/fills?limit=2`);
 });
 
 test("the cursor is forwarded verbatim and included in the signature", async () => {
@@ -131,7 +130,7 @@ test("the cursor is forwarded verbatim and included in the signature", async () 
   assert.equal(result.next_cursor, null);
   assert.equal(
     calls[0].url,
-    `${BASE}/api/v1/fills?limit=2&cursor=eyJvIjoxMH0%3D%2B%2F`,
+    `${BASE}/fills?limit=2&cursor=eyJvIjoxMH0%3D%2B%2F`,
   );
   assert.ok(calls[0].headers.get("x-signature"), "signed");
   // Round-trips back to the exact token the server handed out.
@@ -166,9 +165,9 @@ test("a full agent-driven walk reaches the last page", async () => {
 
   assert.deepEqual(collected, [{ id: 1 }, { id: 2 }, { id: 3 }]);
   assert.deepEqual(urls, [
-    `${BASE}/api/v1/orders/history?limit=1`,
-    `${BASE}/api/v1/orders/history?limit=1&cursor=c2`,
-    `${BASE}/api/v1/orders/history?limit=1&cursor=c3`,
+    `${BASE}/orders/history?limit=1`,
+    `${BASE}/orders/history?limit=1&cursor=c2`,
+    `${BASE}/orders/history?limit=1&cursor=c3`,
   ]);
 });
 

@@ -904,7 +904,8 @@ def check_tool_names(tools, spec):
 # tool turns the friendly value into the one it sends: None (sent as-is), the
 # name of a `Record<...>` const whose values are sent, or "ternary" for a
 # `field: a.field === "x" ? "X" : "Y"` line in toWireOrder. `spec` locates the
-# spec enum: ("schema", Schema, property) | ("param", "METHOD /path", name).
+# spec enum: ("schema", Schema, property) | ("param", "METHOD /path", name)
+# | ("body", "METHOD /path", property), the last a request-body property.
 ENUM_CHECKS = {
     ("friendlyOrderSchema", "side"): {
         "wire": "ternary",

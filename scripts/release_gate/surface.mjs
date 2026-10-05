@@ -3,9 +3,10 @@
 // built dist/ from that install, not src/ through tsx, so it lists the package
 // exactly as npm hands it to a user.
 //
-// This package's public surface is what an agent and a shell call, not its
-// TypeScript exports (CONTRIBUTING.md, "Two public surfaces break
-// independently"):
+// CONTRIBUTING.md ("Two public surfaces break independently") names two: the
+// TypeScript API and the MCP tools. The package has no `exports` and its `main`
+// is the server binary, so the only TypeScript a user can import is a deep
+// `dist/` path, which this leaves out. It lists what an agent and a shell call:
 //
 //   - the MCP tools, as tools/list advertises them: one line per tool name, and
 //     one per input-schema property path with its type, whether it is required,
@@ -15,6 +16,13 @@
 //   - the `bin` entries of the packed package.json, with a note when the target
 //     is missing from the tarball or has no shebang, since either breaks `npx`
 //     for every user.
+//
+// tools/list advertises each tool's `inputSchema`, but the server validates a
+// call with the tool's zod schema (src/server.ts), a second definition. Where
+// the two disagree on a tool's properties, required properties or top-level
+// enums, an agent following the listing gets "Invalid arguments" back, and the
+// listing alone would not show it. So this fails, with no listing written,
+// until they agree (ENG-18798 review).
 //
 // Admin tools are hidden unless NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS is set, so
 // the server is listed both ways and those tools are marked `admin-only`. Both
@@ -27,6 +35,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -37,6 +46,7 @@ if (!pkg) {
 }
 const { loadConfig } = await import(`${pkg}/dist/config.js`);
 const { createServer } = await import(`${pkg}/dist/server.js`);
+const { tools: registry } = await import(`${pkg}/dist/tools/index.js`);
 
 // Validation keywords that narrow what an argument accepts. Tightening any of
 // them breaks a caller that relied on the old range, so each one is part of the
@@ -144,6 +154,50 @@ for (const tool of all) {
 const root = dirname(
   createRequire(import.meta.url).resolve(`${pkg}/package.json`),
 );
+
+// The zod the package itself resolves, so the comparison uses the version its
+// validators were built with.
+const { z } = await import(
+  pathToFileURL(createRequire(join(root, "package.json")).resolve("zod")).href
+);
+const sorted = (values) => JSON.stringify([...(values ?? [])].sort());
+const mismatches = [];
+for (const tool of registry) {
+  const validated = z.toJSONSchema(tool.zod, {
+    io: "input",
+    unrepresentable: "any",
+  });
+  const advertised = tool.inputSchema;
+  const differs = [];
+  const names = (schema) => Object.keys(schema.properties ?? {});
+  if (sorted(names(validated)) !== sorted(names(advertised))) {
+    differs.push(
+      `properties ${sorted(names(advertised))} advertised, ${sorted(names(validated))} validated`,
+    );
+  }
+  if (sorted(validated.required) !== sorted(advertised.required)) {
+    differs.push(
+      `required ${sorted(advertised.required)} advertised, ${sorted(validated.required)} validated`,
+    );
+  }
+  for (const [name, sub] of Object.entries(advertised.properties ?? {})) {
+    const other = validated.properties?.[name] ?? {};
+    if ((sub.enum || other.enum) && sorted(sub.enum) !== sorted(other.enum)) {
+      differs.push(
+        `${name} enum ${sorted(sub.enum)} advertised, ${sorted(other.enum)} validated`,
+      );
+    }
+  }
+  if (differs.length) mismatches.push(`${tool.name}: ${differs.join("; ")}`);
+}
+if (mismatches.length) {
+  for (const line of mismatches) {
+    console.error(
+      `::error title=prepublish-surface (schema mismatch)::${line}. Make the tool's inputSchema and its zod schema in src/tools/index.ts agree.`,
+    );
+  }
+  process.exit(1);
+}
 const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const bins =
   typeof manifest.bin === "string"

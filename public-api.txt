@@ -1,0 +1,304 @@
+bin exchange-mcp dist/index.js
+bin nexus-exchange-mcp dist/index.js
+bin nexus-exchange-mcp-http dist/http-index.js
+tool add_margin object additionalProperties=false
+tool add_margin.amount string required
+tool add_margin.direction string enum=["add","remove"] required
+tool add_margin.market_id string required
+tool adjust_isolated_margin object additionalProperties=false
+tool adjust_isolated_margin.amount string required
+tool adjust_isolated_margin.direction string enum=["add","remove"] required
+tool adjust_isolated_margin.market_id string required
+tool amend_order object additionalProperties=false
+tool amend_order.market_id string required
+tool amend_order.order_id string required
+tool amend_order.price string optional
+tool amend_order.size string optional
+tool cancel_all_orders object additionalProperties=false
+tool cancel_all_orders.confirm boolean optional
+tool cancel_all_orders.market_id string optional
+tool cancel_order object additionalProperties=false
+tool cancel_order.market_id string required
+tool cancel_order.order_id string required
+tool claim_credit object additionalProperties=false
+tool claim_credit.amount string optional
+tool claim_faucet object additionalProperties=false
+tool create_api_key object additionalProperties=false
+tool create_bridge_deposit_address object additionalProperties=false
+tool create_bridge_deposit_address.chain string required
+tool create_bridge_wallet_challenge object additionalProperties=false
+tool create_bridge_wallet_challenge.address string required
+tool create_deposit object additionalProperties=false
+tool create_deposit.amount string required
+tool create_deposit.asset string optional
+tool create_order object additionalProperties=false
+tool create_order.limit_offset_bps integer maximum=9999 minimum=0 optional
+tool create_order.market_id string required
+tool create_order.price string optional
+tool create_order.reduce_only boolean optional
+tool create_order.side string enum=["buy","sell"] required
+tool create_order.size string required
+tool create_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool create_order.trailing_offset_bps integer minimum=0 optional
+tool create_order.trigger_price string optional
+tool create_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool create_orders object additionalProperties=false
+tool create_orders.orders array maxItems=100 minItems=1 required
+tool create_orders.orders[] object additionalProperties=false
+tool create_orders.orders[].limit_offset_bps integer maximum=9999 minimum=0 optional
+tool create_orders.orders[].market_id string required
+tool create_orders.orders[].price string optional
+tool create_orders.orders[].reduce_only boolean optional
+tool create_orders.orders[].side string enum=["buy","sell"] required
+tool create_orders.orders[].size string required
+tool create_orders.orders[].time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool create_orders.orders[].trailing_offset_bps integer minimum=0 optional
+tool create_orders.orders[].trigger_price string optional
+tool create_orders.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool create_ws_token object additionalProperties=false
+tool create_ws_token_legacy object additionalProperties=false
+tool delete_api_key object additionalProperties=false
+tool delete_api_key.confirm boolean optional
+tool delete_api_key.key_id string required
+tool delete_tier object additionalProperties=false admin-only
+tool delete_tier.address string required
+tool delete_tier.confirm boolean optional
+tool deposit object additionalProperties=false
+tool deposit.amount string required
+tool deposit_collateral object additionalProperties=false
+tool deposit_collateral.amount string required
+tool edit_order object additionalProperties=false
+tool edit_order.market_id string required
+tool edit_order.order_id string required
+tool edit_order.price string optional
+tool edit_order.size string optional
+tool fetch_account_state object additionalProperties=false
+tool fetch_account_summary object additionalProperties=false
+tool fetch_adl_events object additionalProperties=false
+tool fetch_adl_events.limit integer optional
+tool fetch_adl_events.market_id string required
+tool fetch_adl_history object additionalProperties=false
+tool fetch_adl_history.address string required
+tool fetch_adl_history.limit integer optional
+tool fetch_agents object additionalProperties=false
+tool fetch_api_keys object additionalProperties=false
+tool fetch_balance object additionalProperties=false
+tool fetch_bridge_assets object additionalProperties=false
+tool fetch_bridge_deposit object additionalProperties=false
+tool fetch_bridge_deposit.id string required
+tool fetch_bridge_deposits object additionalProperties=false
+tool fetch_bridge_deposits.asset string enum=["USDC","USDX"] optional
+tool fetch_bridge_deposits.chain string optional
+tool fetch_bridge_deposits.limit integer optional
+tool fetch_bridge_deposits.status string enum=["detected","confirming","credited","failed"] optional
+tool fetch_cancel_on_disconnect object additionalProperties=false
+tool fetch_deposits object additionalProperties=false
+tool fetch_deposits.limit integer optional
+tool fetch_equity_history object additionalProperties=false
+tool fetch_equity_history.cursor string optional
+tool fetch_equity_history.limit integer optional
+tool fetch_funding_history object additionalProperties=false
+tool fetch_funding_history.limit integer optional
+tool fetch_funding_history.market_id string optional
+tool fetch_funding_rate_history object additionalProperties=false
+tool fetch_funding_rate_history.limit integer optional
+tool fetch_funding_rate_history.market_id string required
+tool fetch_funding_samples object additionalProperties=false
+tool fetch_funding_samples.limit integer optional
+tool fetch_funding_samples.market_id string required
+tool fetch_mark_price object additionalProperties=false
+tool fetch_mark_price.market_id string required
+tool fetch_market_risk_params object additionalProperties=false
+tool fetch_market_risk_params.market_id string required
+tool fetch_market_status object additionalProperties=false
+tool fetch_market_status.market_id string required
+tool fetch_markets object additionalProperties=false
+tool fetch_markets_summary object additionalProperties=false
+tool fetch_my_trades object additionalProperties=false
+tool fetch_my_trades.cursor string optional
+tool fetch_my_trades.limit integer optional
+tool fetch_ohlcv object additionalProperties=false
+tool fetch_ohlcv.limit integer optional
+tool fetch_ohlcv.market_id string required
+tool fetch_ohlcv.timeframe string enum=["1s","1m","5m","1h"] optional
+tool fetch_open_orders object additionalProperties=false
+tool fetch_order object additionalProperties=false
+tool fetch_order.market_id string optional
+tool fetch_order.order_id string required
+tool fetch_order_book object additionalProperties=false
+tool fetch_order_book.market_id string required
+tool fetch_orders object additionalProperties=false
+tool fetch_orders.cursor string optional
+tool fetch_orders.limit integer optional
+tool fetch_portfolio_history object additionalProperties=false
+tool fetch_portfolio_history.limit integer maximum=366 minimum=1 optional
+tool fetch_portfolio_history.window string enum=["day","week","month","all"] optional
+tool fetch_positions object additionalProperties=false
+tool fetch_positions_history object additionalProperties=false
+tool fetch_positions_history.cursor string optional
+tool fetch_positions_history.limit integer optional
+tool fetch_rate_limit_status object additionalProperties=false
+tool fetch_stats object additionalProperties=false
+tool fetch_stats_history object additionalProperties=false
+tool fetch_status object additionalProperties=false
+tool fetch_ticker object additionalProperties=false
+tool fetch_ticker.market_id string required
+tool fetch_tickers object additionalProperties=false
+tool fetch_tiers object additionalProperties=false admin-only
+tool fetch_trades object additionalProperties=false
+tool fetch_trades.cursor string optional
+tool fetch_trades.limit integer optional
+tool fetch_trades.market_id string required
+tool fetch_trading_fees object additionalProperties=false
+tool fetch_withdrawals object additionalProperties=false
+tool fetch_withdrawals.limit integer optional
+tool get_account_fees object additionalProperties=false
+tool get_account_state object additionalProperties=false
+tool get_account_summary object additionalProperties=false
+tool get_adl_history object additionalProperties=false
+tool get_adl_history.address string required
+tool get_adl_history.limit integer optional
+tool get_balance object additionalProperties=false
+tool get_bridge_assets object additionalProperties=false
+tool get_bridge_deposit object additionalProperties=false
+tool get_bridge_deposit.id string required
+tool get_cancel_on_disconnect object additionalProperties=false
+tool get_candles object additionalProperties=false
+tool get_candles.limit integer optional
+tool get_candles.market_id string required
+tool get_candles.timeframe string enum=["1s","1m","5m","1h"] optional
+tool get_closed_positions object additionalProperties=false
+tool get_closed_positions.cursor string optional
+tool get_closed_positions.limit integer optional
+tool get_demo_account object additionalProperties=false
+tool get_demo_orders object additionalProperties=false
+tool get_demo_positions object additionalProperties=false
+tool get_deposit_target object additionalProperties=false
+tool get_deposit_target.asset string optional
+tool get_equity_history object additionalProperties=false
+tool get_equity_history.cursor string optional
+tool get_equity_history.limit integer optional
+tool get_fills object additionalProperties=false
+tool get_fills.cursor string optional
+tool get_fills.limit integer optional
+tool get_funding_history object additionalProperties=false
+tool get_funding_history.limit integer optional
+tool get_funding_history.market_id string required
+tool get_funding_payments object additionalProperties=false
+tool get_funding_payments.limit integer optional
+tool get_funding_payments.market_id string optional
+tool get_funding_samples object additionalProperties=false
+tool get_funding_samples.limit integer optional
+tool get_funding_samples.market_id string required
+tool get_mark_price object additionalProperties=false
+tool get_mark_price.market_id string required
+tool get_market_adl_events object additionalProperties=false
+tool get_market_adl_events.limit integer optional
+tool get_market_adl_events.market_id string required
+tool get_market_risk_params object additionalProperties=false
+tool get_market_risk_params.market_id string required
+tool get_market_status object additionalProperties=false
+tool get_market_status.market_id string required
+tool get_open_orders object additionalProperties=false
+tool get_order object additionalProperties=false
+tool get_order.market_id string optional
+tool get_order.order_id string required
+tool get_order_history object additionalProperties=false
+tool get_order_history.cursor string optional
+tool get_order_history.limit integer optional
+tool get_orderbook object additionalProperties=false
+tool get_orderbook.market_id string required
+tool get_portfolio_history object additionalProperties=false
+tool get_portfolio_history.limit integer maximum=366 minimum=1 optional
+tool get_portfolio_history.window string enum=["day","week","month","all"] optional
+tool get_positions object additionalProperties=false
+tool get_rate_limit_status object additionalProperties=false
+tool get_service_status object additionalProperties=false
+tool get_stats object additionalProperties=false
+tool get_stats_history object additionalProperties=false
+tool get_ticker object additionalProperties=false
+tool get_ticker.market_id string required
+tool get_tickers object additionalProperties=false
+tool get_trades object additionalProperties=false
+tool get_trades.cursor string optional
+tool get_trades.limit integer optional
+tool get_trades.market_id string required
+tool get_withdrawals object additionalProperties=false
+tool get_withdrawals.limit integer optional
+tool get_ws_token object additionalProperties=false
+tool get_ws_token_legacy object additionalProperties=false
+tool list_agents object additionalProperties=false
+tool list_api_keys object additionalProperties=false
+tool list_bridge_deposit_addresses object additionalProperties=false
+tool list_bridge_deposits object additionalProperties=false
+tool list_bridge_deposits.asset string enum=["USDC","USDX"] optional
+tool list_bridge_deposits.chain string optional
+tool list_bridge_deposits.limit integer optional
+tool list_bridge_deposits.status string enum=["detected","confirming","credited","failed"] optional
+tool list_bridge_wallets object additionalProperties=false
+tool list_deposits object additionalProperties=false
+tool list_deposits.limit integer optional
+tool list_market_specs object additionalProperties=false
+tool list_markets object additionalProperties=false
+tool list_tiers object additionalProperties=false admin-only
+tool login object additionalProperties=false
+tool login.message string optional
+tool login.signature string required
+tool place_order object additionalProperties=false
+tool place_order.limit_offset_bps integer maximum=9999 minimum=0 optional
+tool place_order.market_id string required
+tool place_order.price string optional
+tool place_order.reduce_only boolean optional
+tool place_order.side string enum=["buy","sell"] required
+tool place_order.size string required
+tool place_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool place_order.trailing_offset_bps integer minimum=0 optional
+tool place_order.trigger_price string optional
+tool place_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool place_orders_batch object additionalProperties=false
+tool place_orders_batch.orders array maxItems=100 minItems=1 required
+tool place_orders_batch.orders[] object additionalProperties=false
+tool place_orders_batch.orders[].limit_offset_bps integer maximum=9999 minimum=0 optional
+tool place_orders_batch.orders[].market_id string required
+tool place_orders_batch.orders[].price string optional
+tool place_orders_batch.orders[].reduce_only boolean optional
+tool place_orders_batch.orders[].side string enum=["buy","sell"] required
+tool place_orders_batch.orders[].size string required
+tool place_orders_batch.orders[].time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool place_orders_batch.orders[].trailing_offset_bps integer minimum=0 optional
+tool place_orders_batch.orders[].trigger_price string optional
+tool place_orders_batch.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool preview_order object additionalProperties=false
+tool preview_order.limit_offset_bps integer maximum=9999 minimum=0 optional
+tool preview_order.market_id string required
+tool preview_order.price string optional
+tool preview_order.reduce_only boolean optional
+tool preview_order.side string enum=["buy","sell"] required
+tool preview_order.size string required
+tool preview_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool preview_order.trailing_offset_bps integer minimum=0 optional
+tool preview_order.trigger_price string optional
+tool preview_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool register_agent object additionalProperties=false
+tool register_agent.agent string required
+tool register_agent.expires_at integer optional
+tool register_agent.label string optional
+tool register_agent.nonce integer required
+tool register_agent.signature string required
+tool register_agent.wallet string required
+tool register_bridge_wallet object additionalProperties=false
+tool register_bridge_wallet.address string required
+tool register_bridge_wallet.confirm boolean optional
+tool register_bridge_wallet.message string required
+tool register_bridge_wallet.signature string required
+tool revoke_agent object additionalProperties=false
+tool revoke_agent.address string required
+tool revoke_agent.confirm boolean optional
+tool set_cancel_on_disconnect object additionalProperties=false
+tool set_cancel_on_disconnect.enabled boolean required
+tool set_tier object additionalProperties=false admin-only
+tool set_tier.address string required
+tool set_tier.tier string required
+tool submit_deposit object additionalProperties=false
+tool submit_deposit.amount string required
+tool submit_deposit.asset string optional

@@ -23,6 +23,8 @@ The Model Context Protocol server exposing the Nexus Exchange API as agent tools
   `scripts/release_gate/public_api.sh --write` and commit it in the same PR.
   `prepublish-surface` fails on any difference, so a removal shows up in the
   diff a reviewer reads (ENG-18798).
+  A `-` line is a breaking change: give the PR a `!` title, because the next
+  release's `prepublish-verdict` fails a patch bump for it.
 
 ## API contract
 

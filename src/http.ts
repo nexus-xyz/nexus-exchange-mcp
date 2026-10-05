@@ -269,10 +269,15 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
   }
 
   /** JSON-RPC framed error (no id — used before a session/request id exists). */
-  function rpcError(res: ServerResponse, status: number, message: string) {
+  function rpcError(
+    res: ServerResponse,
+    status: number,
+    message: string,
+    code = -32000,
+  ) {
     sendJson(res, status, {
       jsonrpc: "2.0",
-      error: { code: -32000, message },
+      error: { code, message },
       id: null,
     });
   }
@@ -331,18 +336,21 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
         await transport.handleRequest(req, res, body);
         return;
       }
-
-      // Non-initialize POST without a valid session.
-      rpcError(
-        res,
-        400,
-        "Bad Request: no valid session id. Send an `initialize` request first.",
-      );
-      return;
     }
 
-    // GET (SSE stream) / DELETE (session teardown) require an existing session.
-    rpcError(res, 400, "Bad Request: missing or unknown mcp-session-id.");
+    // Everything else needs a live session. An id we don't hold (idle-evicted,
+    // or lost to a restart or redeploy, since sessions live in memory) gets
+    // 404, the spec's cue for the client to drop it and re-initialize; same
+    // body the SDK transport sends (ENG-19686). No id at all is a bad request.
+    if (sessionId) {
+      rpcError(res, 404, "Session not found", -32001);
+      return;
+    }
+    rpcError(
+      res,
+      400,
+      "Bad Request: missing mcp-session-id. Send an `initialize` request first.",
+    );
   }
 
   const httpServer = createHttpServer((req, res) => {

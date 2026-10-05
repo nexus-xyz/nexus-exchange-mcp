@@ -300,10 +300,77 @@ test("Streamable HTTP: an idle session is evicted after the TTL", async () => {
     await client.listTools(); // still inside the TTL, and this refreshes it
     clock += 1000;
     mock.timers.tick(1000);
-    await assert.rejects(client.listTools(), /unknown mcp-session-id|session/i);
+    // 404, not 400: an expired session is the client's cue to re-initialize.
+    await assert.rejects(client.listTools(), { code: 404 });
   } finally {
     mock.timers.reset();
     await close();
+  }
+});
+
+test("Streamable HTTP: a session id lost to a restart gets 404, and a fresh initialize recovers (ENG-19686)", async () => {
+  const before = await withHttpServer({});
+  const staleId = (before.client.transport as StreamableHTTPClientTransport)
+    .sessionId!;
+  assert.ok(staleId);
+  await before.close();
+
+  // The restarted process: a new server, so an empty session store.
+  const server = createHttpMcpServer({
+    config: { baseUrl: "http://gateway.test", enableAdminTools: false },
+  });
+  await new Promise<void>((resolve) => server.listen(0, resolve));
+  const { port } = server.address() as AddressInfo;
+  const url = new URL(`http://127.0.0.1:${port}/mcp`);
+  const send = (method: string, body?: string, sessionId?: string) =>
+    fetch(url, {
+      method,
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+      },
+      body,
+    });
+  const client = new Client({ name: "http-test", version: "0.0.0" });
+  try {
+    const listTools = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    });
+    for (const [method, body] of [
+      ["POST", listTools],
+      ["GET", undefined],
+      ["DELETE", undefined],
+    ] as const) {
+      const r = await send(method, body, staleId);
+      assert.equal(r.status, 404, `${method} with a stale session id`);
+      // The SDK transport's own body for an unknown session.
+      assert.equal(
+        ((await r.json()) as { error: { code: number } }).error.code,
+        -32001,
+      );
+    }
+
+    // Malformed requests stay 400: no session id, or a body that isn't JSON.
+    for (const [method, body] of [
+      ["POST", listTools],
+      ["GET", undefined],
+      ["POST", "{not json"],
+    ] as const) {
+      const r = await send(method, body);
+      assert.equal(r.status, 400, `${method} ${body ?? ""} without a session`);
+      await r.body?.cancel();
+    }
+
+    // Re-initializing without the stale id works.
+    await client.connect(new StreamableHTTPClientTransport(url));
+    const list = await client.listTools();
+    assert.ok(list.tools.length > 0);
+  } finally {
+    await client.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
 

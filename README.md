@@ -753,10 +753,13 @@ version.
 | `MCP_HTTP_TRUSTED_PROXY_HOPS`  | `0`       | How many proxies in front of the server append to `X-Forwarded-For`.               |
 | `MCP_HTTP_MAX_BODY_BYTES`      | `1048576` | Largest `initialize` POST body read; past it the server answers `413` (1 MiB).     |
 
-An evicted session answers `400` on its next request, and the client
-reconnects with a fresh `initialize`. Only requests count as activity: an open
-SSE `GET` stream does not keep a session alive. A client over the limit gets
-`429` with a `Retry-After` header (seconds). `/healthz` is not limited.
+Sessions live in process memory, so a restart or redeploy forgets them too. A
+session id the server doesn't hold, evicted or lost, answers `404` (the MCP
+Streamable HTTP spec's signal), and the client reconnects with a fresh
+`initialize`. A request with no session id is a `400`. Only requests count as
+activity: an open SSE `GET` stream does not keep a session alive. A client over
+the limit gets `429` with a `Retry-After` header (seconds). `/healthz` is not
+limited.
 
 The limiter is in memory and per process, so the effective ceiling is per
 replica: N replicas allow N times the configured rate. An ingress-level limit

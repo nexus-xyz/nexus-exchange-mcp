@@ -21,6 +21,13 @@
 
 import { z } from "zod";
 import { ExchangeClient, type FundsRequirement } from "../client.js";
+import { CUSTOM_TARGET_ID } from "../networks.js";
+import {
+  LOGIN_MESSAGE,
+  personalSign,
+  signRegisterAgent,
+  walletAddress,
+} from "../wallet.js";
 
 export interface ToolDef {
   name: string;
@@ -2148,9 +2155,10 @@ export const tools: ToolDef[] = [
     description:
       "Step 1 of registering a withdrawal wallet: returns the exact `message` " +
       "to sign with that wallet's key (EIP-191 `personal_sign`) and the " +
-      "`expires_at` it is valid until. This server cannot sign for you — sign " +
-      "the message externally (in the wallet), then pass it and the signature " +
-      "to `register_bridge_wallet`. Treat `message` as opaque: echo it back " +
+      "`expires_at` it is valid until. Sign the message in the wallet and pass " +
+      "it and the signature to `register_bridge_wallet`, or, for the wallet " +
+      "`create_wallet` made, omit the signature and the server signs. Treat " +
+      "`message` as opaque: echo it back " +
       "verbatim, never reformat, re-encode or trim it. The `nonce` field is " +
       "informational — sign `message`, not the nonce, and do not treat the " +
       "challenge as single-use: until it expires the same signature can be " +
@@ -2189,8 +2197,11 @@ export const tools: ToolDef[] = [
     description:
       "Step 2 of registering a withdrawal wallet: submit the `address`, the " +
       "`message` returned by `create_bridge_wallet_challenge` echoed back " +
-      "VERBATIM, and the EIP-191 signature over it. The address recovered from " +
-      "the signature must equal `address`, and the challenge must name the " +
+      "VERBATIM, and the EIP-191 signature over it. Omit `signature` to have " +
+      "the stdio server sign with its own wallet (see `create_wallet`; " +
+      "play-funds targets only, and `address` must be that wallet). The " +
+      "address recovered from the signature must equal `address`, and the " +
+      "challenge must name the " +
       "authenticated account. The registered wallet is where withdrawals are " +
       "paid, so getting it wrong matters: an account holds ONE wallet in this " +
       "cut and replacement is not supported — registering a different address " +
@@ -2221,7 +2232,8 @@ export const tools: ToolDef[] = [
           type: "string",
           description:
             "0x-prefixed 65-byte EIP-191 `personal_sign` signature over " +
-            "`message`, produced by the key for `address`.",
+            "`message`, produced by the key for `address`. Optional when this " +
+            "server holds the wallet for `address`: it signs instead.",
         },
         confirm: {
           type: "boolean",
@@ -2230,13 +2242,13 @@ export const tools: ToolDef[] = [
             "the account gets one withdrawal wallet and cannot swap it later.",
         },
       },
-      ["address", "message", "signature"],
+      ["address", "message"],
     ),
     zod: z
       .object({
         address: evmAddress,
         message: z.string().min(1),
-        signature: z.string().min(1),
+        signature: z.string().min(1).optional(),
         confirm: z.boolean().optional(),
       })
       .strict(),
@@ -2249,7 +2261,7 @@ export const tools: ToolDef[] = [
       const a = args as {
         address: string;
         message: string;
-        signature: string;
+        signature?: string;
         confirm?: boolean;
       };
       if (!a.confirm) {
@@ -2259,14 +2271,22 @@ export const tools: ToolDef[] = [
             "one registered wallet and it cannot be replaced afterwards.",
         );
       }
+      let signature = a.signature;
+      if (!signature) {
+        const key = client.walletKey("register_bridge_wallet");
+        const own = walletAddress(key);
+        if (a.address.toLowerCase() !== own) {
+          throw new Error(
+            `\`address\` ${a.address} is not this server's wallet (${own}). ` +
+              "It signs only for its own address; pass `signature` for another.",
+          );
+        }
+        signature = personalSign(key, a.message);
+      }
       return client.request({
         method: "POST",
         path: "/api/v1/bridge/wallets",
-        body: {
-          address: a.address,
-          message: a.message,
-          signature: a.signature,
-        },
+        body: { address: a.address, message: a.message, signature },
         signed: true,
       });
     },
@@ -2310,15 +2330,18 @@ export const tools: ToolDef[] = [
       "Register a delegated agent key so an AI agent can trade on a wallet's " +
       "behalf without holding the wallet key. Authorized by an EIP-712 " +
       "signature from the OWNER WALLET over `RegisterAgent{agent, expiresAt, " +
-      "nonce}` (domain `NexusExchange` v1). This server cannot produce that " +
-      "wallet signature — sign it externally (e.g. in the wallet) and pass it " +
-      "as `signature`. No API credentials are needed; the signature is the " +
-      "authorization.",
+      "nonce}` (domain `Nexus Exchange` v1). Sign it in the wallet and pass " +
+      "`wallet` and `signature`, or omit both to have the stdio server sign " +
+      "with its own wallet (see `create_wallet`; testnet and local only, " +
+      "expiry defaulting to now+30d). No API credentials are needed; the " +
+      "signature is the authorization.",
     inputSchema: jsonSchema(
       {
         wallet: {
           type: "string",
-          description: "Owner wallet address (0x-prefixed, 20 bytes).",
+          description:
+            "Owner wallet address (0x-prefixed, 20 bytes). Required with " +
+            "`signature`; defaults to this server's wallet without one.",
         },
         agent: {
           type: "string",
@@ -2334,7 +2357,8 @@ export const tools: ToolDef[] = [
           type: "string",
           description:
             "EIP-712 signature over RegisterAgent{agent, expiresAt, nonce} from " +
-            "the wallet private key (0x-prefixed).",
+            "the wallet private key (0x-prefixed). Omit it to have this " +
+            "server sign with its own wallet.",
         },
         expires_at: {
           type: "integer",
@@ -2347,14 +2371,14 @@ export const tools: ToolDef[] = [
           description: "Optional human-readable label for the agent.",
         },
       },
-      ["wallet", "agent", "nonce", "signature"],
+      ["agent", "nonce"],
     ),
     zod: z
       .object({
-        wallet: z.string().min(1),
+        wallet: z.string().min(1).optional(),
         agent: z.string().min(1),
         nonce: z.number().int().nonnegative(),
-        signature: z.string().min(1),
+        signature: z.string().min(1).optional(),
         expires_at: z.number().int().positive().optional(),
         label: z.string().optional(),
       })
@@ -2362,20 +2386,53 @@ export const tools: ToolDef[] = [
     requiresAuth: false,
     handler: (client, args) => {
       const a = args as {
-        wallet: string;
+        wallet?: string;
         agent: string;
         nonce: number;
-        signature: string;
+        signature?: string;
         expires_at?: number;
         label?: string;
       };
+      let { wallet, signature, expires_at } = a;
+      if (!signature) {
+        const key = client.walletKey("register_agent");
+        // The server salts this domain with its own network name, which a
+        // custom target does not declare (ENG-15643).
+        const network = client.target()!.id;
+        if (network === CUSTOM_TARGET_ID) {
+          throw new Error(
+            "register_agent cannot sign on a custom target: the server binds " +
+              "a registration to its network name, which a custom target does " +
+              "not declare. Sign in the wallet and pass `signature`.",
+          );
+        }
+        const own = walletAddress(key);
+        if (wallet && wallet.toLowerCase() !== own) {
+          throw new Error(
+            `\`wallet\` ${wallet} is not this server's wallet (${own}). Omit ` +
+              "it, or pass a `signature` made by that wallet.",
+          );
+        }
+        wallet = own;
+        // Signing needs a concrete expiry; the server's own default is 30 days.
+        expires_at ??= Date.now() + 30 * 24 * 60 * 60 * 1000;
+        signature = signRegisterAgent(key, {
+          agent: a.agent,
+          expiresAt: expires_at,
+          nonce: a.nonce,
+          network,
+        });
+      }
+      if (!wallet) {
+        throw new Error("`wallet` is required with an explicit `signature`.");
+      }
       const body: Record<string, unknown> = {
-        wallet: a.wallet,
+        wallet,
         agent: a.agent,
         nonce: a.nonce,
-        signature: a.signature,
+        signature,
       };
-      if (a.expires_at !== undefined) body.expires_at = a.expires_at;
+      if (expires_at !== undefined) body.expires_at = expires_at;
       if (a.label !== undefined) body.label = a.label;
       return client.request({
         method: "POST",
@@ -2428,47 +2485,87 @@ export const tools: ToolDef[] = [
 
   // ── Session + API-key management (Bearer session token) ───────────────────
   {
+    name: "create_wallet",
+    ops: [],
+    description:
+      "Make a new EVM wallet for this server to sign with, on a play-funds " +
+      "target only (testnet, local, or a custom stage declared " +
+      "NEXUS_EXCHANGE_FUNDS=play). The key is saved in this network's " +
+      "section of the Nexus CLI config (0600) and used for the rest of the " +
+      "session; only the address comes back, never the key. After it, " +
+      "`login`, `register_agent` and `register_bridge_wallet` sign for " +
+      "themselves when `signature` is omitted, so `create_wallet`, `login`, " +
+      "`create_api_key` gets an agent an account with nothing signed " +
+      "elsewhere. If a wallet already exists for this network it is " +
+      "refused unless `confirm: true`, which overwrites the old key and keeps " +
+      "it nowhere. Stdio server only. Refused on mainnet and on any target " +
+      "whose funds are real or undeclared.",
+    inputSchema: jsonSchema({
+      confirm: {
+        type: "boolean",
+        description:
+          "Must be true to replace an existing wallet. The old key is lost.",
+      },
+    }),
+    zod: z.object({ confirm: z.boolean().optional() }).strict(),
+    fundsGuard: "play-wallet",
+    requiresAuth: false,
+    handler: async (client, args) =>
+      client.createWallet((args as { confirm?: boolean }).confirm === true),
+  },
+  {
     name: "login",
     ops: ["POST /auth/login"],
     description:
       "Sign in with an EVM wallet to get a 24h session token. Submit an " +
       'EIP-191 personal_sign signature over the exact message "Sign in to ' +
-      'Nexus Exchange". This server cannot sign for you — produce the ' +
-      "signature in the wallet and pass it as `signature`. The returned token " +
+      'Nexus Exchange", made in the wallet and passed as `signature`. Omit ' +
+      "`signature` to have the stdio server sign with its own wallet (see " +
+      "`create_wallet`; play-funds targets only). The returned token " +
       "is the Bearer credential for the `*_api_key` tools. The stdio server " +
       "keeps it for the rest of this session and saves it for this network in " +
       "the Nexus CLI config (`saved_to` names the file), so nothing has to be " +
       "copied into the environment. No credentials needed to call this.",
-    inputSchema: jsonSchema(
-      {
-        signature: {
-          type: "string",
-          description:
-            "EIP-191 personal_sign hex (0x-prefixed, 65 bytes) over the login " +
-            "message.",
-        },
-        message: {
-          type: "string",
-          description:
-            'Signed message. Must be exactly "Sign in to Nexus Exchange" ' +
-            "(the default if omitted).",
-        },
+    inputSchema: jsonSchema({
+      signature: {
+        type: "string",
+        description:
+          "EIP-191 personal_sign hex (0x-prefixed, 65 bytes) over the login " +
+          "message. Omit it to have this server sign with its own wallet.",
       },
-      ["signature"],
-    ),
+      message: {
+        type: "string",
+        description:
+          'Signed message. Must be exactly "Sign in to Nexus Exchange" ' +
+          "(the default if omitted).",
+      },
+    }),
     zod: z
-      .object({ signature: z.string().min(1), message: z.string().optional() })
+      .object({
+        signature: z.string().min(1).optional(),
+        message: z.string().optional(),
+      })
       .strict(),
     requiresAuth: false,
     handler: async (client, args) => {
-      const a = args as { signature: string; message?: string };
+      const a = args as { signature?: string; message?: string };
+      const message = a.message ?? LOGIN_MESSAGE;
+      let signature = a.signature;
+      if (!signature) {
+        const key = client.walletKey("login");
+        // The wallet signs the login message and nothing a caller chose.
+        if (message !== LOGIN_MESSAGE) {
+          throw new Error(
+            `login signs only "${LOGIN_MESSAGE}" itself. Pass \`signature\` ` +
+              "to send another message.",
+          );
+        }
+        signature = personalSign(key, message);
+      }
       const login = await client.request<{ token?: string } | undefined>({
         method: "POST",
         path: "/auth/login",
-        body: {
-          message: a.message ?? "Sign in to Nexus Exchange",
-          signature: a.signature,
-        },
+        body: { message, signature },
       });
       if (!login?.token) return login;
       return {

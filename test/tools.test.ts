@@ -940,11 +940,12 @@ test("register_bridge_wallet echoes the challenge message verbatim, signed", asy
     false,
     "message required",
   );
+  // `signature` is optional since ENG-19785: without one the server signs with
+  // its own wallet or refuses (see test/wallet.test.ts).
   assert.equal(
     tool.zod.safeParse({ address: WALLET, message: "m", confirm: true })
       .success,
-    false,
-    "signature required",
+    true,
   );
 });
 
@@ -1507,8 +1508,9 @@ test("every tool declares the spec operations it calls", () => {
   const opFormat = /^(GET|POST|PUT|PATCH|DELETE) \/\S*$/;
   // Tools that legitimately call nothing. Kept in step with TOOLS_WITHOUT_OPS in
   // scripts/check_spec_drift.py; get_deposit_target describes a capability that
-  // is not built server-side yet and returns a local "pending" payload.
-  const NO_OPS = new Set(["get_deposit_target"]);
+  // is not built server-side yet and returns a local "pending" payload, and
+  // create_wallet makes a key locally.
+  const NO_OPS = new Set(["create_wallet", "get_deposit_target"]);
 
   for (const tool of tools) {
     assert.ok(Array.isArray(tool.ops), `${tool.name} declares ops`);

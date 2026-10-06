@@ -7,9 +7,11 @@
  * `src/credentials.rs` on main. It lives at `$XDG_CONFIG_HOME/nexus/config.json`,
  * falling back to `$HOME/.config/nexus/config.json` (macOS included), holds each
  * network's credentials under `networks.<label>` as `api_key`, `api_secret` and
- * `session_token`, and is written `0600` inside a `0700` directory, through a
- * temp file and a rename so a reader never sees half a file. Every other key in
- * it is the CLI's and is carried through a write untouched.
+ * `session_token` (plus `private_key`, the wallet `create_wallet` made on a
+ * play-funds network, ENG-19785), and is written `0600` inside a `0700`
+ * directory, through a temp file and a rename so a reader never sees half a
+ * file. Every other key in it is the CLI's and is carried through a write
+ * untouched.
  *
  * Only the stdio server uses it (see `index.ts`). The hosted server takes
  * credentials from request headers alone (ENG-4359), so it never reads or
@@ -36,6 +38,8 @@ export interface StoredCredentials {
   api_key?: string;
   api_secret?: string;
   session_token?: string;
+  /** The wallet key `create_wallet` made. Only ever read on a play-funds target. */
+  private_key?: string;
 }
 
 type Json = Record<string, unknown>;
@@ -92,7 +96,12 @@ export function readSection(path: string, network: string): StoredCredentials {
       : undefined;
   const out: StoredCredentials = {};
   if (!isObject(section)) return out;
-  for (const field of ["api_key", "api_secret", "session_token"] as const) {
+  for (const field of [
+    "api_key",
+    "api_secret",
+    "session_token",
+    "private_key",
+  ] as const) {
     const value = section[field];
     if (typeof value === "string" && value) out[field] = value;
   }
@@ -169,20 +178,31 @@ export function writeSection(
  *
  * A target with no section of its own (`credentialNamespace` unset) gets
  * nothing from the file and writes nothing to it.
+ *
+ * The wallet key (`NEXUS_EXCHANGE_PRIVATE_KEY`, else the section's
+ * `private_key`) is read here rather than in `loadConfig`, so the hosted
+ * server, which never calls this, can never hold one. It is read only on a
+ * play-funds target: holding a key for real or undeclared funds is out of scope
+ * (ENG-19785), so there it is not loaded at all.
  */
 export function withStoredCredentials(
   cfg: ExchangeConfig,
   env: NodeJS.ProcessEnv = process.env,
 ): ExchangeConfig {
+  const play = cfg.target?.funds === "play";
+  const envKey = (play && env.NEXUS_EXCHANGE_PRIVATE_KEY) || undefined;
   const path = storePath(env);
   const network = cfg.credentialNamespace;
-  if (!path || !network) return cfg;
+  if (!path || !network) {
+    return envKey ? Object.freeze({ ...cfg, privateKey: envKey }) : cfg;
+  }
   const stored = readSection(path, network);
   return Object.freeze({
     ...cfg,
     apiKey: cfg.apiKey ?? stored.api_key,
     apiSecret: cfg.apiSecret ?? stored.api_secret,
     sessionToken: cfg.sessionToken ?? stored.session_token,
+    privateKey: envKey ?? (play ? stored.private_key : undefined),
     credentialStorePath: path,
   });
 }

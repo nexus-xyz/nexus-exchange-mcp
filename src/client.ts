@@ -26,7 +26,8 @@ import {
   type DeclaredFunds,
   type ResolvedTarget,
 } from "./networks.js";
-import { writeSection } from "./store.js";
+import { readSection, writeSection } from "./store.js";
+import { newPrivateKey, walletAddress } from "./wallet.js";
 
 /**
  * Header carrying the compiled-against Exchange API spec tag (see
@@ -180,8 +181,11 @@ function describeTarget(target: ResolvedTarget | undefined): string {
  *   margin that moves, an on-chain deposit address that funds get sent to.
  * - `"play-funds"` — the target must be play funds AND have a faucet. For the
  *   synthetic-funding tools, which exist only where the money is synthetic.
+ * - `"play-wallet"`: the target must be play funds, faucet or not. For a wallet
+ *   key held by this server (ENG-19785): `create_wallet`, and every tool that
+ *   signs for itself.
  */
-export type FundsRequirement = "declared-funds" | "play-funds";
+export type FundsRequirement = "declared-funds" | "play-funds" | "play-wallet";
 
 /**
  * A tool refused because of what the configured target says (or fails to say)
@@ -304,6 +308,64 @@ export class ExchangeClient {
   }
 
   /**
+   * The wallet key a tool signs with when the caller passed no `signature`
+   * (ENG-19785), or a refusal. The funds guard runs first, so a target that is
+   * not play funds is refused the same way whether or not a key is set.
+   */
+  walletKey(tool: string): string {
+    this.assertFundsAllow("play-wallet", tool);
+    if (this.cfg.privateKey) return this.cfg.privateKey;
+    throw new Error(
+      `Tool "${tool}" needs \`signature\`: this server holds no wallet for ` +
+        `this target. On the stdio server, make one with \`create_wallet\` or ` +
+        `set NEXUS_EXCHANGE_PRIVATE_KEY (play-funds targets only). The hosted ` +
+        `server never holds one.`,
+    );
+  }
+
+  /**
+   * Generate a wallet key and save it in this target's section of the CLI's
+   * config file (`private_key`), then use it for the rest of the session.
+   * Returns the address and the file, never the key. Funds-guarded by the tool
+   * (`create_wallet`), so this only runs on play funds.
+   *
+   * Refuses to replace an existing wallet without `confirm`, and refuses
+   * outright when the one in use came from NEXUS_EXCHANGE_PRIVATE_KEY, which
+   * would win over the file again at the next start. A replaced key is
+   * overwritten and kept nowhere.
+   */
+  createWallet(confirm: boolean): { address: string; saved_to: string } {
+    const path = this.cfg.credentialStorePath;
+    const network = this.cfg.credentialNamespace;
+    if (!path || !network) {
+      throw new Error(
+        "There is nowhere to keep a wallet for this target. The hosted server " +
+          "never stores credentials, and on the stdio server a bare " +
+          "NEXUS_EXCHANGE_API_URL, or a custom label spelling a network name, " +
+          "has no section of its own in the Nexus CLI config.",
+      );
+    }
+    const old = this.cfg.privateKey;
+    if (old && old !== readSection(path, network).private_key) {
+      throw new Error(
+        "This session's wallet comes from NEXUS_EXCHANGE_PRIVATE_KEY, which " +
+          "wins over the config file. Unset it to make a wallet here.",
+      );
+    }
+    if (old && !confirm) {
+      throw new Error(
+        `A wallet already exists for this network (${walletAddress(old)}). ` +
+          "Pass `confirm: true` to replace it. The old key is overwritten and " +
+          "kept nowhere, so the account it controls can no longer be signed for.",
+      );
+    }
+    const key = newPrivateKey();
+    writeSection(path, network, { private_key: key });
+    this.cfg = Object.freeze({ ...this.cfg, privateKey: key });
+    return { address: walletAddress(key), saved_to: path };
+  }
+
+  /**
    * Whether the admin tier-management tools should be registered for this
    * client (mirrors `ExchangeConfig.enableAdminTools`). Off by default so a
    * general trading agent never sees the operator-only tools.
@@ -380,6 +442,18 @@ export class ExchangeClient {
               : `reports funds "${funds}". Refusing rather than sending a funding ` +
                 `request at a host that may hold real money.`
           }`,
+      );
+    }
+
+    if (need === "play-wallet") {
+      if (funds === "play") return;
+      throw new FundsGuardError(
+        tool,
+        `Tool "${tool}" would use a wallet key held by this server, which it ` +
+          `does only on a play-funds target. This target ` +
+          `(${describeTarget(target)}) reports funds "${funds}". Holding a key ` +
+          `for real or undeclared funds in this server is not supported: sign ` +
+          `in your own wallet and pass \`signature\` instead.`,
       );
     }
 

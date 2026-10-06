@@ -74,12 +74,13 @@ exception while the pinned spec lacks their bare twins. See
 | `fetch_bridge_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits`           |
 | `fetch_bridge_deposit`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits/{id}`      |
 | `create_bridge_wallet_challenge` | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/wallets/challenge` |
-| `register_bridge_wallet`         | ✅ Live (needs key + caller EIP-191 signature)  | `POST /api/v1/bridge/wallets`           |
+| `register_bridge_wallet`         | ✅ Live (needs key + EIP-191 sig or own wallet) | `POST /api/v1/bridge/wallets`           |
 | `list_bridge_wallets`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/wallets`            |
 | `fetch_agents`                   | ✅ Live (needs key + direct gateway)            | `GET /agents`                           |
-| `register_agent`                 | ✅ Live (needs caller EIP-712 signature)        | `POST /agents/register`                 |
+| `register_agent`                 | ✅ Live (EIP-712 signature or own wallet)       | `POST /agents/register`                 |
 | `revoke_agent`                   | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}`                 |
-| `login`                          | ✅ Live (needs caller EIP-191 signature)        | `POST /auth/login`                      |
+| `create_wallet`                  | ✅ Live (stdio, play funds only)                | none (local key)                        |
+| `login`                          | ✅ Live (EIP-191 signature or own wallet)       | `POST /auth/login`                      |
 | `fetch_api_keys`                 | ✅ Live (needs session token)                   | `GET /keys`                             |
 | `create_api_key`                 | ✅ Live (needs session token)                   | `POST /keys`                            |
 | `delete_api_key`                 | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}`                 |
@@ -147,11 +148,11 @@ under one REST base: sent as `/v1/orders` on the public testnet host, signed as
 
 ### API-surface coverage
 
-**70 registered tools** (plus 48 deprecated aliases, see
+**71 registered tools** (plus 48 deprecated aliases, see
 [Tool names](#tool-names)) covering **66 spec operations** of Exchange API spec
 **v0.8.1**. Those are two different numbers and neither substitutes for the
-other: an alias calls the same operation as its canonical tool, and one tool
-calls none. The operation count is the figure comparable with the rs / py / cli
+other: an alias calls the same operation as its canonical tool, and two tools
+call none. The operation count is the figure comparable with the rs / py / cli
 SDK manifests; the tool count is MCP's own axis and must never be reported as a
 coverage figure. [`docs/coverage-unit.md`](./docs/coverage-unit.md) records that
 decision and how it is enforced.
@@ -319,9 +320,12 @@ is `next_cursor: null`, i.e. exactly the pre-pagination single-page behaviour.
 - **HMAC (key + direct gateway)** — account reads, trading, agent/funding
   actions. Uses `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`. See the
   "Authentication" note below about the public proxy.
-- **Caller signature** — `login` (EIP-191) and `register_agent` (EIP-712) carry
-  a wallet signature the caller produces externally; this server never holds a
-  wallet key and cannot sign for you.
+- **Wallet signature**: `login` (EIP-191), `register_agent` (EIP-712) and
+  `register_bridge_wallet` (EIP-191) carry a wallet signature. Pass one made in
+  the wallet as `signature`, or, on a play-funds target only, omit it and the
+  stdio server signs with its own wallet (see [Local wallet](#local-wallet)).
+  The server never holds a key for real or undeclared funds, and the hosted
+  server never holds one at all.
 - **Session token** — the `*_api_key` tools authenticate with a Bearer session
   token from `login`. The stdio server keeps it for the session and saves it,
   so nothing needs copying into the environment (see
@@ -377,6 +381,7 @@ credentials — never commit real secrets.
 | `NEXUS_EXCHANGE_GATEWAY_PATH`       | No                      | Where a custom stage hangs off its host: `/api/exchange` (default) or `/` for a bare indexer serving at its root. Places **both** surfaces since ENG-6221, so a wrong value 404s every tool, not only the legacy ones. Read only with `NEXUS_EXCHANGE_NETWORK=custom` — refused on its own.                                                                                                                                                                                                                                                                                                          |
 | `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `NEXUS_EXCHANGE_PRIVATE_KEY`        | No                      | Wallet private key (hex) the stdio server signs with when `signature` is omitted. Wins over a stored `private_key`. Read only on a play-funds target, ignored elsewhere and by the hosted server. See [Local wallet](#local-wallet).                                                                                                                                                                                                                                                                                                                                                                 |
 | `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -423,6 +428,34 @@ rename. One network's credentials never go into another's section: a bare
 have no section, so what `login` and `create_api_key` return is kept for the
 session only and the secret comes back in full. The hosted HTTP server never
 reads or writes this file.
+
+### Local wallet
+
+On a play-funds target (testnet, `local`, or a custom stage declared
+`NEXUS_EXCHANGE_FUNDS=play`), the stdio server can hold a wallet key of its
+own, so an agent can make an account with nothing signed elsewhere:
+`create_wallet`, then `login` with no `signature`, then `create_api_key`.
+
+- `create_wallet` generates a secp256k1 key and saves it as `private_key` in
+  the active network's section of the file above, then uses it for the rest of
+  the session. It returns the address and `saved_to`, never the key. If a
+  wallet already exists it refuses unless `confirm: true`, which overwrites the
+  old key and keeps it nowhere.
+- To use a key you already have, set `NEXUS_EXCHANGE_PRIVATE_KEY`. It wins over
+  the file, and `create_wallet` will not replace it.
+- With a wallet held, `login`, `register_agent` and `register_bridge_wallet`
+  sign for themselves when `signature` is omitted. An explicit `signature` is
+  still accepted everywhere. `login` signs only its fixed message,
+  `register_bridge_wallet` only for the held wallet's own address, and
+  `register_agent` only on testnet and `local` (its signature is bound to the
+  server's network name, which a custom stage does not declare).
+- On mainnet, and on a custom stage whose funds are `real` or `unknown`,
+  `create_wallet` and self-signing refuse before any request, and a key in the
+  environment or the file is not even loaded. No tool ever returns the key.
+- The `nexus` CLI shares the file. A CLI release without
+  [nexus-exchange-cli#95](https://github.com/nexus-xyz/nexus-exchange-cli/pull/95)
+  drops `private_key` the next time it writes the file (for example on
+  `nexus auth login`), so update the CLI before using both.
 
 ## Networks
 
@@ -513,6 +546,7 @@ tools refuse rather than proceed on an assumption:
 | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `create_order`, `create_orders`, `edit_order`, `deposit`, `create_deposit`, `add_margin`, `create_bridge_deposit_address` | funds declared `real` **or** `play` |
 | `claim_faucet`, `claim_credit`                                                                                            | funds `play` **and** a faucet       |
+| `create_wallet`, and `login` / `register_agent` / `register_bridge_wallet` without `signature`                            | funds `play`                        |
 
 Everything else is unaffected: every read, `preview_order`, and — deliberately —
 `cancel_order`. Blocking a cancel would trap a caller holding open risk, which is
@@ -780,8 +814,9 @@ version.
 >
 > **The hosted server never uses server-env credentials** (ENG-4359).
 > `NEXUS_EXCHANGE_API_KEY`, `NEXUS_EXCHANGE_API_SECRET`,
-> `NEXUS_EXCHANGE_SESSION_TOKEN` and `NEXUS_EXCHANGE_ADMIN_SECRET` are ignored
-> in HTTP mode, and so is the [stored-credentials](#stored-credentials) file,
+> `NEXUS_EXCHANGE_SESSION_TOKEN`, `NEXUS_EXCHANGE_ADMIN_SECRET` and
+> `NEXUS_EXCHANGE_PRIVATE_KEY` are ignored in HTTP mode, and so is the
+> [stored-credentials](#stored-credentials) file,
 > so a caller that sends no headers can never trade as the server's account.
 > Admin tools are never exposed over HTTP. The stdio server still reads them
 > from the environment as before, then from that file.

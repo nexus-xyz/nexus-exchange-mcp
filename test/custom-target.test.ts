@@ -483,6 +483,7 @@ const GUARDED = {
   register_bridge_wallet: "declared-funds",
   claim_credit: "play-funds",
   claim_faucet: "play-funds",
+  create_wallet: "play-wallet",
 } as const;
 
 test("the guarded set is exactly the tools that move value", () => {

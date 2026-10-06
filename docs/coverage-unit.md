@@ -15,7 +15,7 @@ The tool count is the headline, because a tool is what MCP actually ships and wh
 an agent actually sees. The operation count is the comparable figure, and it is
 the only one that may appear in a cross-surface coverage table.
 
-Today: **70 tools** (plus 48 deprecated aliases, ENG-17742), **66 spec operations** of the 101 the pinned spec documents
+Today: **71 tools** (plus 48 deprecated aliases, ENG-17742), **66 spec operations** of the 101 the pinned spec documents
 (68 distinct once the dual-stack aliases are collapsed — see below).
 
 ## Why it needed deciding
@@ -30,6 +30,8 @@ counting either gives the same answer. MCP does not.
 - `get_deposit_target` calls **none**. The endpoint does not exist server-side
   yet; the tool is registered so the agent flow is complete and returns an honest
   `not_yet_available` payload.
+- `create_wallet` calls **none** either: it makes a wallet key locally
+  (ENG-19785).
 - Three `get_demo_*` tools call gateway sample routes that are not in the
   OpenAPI contract at all.
 

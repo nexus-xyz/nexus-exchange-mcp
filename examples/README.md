@@ -12,7 +12,7 @@ npm install
 npm run build
 ```
 
-All scripts talk to the configured exchange gateway (production by default),
+All scripts talk to the configured exchange host (testnet by default),
 so they need network access. Gateway and credential configuration is read from
 the environment by the server itself; see [`.env.example`](../.env.example).
 
@@ -29,19 +29,17 @@ the environment by the server itself; see [`.env.example`](../.env.example).
 | [`trading-walkthrough.mjs`](./trading-walkthrough.mjs)       | HMAC key (**trades**)    | Place → inspect → amend → cancel a resting limit order, safely            |
 | [`ws-streaming.mjs`](./ws-streaming.mjs)                     | HMAC key (token minting) | Mint a WebSocket token and stream live trades over `/ws`                  |
 | [`agent-funds-and-trades.mjs`](./agent-funds-and-trades.mjs) | HMAC key (**trades**)    | North star, end to end: fund via faucet → preview → trade → close → PnL   |
+| [`full-circle.mjs`](./full-circle.mjs) | None to start (**trades**) | New wallet → login → API key → faucet → trade → close, tools only |
 | [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)                 | —                        | Common failures: 404s, auth errors, rate limits, WS token expiry          |
 
 ## Auth tiers
 
 - **Public** — works with zero configuration. Point-and-run.
-- **HMAC key** — set `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`,
-  and point `NEXUS_EXCHANGE_API_URL` at a **direct** indexer gateway that
-  verifies client HMAC, naming the network it belongs to alongside it (e.g.
-  `NEXUS_EXCHANGE_NETWORK=local` with the `http://localhost:9090` from the
-  exchange `docker-compose`). The public production host fronts authenticated
-  requests with a proxy that signs with the site's own key, so per-caller
-  credentials are not honored there — see the top-level README
-  "Authentication" section.
+- **HMAC key**: set `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`.
+  The default testnet host verifies it as your own key, so no URL is needed.
+  To run against a local indexer instead, add `NEXUS_EXCHANGE_NETWORK=local`
+  (the `http://localhost:9090` from the exchange `docker-compose`). No key yet?
+  `full-circle.mjs` makes one with tools alone.
 - **Name the network, not just the URL.** The network carries the deployment
   shape: a local indexer serves the spec's paths at its origin, while a bare
   `NEXUS_EXCHANGE_API_URL` assumes the public-gateway shape and puts every

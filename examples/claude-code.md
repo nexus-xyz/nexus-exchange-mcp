@@ -19,23 +19,22 @@ claude mcp add nexus-exchange \
   -- node /ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js
 ```
 
-To enable the account/trading tools, pass credentials the same way (and point
-at a direct HMAC-verifying gateway — see "Authentication" in the top-level
-README; the public host's proxy does not honor per-caller HMAC):
+To enable the account/trading tools, pass credentials the same way. The testnet
+host verifies your own key (see "Authentication" in the top-level README):
 
 ```bash
 claude mcp add nexus-exchange \
-  --env NEXUS_EXCHANGE_NETWORK=local \
-  --env NEXUS_EXCHANGE_API_URL=http://localhost:9090 \
+  --env NEXUS_EXCHANGE_NETWORK=testnet \
   --env NEXUS_EXCHANGE_API_KEY=nx_your_key_id \
   --env NEXUS_EXCHANGE_API_SECRET=your_hex_secret \
   -- node /ABSOLUTE/PATH/TO/nexus-exchange-mcp/dist/index.js
 ```
 
-`NEXUS_EXCHANGE_NETWORK` is what makes the fund-moving tools available: a URL on
-its own does not say whose money is behind it, so those tools refuse rather than
-assume play funds. Naming `local` also tells the server this host serves the
-legacy routes at its root instead of under `/api/exchange`. For a stage that is
+No key yet? Leave both out and ask Claude to make one: `create_wallet`, `login`,
+`create_api_key` (top-level README, "Full circle on testnet"). For a local
+indexer, use `NEXUS_EXCHANGE_NETWORK=local`: the network, not a URL on its own,
+is what declares whose money is behind the host, so the fund-moving tools
+refuse on a bare URL rather than assume play funds. For a stage that is
 not one of the named networks, describe it with the `custom` bundle (top-level
 README, "A custom stage").
 

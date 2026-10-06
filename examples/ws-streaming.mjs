@@ -2,11 +2,8 @@
 // stream open OUTSIDE MCP.
 //
 // Auth tier: HMAC KEY (for the token mint). Set NEXUS_EXCHANGE_API_KEY /
-// NEXUS_EXCHANGE_API_SECRET, and NEXUS_EXCHANGE_API_URL at a direct
-// HMAC-verifying gateway (see the top-level README, "Authentication"), plus
-// NEXUS_EXCHANGE_NETWORK naming the network that URL belongs to (`local` for a
-// local indexer) — the network carries the deployment shape, and a bare URL
-// assumes the public-gateway one (ENG-6221).
+// NEXUS_EXCHANGE_API_SECRET. The default testnet host verifies your own key;
+// set NEXUS_EXCHANGE_NETWORK=local for a local indexer.
 //
 // Why the split: an MCP tool is request/response — it cannot hold a socket
 // open. So the server's `create_ws_token` tool mints the single-use 60s token,
@@ -68,9 +65,11 @@ async function main() {
   await client.connect(transport);
 
   let token;
+  let endpoint;
   try {
     const minted = await callJson(client, "create_ws_token");
     token = minted.token ?? minted.ws_token;
+    endpoint = minted.ws_endpoint;
     if (!token)
       throw new Error(`no token in response: ${JSON.stringify(minted)}`);
     console.log("Minted WS token (single-use, expires in 60s).");
@@ -79,11 +78,10 @@ async function main() {
   }
 
   // ── Phase 2: WebSocket — connect and subscribe ───────────────────────────
-  // Derive the WS origin from the same base URL the server used.
-  const base = (
-    process.env.NEXUS_EXCHANGE_API_URL ?? "https://exchange.nexus.xyz"
-  ).replace(/\/+$/, "");
-  const wsUrl = `${base.replace(/^http/, "ws")}/ws?token=${encodeURIComponent(token)}`;
+  // The server says where its network's socket is (`ws_endpoint`), so no host
+  // is guessed here.
+  if (!endpoint) throw new Error("create_ws_token returned no ws_endpoint");
+  const wsUrl = `${endpoint}?token=${encodeURIComponent(token)}`;
   console.log(`Connecting to ${wsUrl.replace(/token=.*/, "token=***")}`);
 
   const ws = new WebSocket(wsUrl);

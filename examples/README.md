@@ -18,19 +18,19 @@ the environment by the server itself; see [`.env.example`](../.env.example).
 
 ## Catalog
 
-| Example                                                      | Auth tier                | What it shows                                                             |
-| ------------------------------------------------------------ | ------------------------ | ------------------------------------------------------------------------- |
-| [`claude-desktop/`](./claude-desktop/)                       | Public (creds optional)  | Claude Desktop config JSON + setup walkthrough                            |
-| [`claude-code.md`](./claude-code.md)                         | Public (creds optional)  | `claude mcp add` — local stdio and hosted Streamable-HTTP variants        |
-| [`list-markets.mjs`](./list-markets.mjs)                     | Public — no credentials  | Minimal MCP client: connect, list tools, call one tool                    |
-| [`market-scan.mjs`](./market-scan.mjs)                       | Public — no credentials  | Market-data agent: tickers, order book, funding, risk params, venue stats |
-| [`demo-account.mjs`](./demo-account.mjs)                     | Public — no credentials  | The account flow (balance/positions/orders) on the public demo account    |
-| [`account-health.mjs`](./account-health.mjs)                 | HMAC key (read-only)     | Portfolio check: summary, equity history, closed positions, rate limits   |
-| [`trading-walkthrough.mjs`](./trading-walkthrough.mjs)       | HMAC key (**trades**)    | Place → inspect → amend → cancel a resting limit order, safely            |
-| [`ws-streaming.mjs`](./ws-streaming.mjs)                     | HMAC key (token minting) | Mint a WebSocket token and stream live trades over `/ws`                  |
-| [`agent-funds-and-trades.mjs`](./agent-funds-and-trades.mjs) | HMAC key (**trades**)    | North star, end to end: fund via faucet → preview → trade → close → PnL   |
-| [`full-circle.mjs`](./full-circle.mjs) | None to start (**trades**) | New wallet → login → API key → faucet → trade → close, tools only |
-| [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)                 | —                        | Common failures: 404s, auth errors, rate limits, WS token expiry          |
+| Example                                                      | Auth tier                  | What it shows                                                             |
+| ------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------- |
+| [`claude-desktop/`](./claude-desktop/)                       | Public (creds optional)    | Claude Desktop config JSON + setup walkthrough                            |
+| [`claude-code.md`](./claude-code.md)                         | Public (creds optional)    | `claude mcp add` — local stdio and hosted Streamable-HTTP variants        |
+| [`list-markets.mjs`](./list-markets.mjs)                     | Public — no credentials    | Minimal MCP client: connect, list tools, call one tool                    |
+| [`market-scan.mjs`](./market-scan.mjs)                       | Public — no credentials    | Market-data agent: tickers, order book, funding, risk params, venue stats |
+| [`demo-account.mjs`](./demo-account.mjs)                     | Public — no credentials    | The account flow (balance/positions/orders) on the public demo account    |
+| [`account-health.mjs`](./account-health.mjs)                 | HMAC key (read-only)       | Portfolio check: summary, equity history, closed positions, rate limits   |
+| [`trading-walkthrough.mjs`](./trading-walkthrough.mjs)       | HMAC key (**trades**)      | Place → inspect → amend → cancel a resting limit order, safely            |
+| [`ws-streaming.mjs`](./ws-streaming.mjs)                     | HMAC key (token minting)   | Mint a WebSocket token and stream live trades over `/ws`                  |
+| [`agent-funds-and-trades.mjs`](./agent-funds-and-trades.mjs) | HMAC key (**trades**)      | North star, end to end: fund via faucet → preview → trade → close → PnL   |
+| [`full-circle.mjs`](./full-circle.mjs)                       | None to start (**trades**) | New wallet → login → API key → faucet → trade → close, tools only         |
+| [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md)                 | —                          | Common failures: 404s, auth errors, rate limits, WS token expiry          |
 
 ## Auth tiers
 

@@ -84,7 +84,8 @@ async function main() {
     // 2. Sign in. With no `signature` the server signs the fixed login
     //    message with the wallet from step 1 and keeps the session token.
     const login = await callJson(client, "login");
-    if (!login?.token) throw new Error(`login returned no token: ${short(login)}`);
+    if (!login?.token)
+      throw new Error(`login returned no token: ${short(login)}`);
     console.log("2. logged in, session token kept");
 
     // 3. Mint an HMAC key with that token. The server keeps it, so every
@@ -107,7 +108,9 @@ async function main() {
     });
     opened = true;
     console.log(`5. entry order: ${short(entry)}`);
-    console.log(`   positions: ${short(await callJson(client, "fetch_positions"))}`);
+    console.log(
+      `   positions: ${short(await callJson(client, "fetch_positions"))}`,
+    );
 
     // 6. Close: reduce_only can only shrink the position, never flip it.
     const exit = await callJson(client, "create_order", {
@@ -119,9 +122,13 @@ async function main() {
     });
     opened = false;
     console.log(`6. exit order: ${short(exit)}`);
-    console.log(`   positions: ${short(await callJson(client, "fetch_positions"))}`);
+    console.log(
+      `   positions: ${short(await callJson(client, "fetch_positions"))}`,
+    );
 
-    console.log("\nFull circle: wallet -> login -> key -> faucet -> trade -> close.");
+    console.log(
+      "\nFull circle: wallet -> login -> key -> faucet -> trade -> close.",
+    );
     ok = true;
   } finally {
     await client.close();

@@ -374,14 +374,14 @@ With nothing configured, an agent on the stdio server can go from no account to
 a closed position on `testnet` (play funds) through tools alone. Each step is
 one tool call:
 
-| Step | Tool             | Arguments                                                          | What happens                                                                                 |
-| ---- | ---------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| 1    | `create_wallet`  | none                                                               | Makes a wallet key and saves it (see [Local wallet](#local-wallet)). Returns the address.    |
-| 2    | `login`          | none                                                               | Signs the login message with that wallet and keeps the session token.                        |
-| 3    | `create_api_key` | none                                                               | Mints an HMAC key with that token and keeps it, so the account tools work from here on.      |
-| 4    | `claim_faucet`   | none                                                               | Credits synthetic USDX. `fetch_balance` shows it.                                            |
-| 5    | `create_order`   | `market_id: "BTC-USDX-PERP"`, `side: "buy"`, `type: "market"`, `size: "0.001"` | Opens a small position. `fetch_positions` shows it.                              |
-| 6    | `create_order`   | the same with `side: "sell"`, `reduce_only: true`                  | Closes it: `reduce_only` can only shrink the position, never flip it.                        |
+| Step | Tool             | Arguments                                                                      | What happens                                                                              |
+| ---- | ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| 1    | `create_wallet`  | none                                                                           | Makes a wallet key and saves it (see [Local wallet](#local-wallet)). Returns the address. |
+| 2    | `login`          | none                                                                           | Signs the login message with that wallet and keeps the session token.                     |
+| 3    | `create_api_key` | none                                                                           | Mints an HMAC key with that token and keeps it, so the account tools work from here on.   |
+| 4    | `claim_faucet`   | none                                                                           | Credits synthetic USDX. `fetch_balance` shows it.                                         |
+| 5    | `create_order`   | `market_id: "BTC-USDX-PERP"`, `side: "buy"`, `type: "market"`, `size: "0.001"` | Opens a small position. `fetch_positions` shows it.                                       |
+| 6    | `create_order`   | the same with `side: "sell"`, `reduce_only: true`                              | Closes it (`reduce_only` never flips it). `fetch_positions` is empty again.               |
 
 Nothing is copied into the environment and the server is not restarted (see
 [Stored credentials](#stored-credentials)). `create_wallet` refuses when this

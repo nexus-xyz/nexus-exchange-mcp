@@ -323,7 +323,10 @@ is `next_cursor: null`, i.e. exactly the pre-pagination single-page behaviour.
   a wallet signature the caller produces externally; this server never holds a
   wallet key and cannot sign for you.
 - **Session token** — the `*_api_key` tools authenticate with a Bearer session
-  token from `login`, set as `NEXUS_EXCHANGE_SESSION_TOKEN`.
+  token from `login`. The stdio server keeps it for the session and saves it,
+  so nothing needs copying into the environment (see
+  [Stored credentials](#stored-credentials)); `NEXUS_EXCHANGE_SESSION_TOKEN`
+  still works.
 - **Admin (opt-in)** — `fetch_tiers` / `set_tier` / `delete_tier` use the
   operator admin secret and mutate other accounts' fee tiers. They are **not
   registered** unless `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS=1` is set (and
@@ -377,6 +380,49 @@ credentials — never commit real secrets.
 | `NEXUS_EXCHANGE_SESSION_TOKEN`      | For `*_api_key` tools   | Bearer session token from `login` (`POST /auth/login`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `NEXUS_EXCHANGE_ADMIN_SECRET`       | For admin tools         | Operator admin secret (`ADMIN_SECRET`). Only with the flag below.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS` | No                      | Set to `1` to register the admin tier tools. Off by default.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+
+### Stored credentials
+
+The stdio server shares its credential file with the Nexus CLI (`nexus`), so a
+key made in one works in the other. The file is
+`$XDG_CONFIG_HOME/nexus/config.json`, or `~/.config/nexus/config.json` when
+`XDG_CONFIG_HOME` is unset (macOS included), with one section per network under
+`networks.<network>`, as in the CLI's
+[per-network credentials](https://github.com/nexus-xyz/nexus-exchange-cli#per-network-credentials):
+
+```json
+{
+  "networks": {
+    "testnet": {
+      "api_key": "nx_...",
+      "api_secret": "...",
+      "session_token": "..."
+    }
+  }
+}
+```
+
+- `login` keeps its session token for the rest of the session and saves it to
+  the active network's section, as `nexus auth login` does.
+- `create_api_key` does the same with the new key id and secret. Once the
+  secret is saved, the result shows `"secret": "[REDACTED]"` and `saved_to`
+  names the file. If the save fails, the result carries the secret in full and
+  a `save_error`.
+- At startup the server reads the active network's section. Environment
+  variables win field by field, matching the CLI's order (flags > env > file).
+  A file that is not valid JSON stops the server at startup, as it stops the
+  CLI, rather than being read as empty and overwritten.
+
+So an agent goes from `login` to `create_api_key` to a trade in one session,
+with nothing copied into the environment and no restart, and the key still
+works after one.
+
+The file is written `0600` in a `0700` directory, through a temp file and a
+rename. One network's credentials never go into another's section: a bare
+`NEXUS_EXCHANGE_API_URL`, and a custom stage whose label spells a network name,
+have no section, so what `login` and `create_api_key` return is kept for the
+session only and the secret comes back in full. The hosted HTTP server never
+reads or writes this file.
 
 ## Networks
 
@@ -735,9 +781,10 @@ version.
 > **The hosted server never uses server-env credentials** (ENG-4359).
 > `NEXUS_EXCHANGE_API_KEY`, `NEXUS_EXCHANGE_API_SECRET`,
 > `NEXUS_EXCHANGE_SESSION_TOKEN` and `NEXUS_EXCHANGE_ADMIN_SECRET` are ignored
-> in HTTP mode, so a caller that sends no headers can never trade as the
-> server's account. Admin tools are never exposed over HTTP. The stdio server
-> still reads them from the environment as before.
+> in HTTP mode, and so is the [stored-credentials](#stored-credentials) file,
+> so a caller that sends no headers can never trade as the server's account.
+> Admin tools are never exposed over HTTP. The stdio server still reads them
+> from the environment as before, then from that file.
 >
 > Header passthrough is the simplest defensible MVP, but the long-term answer
 > is OAuth-minted scoped (trade-not-withdraw) keys so the caller never hands us

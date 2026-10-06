@@ -25,6 +25,7 @@ import {
   CUSTOM_TARGET_ID,
   DEFAULT_NETWORK,
   defineTarget,
+  NETWORK_IDS,
   NETWORKS,
   resolveNetworkId,
   unreachableNetworkMessage,
@@ -130,6 +131,25 @@ export interface ExchangeConfig {
   wsAuthenticatedUrl?: string;
   /** Legacy public market-data stream: `${wsUrl}/stream`. */
   wsMarketDataUrl?: string;
+  /**
+   * The section of the CLI's config file this target's stored credentials live
+   * under (`networks.<this>`, ENG-19784), matching the CLI's own namespace: the
+   * network id, even when `NEXUS_EXCHANGE_API_URL` redirects its host, or a
+   * custom bundle's label.
+   *
+   * Unset when the target has no section of its own: a bare
+   * `NEXUS_EXCHANGE_API_URL` names a host and nothing else, and a custom label
+   * spelling a network name (`testnet`) would share that network's section.
+   * Neither reads from nor writes to the file, so one target's key never lands
+   * in another's section.
+   */
+  credentialNamespace?: string;
+  /**
+   * Path of the CLI's config file, set only by `withStoredCredentials` (the
+   * stdio entry point). When set, `login` and `create_api_key` save what they
+   * return to {@link credentialNamespace}'s section of it.
+   */
+  credentialStorePath?: string;
 }
 
 /**
@@ -563,6 +583,15 @@ export function loadConfig(
   // so `/ws` and `/stream` resolve against the REST base with the scheme
   // swapped.
   const wsUrl = publishedWsUrl ?? baseUrl.replace(/^http/, "ws");
+  // A bare URL, or a custom label spelling a network name, gets no section of
+  // the CLI's config file (see `ExchangeConfig.credentialNamespace`).
+  let credentialNamespace: string | undefined = target.id;
+  if (target.id === CUSTOM_TARGET_ID) {
+    const label = target.label.toLowerCase();
+    const shadowsNetwork = NETWORK_IDS.some((id) => id === label);
+    credentialNamespace =
+      viaBareUrl || shadowsNetwork ? undefined : target.label;
+  }
 
   // Frozen: a tool handler receives this object, and a base URL that can be
   // rewritten at runtime is a redirect for every signed request that follows.
@@ -574,6 +603,7 @@ export function loadConfig(
     wsUrl,
     wsAuthenticatedUrl: `${wsUrl}/ws`,
     wsMarketDataUrl: `${wsUrl}/stream`,
+    credentialNamespace,
     apiKey: env.NEXUS_EXCHANGE_API_KEY || undefined,
     apiSecret: env.NEXUS_EXCHANGE_API_SECRET || undefined,
     sessionToken: env.NEXUS_EXCHANGE_SESSION_TOKEN || undefined,

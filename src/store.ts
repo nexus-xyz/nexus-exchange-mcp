@@ -113,12 +113,16 @@ let tmpSeq = 0;
 /**
  * Merge `creds` into `networks.<network>` and write the file back, leaving every
  * other network and every other key as it was. Undefined fields are left alone.
+ * Throws when the fields are not in the file after the write, so a caller never
+ * reports as saved what another writer erased.
  *
  * ponytail: no lock. The CLI holds a `flock` on `.config.json.lock` for its
  * read-modify-write (ENG-18686), which Node cannot take without a native
  * dependency, so a `nexus` write landing in the same instant can lose one of the
- * two changes. The rename still keeps the file whole. Take the lock if that race
- * shows up in practice.
+ * two changes. The rename still keeps the file whole, and the re-read below
+ * catches a loss that lands before it (ENG-20052). A stale `nexus` write that
+ * renames after the re-read still erases the fields unnoticed; closing that
+ * needs one lock shared with the CLI.
  */
 export function writeSection(
   path: string,
@@ -167,6 +171,15 @@ export function writeSection(
   } catch (err) {
     rmSync(tmp, { force: true });
     throw err;
+  }
+
+  const saved: Json = { ...readSection(path, network) };
+  const lost = given.filter(([k, v]) => saved[k] !== v).map(([k]) => k);
+  if (lost.length) {
+    throw new Error(
+      `${path} was replaced by another writer (a \`nexus\` command or another ` +
+        `MCP server) as this save landed, so it does not hold ${lost.join(", ")}.`,
+    );
   }
 }
 

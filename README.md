@@ -37,55 +37,55 @@ exception while the pinned spec lacks their bare twins. See
 | `get_demo_account`               | ✅ Live (public)                                | `GET /demo/account`                     |
 | `get_demo_positions`             | ✅ Live (public)                                | `GET /demo/positions`                   |
 | `get_demo_orders`                | ✅ Live (public)                                | `GET /demo/orders`                      |
-| `fetch_balance`                  | ✅ Live (needs key + direct gateway)            | `GET /account`                          |
-| `fetch_account_summary`          | ✅ Live (needs key + direct gateway)            | `GET /account/summary`                  |
-| `fetch_account_state`            | ✅ Live (needs key + direct gateway)            | `GET /account/state`                    |
-| `fetch_trading_fees`             | ✅ Live (needs key + direct gateway)            | `GET /account/fees`                     |
-| `fetch_portfolio_history`        | ✅ Live (needs key + direct gateway)            | `GET /account/portfolio-history`        |
-| `fetch_equity_history`           | ✅ Live (needs key + direct gateway)            | `GET /account/equity-history`           |
-| `fetch_positions`                | ✅ Live (needs key + direct gateway)            | `GET /positions`                        |
-| `fetch_positions_history`        | ✅ Live (needs key + direct gateway)            | `GET /positions/closed`                 |
-| `fetch_open_orders`              | ✅ Live (needs key + direct gateway)            | `GET /orders`                           |
-| `fetch_order`                    | ✅ Live (needs key + direct gateway)            | `GET /orders/{id}`                      |
-| `fetch_orders`                   | ✅ Live (needs key + direct gateway)            | `GET /orders/history`                   |
-| `fetch_my_trades`                | ✅ Live (needs key + direct gateway)            | `GET /fills`                            |
-| `fetch_funding_history`          | ✅ Live (needs key + direct gateway)            | `GET /funding`                          |
-| `fetch_withdrawals`              | ✅ Live (needs key + direct gateway)            | `GET /withdrawals`                      |
-| `fetch_deposits`                 | ✅ Live (needs key + direct gateway)            | `GET /deposits`                         |
-| `fetch_rate_limit_status`        | ✅ Live (needs key + direct gateway)            | `GET /account/rate-limit`               |
-| `fetch_cancel_on_disconnect`     | ✅ Live (needs key + direct gateway)            | `GET /account/cancel-on-disconnect`     |
-| `set_cancel_on_disconnect`       | ✅ Live (needs key + direct gateway)            | `PUT /account/cancel-on-disconnect`     |
-| `fetch_adl_history`              | ✅ Live (needs key + direct gateway)            | `GET /account/{addr}/adl-history`       |
-| `fetch_adl_events`               | ✅ Live (needs key + direct gateway)            | `GET /markets/{id}/adl-events`          |
-| `create_order`                   | ✅ Live (needs key + direct gateway)            | `POST /orders`                          |
-| `create_orders`                  | ✅ Live (needs key + direct gateway)            | `POST /orders/batch`                    |
-| `edit_order`                     | ✅ Live (needs key + direct gateway)            | `PATCH /orders/{id}`                    |
-| `preview_order`                  | ✅ Live (needs key + direct gateway)            | `POST /orders/preview`                  |
-| `cancel_order`                   | ✅ Live (needs key + direct gateway)            | `DELETE /orders/{id}`                   |
-| `cancel_all_orders`              | ✅ Live (needs key + direct gateway)            | `DELETE /orders`                        |
-| `deposit`                        | ✅ Live (needs key + direct gateway)            | `POST /account/deposit`                 |
-| `create_deposit`                 | ✅ Live (needs key + direct gateway)            | `POST /deposits`                        |
-| `claim_credit`                   | ✅ Live (needs key + direct gateway)            | `POST /account/credit`                  |
-| `claim_faucet`                   | ✅ Live (needs key + direct gateway)            | `POST /faucet`                          |
-| `add_margin`                     | ✅ Live (needs key + direct gateway)            | `POST /account/margin`                  |
+| `fetch_balance`                  | ✅ Live (needs key)                             | `GET /account`                          |
+| `fetch_account_summary`          | ✅ Live (needs key)                             | `GET /account/summary`                  |
+| `fetch_account_state`            | ✅ Live (needs key)                             | `GET /account/state`                    |
+| `fetch_trading_fees`             | ✅ Live (needs key)                             | `GET /account/fees`                     |
+| `fetch_portfolio_history`        | ✅ Live (needs key)                             | `GET /account/portfolio-history`        |
+| `fetch_equity_history`           | ✅ Live (needs key)                             | `GET /account/equity-history`           |
+| `fetch_positions`                | ✅ Live (needs key)                             | `GET /positions`                        |
+| `fetch_positions_history`        | ✅ Live (needs key)                             | `GET /positions/closed`                 |
+| `fetch_open_orders`              | ✅ Live (needs key)                             | `GET /orders`                           |
+| `fetch_order`                    | ✅ Live (needs key)                             | `GET /orders/{id}`                      |
+| `fetch_orders`                   | ✅ Live (needs key)                             | `GET /orders/history`                   |
+| `fetch_my_trades`                | ✅ Live (needs key)                             | `GET /fills`                            |
+| `fetch_funding_history`          | ✅ Live (needs key)                             | `GET /funding`                          |
+| `fetch_withdrawals`              | ✅ Live (needs key)                             | `GET /withdrawals`                      |
+| `fetch_deposits`                 | ✅ Live (needs key)                             | `GET /deposits`                         |
+| `fetch_rate_limit_status`        | ✅ Live (needs key)                             | `GET /account/rate-limit`               |
+| `fetch_cancel_on_disconnect`     | ✅ Live (needs key)                             | `GET /account/cancel-on-disconnect`     |
+| `set_cancel_on_disconnect`       | ✅ Live (needs key)                             | `PUT /account/cancel-on-disconnect`     |
+| `fetch_adl_history`              | ✅ Live (needs key)                             | `GET /account/{addr}/adl-history`       |
+| `fetch_adl_events`               | ✅ Live (needs key)                             | `GET /markets/{id}/adl-events`          |
+| `create_order`                   | ✅ Live (needs key)                             | `POST /orders`                          |
+| `create_orders`                  | ✅ Live (needs key)                             | `POST /orders/batch`                    |
+| `edit_order`                     | ✅ Live (needs key)                             | `PATCH /orders/{id}`                    |
+| `preview_order`                  | ✅ Live (needs key)                             | `POST /orders/preview`                  |
+| `cancel_order`                   | ✅ Live (needs key)                             | `DELETE /orders/{id}`                   |
+| `cancel_all_orders`              | ✅ Live (needs key)                             | `DELETE /orders`                        |
+| `deposit`                        | ✅ Live (needs key)                             | `POST /account/deposit`                 |
+| `create_deposit`                 | ✅ Live (needs key)                             | `POST /deposits`                        |
+| `claim_credit`                   | ✅ Live (needs key)                             | `POST /account/credit`                  |
+| `claim_faucet`                   | ✅ Live (needs key)                             | `POST /faucet`                          |
+| `add_margin`                     | ✅ Live (needs key)                             | `POST /account/margin`                  |
 | `fetch_bridge_assets`            | ✅ Live (public)                                | `GET /api/v1/bridge/assets`             |
 | `create_bridge_deposit_address`  | ⛔ Deprecated — route not served (ENG-11460)    | `POST /api/v1/bridge/deposit-addresses` |
 | `list_bridge_deposit_addresses`  | ⛔ Deprecated — route not served (ENG-11460)    | `GET /api/v1/bridge/deposit-addresses`  |
-| `fetch_bridge_deposits`          | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits`           |
-| `fetch_bridge_deposit`           | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/deposits/{id}`      |
-| `create_bridge_wallet_challenge` | ✅ Live (needs key + direct gateway)            | `POST /api/v1/bridge/wallets/challenge` |
+| `fetch_bridge_deposits`          | ✅ Live (needs key)                             | `GET /api/v1/bridge/deposits`           |
+| `fetch_bridge_deposit`           | ✅ Live (needs key)                             | `GET /api/v1/bridge/deposits/{id}`      |
+| `create_bridge_wallet_challenge` | ✅ Live (needs key)                             | `POST /api/v1/bridge/wallets/challenge` |
 | `register_bridge_wallet`         | ✅ Live (needs key + EIP-191 sig or own wallet) | `POST /api/v1/bridge/wallets`           |
-| `list_bridge_wallets`            | ✅ Live (needs key + direct gateway)            | `GET /api/v1/bridge/wallets`            |
-| `fetch_agents`                   | ✅ Live (needs key + direct gateway)            | `GET /agents`                           |
+| `list_bridge_wallets`            | ✅ Live (needs key)                             | `GET /api/v1/bridge/wallets`            |
+| `fetch_agents`                   | ✅ Live (needs key)                             | `GET /agents`                           |
 | `register_agent`                 | ✅ Live (EIP-712 signature or own wallet)       | `POST /agents/register`                 |
-| `revoke_agent`                   | ✅ Live (needs key + direct gateway)            | `DELETE /agents/{addr}`                 |
+| `revoke_agent`                   | ✅ Live (needs key)                             | `DELETE /agents/{addr}`                 |
 | `create_wallet`                  | ✅ Live (stdio, play funds only)                | none (local key)                        |
 | `login`                          | ✅ Live (EIP-191 signature or own wallet)       | `POST /auth/login`                      |
 | `fetch_api_keys`                 | ✅ Live (needs session token)                   | `GET /keys`                             |
 | `create_api_key`                 | ✅ Live (needs session token)                   | `POST /keys`                            |
 | `delete_api_key`                 | ✅ Live (needs session token)                   | `DELETE /keys/{key_id}`                 |
-| `create_ws_token`                | ✅ Live (needs key + direct gateway)            | `POST /ws/token`                        |
-| `create_ws_token_legacy`         | ✅ Live (needs key + direct gateway)            | `POST /ws-tokens`                       |
+| `create_ws_token`                | ✅ Live (needs key)                             | `POST /ws/token`                        |
+| `create_ws_token_legacy`         | ✅ Live (needs key)                             | `POST /ws-tokens`                       |
 | `fetch_status`                   | ✅ Live (public)                                | `GET /status`                           |
 | `fetch_tiers`                    | 🔒 Admin (opt-in, see below)                    | `GET /admin/tiers`                      |
 | `set_tier`                       | 🔒 Admin (opt-in, see below)                    | `PUT /admin/tiers`                      |
@@ -317,9 +317,11 @@ is `next_cursor: null`, i.e. exactly the pre-pagination single-page behaviour.
 ### Authorization tiers
 
 - **Public** — no credentials.
-- **HMAC (key + direct gateway)** — account reads, trading, agent/funding
-  actions. Uses `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`. See the
-  "Authentication" note below about the public proxy.
+- **HMAC (key)**: account reads, trading, agent/funding actions. Uses
+  `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET`, or the key
+  `create_api_key` just made (see [Stored credentials](#stored-credentials)).
+  The testnet host verifies it as your own key; see
+  [Authentication](#authentication).
 - **Wallet signature**: `login` (EIP-191), `register_agent` (EIP-712) and
   `register_bridge_wallet` (EIP-191) carry a wallet signature. Pass one made in
   the wallet as `signature`, or, on a play-funds target only, omit it and the
@@ -365,6 +367,30 @@ hand. Market-data and demo tools work with zero configuration; see
 
 Prefer to run from a checkout — for development, or to use the smoke check? See
 [Development](#development).
+
+## Full circle on testnet
+
+With nothing configured, an agent on the stdio server can go from no account to
+a closed position on `testnet` (play funds) through tools alone. Each step is
+one tool call:
+
+| Step | Tool             | Arguments                                                                      | What happens                                                                              |
+| ---- | ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| 1    | `create_wallet`  | none                                                                           | Makes a wallet key and saves it (see [Local wallet](#local-wallet)). Returns the address. |
+| 2    | `login`          | none                                                                           | Signs the login message with that wallet and keeps the session token.                     |
+| 3    | `create_api_key` | none                                                                           | Mints an HMAC key with that token and keeps it, so the account tools work from here on.   |
+| 4    | `claim_faucet`   | none                                                                           | Credits synthetic USDX. `fetch_balance` shows it.                                         |
+| 5    | `create_order`   | `market_id: "BTC-USDX-PERP"`, `side: "buy"`, `type: "market"`, `size: "0.001"` | Opens a small position. `fetch_positions` shows it.                                       |
+| 6    | `create_order`   | the same with `side: "sell"`, `reduce_only: true`                              | Closes it (`reduce_only` never flips it). `fetch_positions` is empty again.               |
+
+Nothing is copied into the environment and the server is not restarted (see
+[Stored credentials](#stored-credentials)). `create_wallet` refuses when this
+network already has a wallet; `confirm: true` replaces it and the old key is
+lost. `claim_faucet` has a per-wallet cooldown and cap, and `claim_credit` is
+the per-key daily allowance.
+
+[`examples/full-circle.mjs`](./examples/full-circle.mjs) runs these steps
+against a throwaway config directory, so your own Nexus config is left alone.
 
 ## Environment variables
 
@@ -701,15 +727,20 @@ before the indexer checks (`apps-prod-testnet.yaml`: "transport prefixes are
 stripped before auth"). If signed calls 401 on a prefixed host and the same key
 works against a bare indexer, that stripping is the thing to check.
 
-Important: the public production host still fronts authenticated requests with a
-proxy that signs with the site's own frontend key, so per-caller HMAC headers
-are not honored there — authenticated tools resolve to the site account, not
-yours. To trade as a specific account, target a direct indexer gateway that
-verifies client HMAC — `NEXUS_EXCHANGE_NETWORK=local` for the
-`http://localhost:9090` from the exchange `docker-compose`, or a `custom` bundle
-pointed at your own (declaring its funds unlocks the guarded tools; a bare
-`NEXUS_EXCHANGE_API_URL` leaves them refused). Until then, use the public
-`get_demo_*` tools to demo the account flow with no secrets.
+The testnet host verifies the caller's own HMAC. A bad signature is answered
+`401 UNAUTHORIZED`, and a valid key acts as the account that minted it: its own
+balance, faucet credit, orders and positions. So trading as yourself needs no
+special gateway, and an agent can make its own account there with tools alone
+(see [Full circle on testnet](#full-circle-on-testnet)). `local` (the
+`http://localhost:9090` from the exchange `docker-compose`) verifies client HMAC
+the same way.
+
+The one exception is the retired legacy gateway at
+`exchange.nexus.xyz/api/exchange`, which no network targets since ENG-8869 (it
+now answers `500`). It proxied authenticated requests and signed them with the
+site's own frontend key, so per-caller HMAC was not honored and calls resolved
+to the site account. A `custom` stage still behind such a proxy behaves the same
+way.
 
 ## Claude Desktop config
 
@@ -749,8 +780,8 @@ this package ships no host for, use the `custom` bundle rather than
 ```
 
 To enable trading, add `NEXUS_EXCHANGE_API_KEY` / `NEXUS_EXCHANGE_API_SECRET` to
-the `env` block and point it at a direct gateway (see
-[Authentication](#authentication)).
+the `env` block, or on testnet let the agent make its own key (see
+[Full circle on testnet](#full-circle-on-testnet)).
 
 ## Demo script
 

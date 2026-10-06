@@ -38,21 +38,19 @@ for the examples: your shell). Public and `demo_*` tools never need this.
 
 ## Authenticated calls succeed but show the WRONG account
 
-You're going through the public production proxy, which re-signs requests with
-the site's own frontend key — your per-caller HMAC headers are not honored, so
-reads resolve to the site account. Point `NEXUS_EXCHANGE_API_URL` at a
-**direct** indexer gateway that verifies client HMAC, and **name the network it
-belongs to**:
+The testnet host and a local indexer both verify your own key, so this points
+at a target behind a proxy that re-signs with its own key. The retired legacy
+gateway (`exchange.nexus.xyz/api/exchange`) did that; a `custom` stage behind
+such a proxy does too. Unset `NEXUS_EXCHANGE_API_URL` to use the default
+testnet host, or **name the network** of a local indexer:
 
 ```bash
-NEXUS_EXCHANGE_NETWORK=local NEXUS_EXCHANGE_API_URL=http://localhost:9090
+NEXUS_EXCHANGE_NETWORK=local
 ```
 
-The network is what carries the deployment shape (ENG-6221): a bare URL assumes
-the public-gateway one and sends every route under `/api/exchange`,
-where a local indexer serves nothing — trading the wrong-account failure for a 404. For an indexer that is not one of the named networks, describe it with the
-full `custom` bundle and `NEXUS_EXCHANGE_GATEWAY_PATH=/`. See "Authentication"
-in the top-level README.
+For an indexer that is not one of the named networks, describe it with the full
+`custom` bundle and `NEXUS_EXCHANGE_GATEWAY_PATH=/`. See "Authentication" in the
+top-level README.
 
 ## `Exchange API 401` on signed calls
 

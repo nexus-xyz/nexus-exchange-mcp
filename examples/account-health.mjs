@@ -5,18 +5,8 @@
 //
 //   NEXUS_EXCHANGE_API_KEY     - HMAC key id
 //   NEXUS_EXCHANGE_API_SECRET  - HMAC secret (hex)
-//   NEXUS_EXCHANGE_API_URL     - a DIRECT indexer gateway that verifies client
-//                                HMAC (e.g. http://localhost:9090). The public
-//                                production host proxies authenticated calls
-//                                under the site's own key — see the top-level
-//                                README, "Authentication".
-//   NEXUS_EXCHANGE_NETWORK     - the network that URL belongs to (e.g. `local`
-//                                for a local indexer). Required here even though
-//                                this script only READS: the network carries the
-//                                deployment shape, and a bare URL assumes the
-//                                public-gateway one, which puts every
-//                                route under /api/exchange where a local indexer
-//                                serves nothing (ENG-6221).
+//   NEXUS_EXCHANGE_NETWORK     - optional. The default, testnet, verifies your
+//                                own key; set `local` for a local indexer.
 //
 //   fetch_account_state      -> summary + open positions in one coherent read
 //   fetch_account_summary    -> equity / margin / PnL rollup / withdrawable

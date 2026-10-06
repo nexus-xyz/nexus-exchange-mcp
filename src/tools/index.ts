@@ -2415,6 +2415,8 @@ export const tools: ToolDef[] = [
         }
         wallet = own;
         // Signing needs a concrete expiry; the server's own default is 30 days.
+        // Unix milliseconds, as AgentRegistrationRequest.expires_at is in the
+        // spec: the server refuses anything outside [now+1d, now+180d] in ms.
         expires_at ??= Date.now() + 30 * 24 * 60 * 60 * 1000;
         signature = signRegisterAgent(key, {
           agent: a.agent,

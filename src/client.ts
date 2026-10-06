@@ -26,6 +26,7 @@ import {
   type DeclaredFunds,
   type ResolvedTarget,
 } from "./networks.js";
+import { writeSection } from "./store.js";
 
 /**
  * Header carrying the compiled-against Exchange API spec tag (see
@@ -121,8 +122,10 @@ export class MissingCredentialsError extends Error {
             `uses server-side credentials: send both X-Nexus-Api-Key and ` +
             `X-Nexus-Api-Secret headers on the initialize request (reconnect ` +
             `to start a new session). Public market-data tools work without them.`
-        : `Tool "${tool}" requires API credentials. Set NEXUS_EXCHANGE_API_KEY and ` +
-            `NEXUS_EXCHANGE_API_SECRET in the environment. See the package README.`,
+        : `Tool "${tool}" requires API credentials. Create a key with ` +
+            `\`create_api_key\` (kept for this session), or set ` +
+            `NEXUS_EXCHANGE_API_KEY and NEXUS_EXCHANGE_API_SECRET in the ` +
+            `environment. See the package README.`,
     );
     this.name = "MissingCredentialsError";
   }
@@ -135,7 +138,7 @@ export class MissingSessionTokenError extends Error {
         ? `Tool "${tool}" requires a session token, which the hosted MCP server ` +
             `does not accept. Run the stdio server locally for this tool.`
         : `Tool "${tool}" requires a session token. Sign in with the \`login\` tool ` +
-            `(or POST /auth/login) and set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
+            `(kept for this session), or set NEXUS_EXCHANGE_SESSION_TOKEN in the ` +
             `environment. See the package README.`,
     );
     this.name = "MissingSessionTokenError";
@@ -262,7 +265,43 @@ export interface Page<T> {
 }
 
 export class ExchangeClient {
-  constructor(private readonly cfg: ExchangeConfig) {}
+  /**
+   * Not readonly: `keepCredentials` swaps in a copy carrying credentials a tool
+   * just obtained. The base URL and target are copied across unchanged.
+   */
+  constructor(private cfg: ExchangeConfig) {}
+
+  /**
+   * Keep credentials `login` or `create_api_key` just returned: for the rest of
+   * this session, and in the target's section of the CLI's config file when the
+   * stdio server has one (ENG-19784). Returns where they were saved, or why
+   * they were not, so the tool result can say so.
+   *
+   * A hosted session is left as it is: it takes credentials from request
+   * headers alone (ENG-4359), never from a tool result.
+   *
+   * A failed save is reported rather than thrown. The call it follows already
+   * succeeded upstream, and throwing would drop a secret the API shows once.
+   */
+  keepCredentials(
+    creds: Pick<ExchangeConfig, "apiKey" | "apiSecret" | "sessionToken">,
+  ): { saved_to?: string; save_error?: string } {
+    if (this.cfg.credentialSource === "headers") return {};
+    this.cfg = Object.freeze({ ...this.cfg, ...creds });
+    const path = this.cfg.credentialStorePath;
+    const network = this.cfg.credentialNamespace;
+    if (!path || !network) return {};
+    try {
+      writeSection(path, network, {
+        api_key: creds.apiKey,
+        api_secret: creds.apiSecret,
+        session_token: creds.sessionToken,
+      });
+      return { saved_to: path };
+    } catch (err) {
+      return { save_error: err instanceof Error ? err.message : String(err) };
+    }
+  }
 
   /**
    * Whether the admin tier-management tools should be registered for this

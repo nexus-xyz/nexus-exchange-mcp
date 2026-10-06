@@ -2435,8 +2435,10 @@ export const tools: ToolDef[] = [
       'EIP-191 personal_sign signature over the exact message "Sign in to ' +
       'Nexus Exchange". This server cannot sign for you — produce the ' +
       "signature in the wallet and pass it as `signature`. The returned token " +
-      "is used as the Bearer credential for the `*_api_key` tools (set it as " +
-      "NEXUS_EXCHANGE_SESSION_TOKEN). No credentials needed to call this.",
+      "is the Bearer credential for the `*_api_key` tools. The stdio server " +
+      "keeps it for the rest of this session and saves it for this network in " +
+      "the Nexus CLI config (`saved_to` names the file), so nothing has to be " +
+      "copied into the environment. No credentials needed to call this.",
     inputSchema: jsonSchema(
       {
         signature: {
@@ -2458,9 +2460,9 @@ export const tools: ToolDef[] = [
       .object({ signature: z.string().min(1), message: z.string().optional() })
       .strict(),
     requiresAuth: false,
-    handler: (client, args) => {
+    handler: async (client, args) => {
       const a = args as { signature: string; message?: string };
-      return client.request({
+      const login = await client.request<{ token?: string } | undefined>({
         method: "POST",
         path: "/auth/login",
         body: {
@@ -2468,6 +2470,11 @@ export const tools: ToolDef[] = [
           signature: a.signature,
         },
       });
+      if (!login?.token) return login;
+      return {
+        ...login,
+        ...client.keepCredentials({ sessionToken: login.token }),
+      };
     },
   },
   {
@@ -2475,8 +2482,8 @@ export const tools: ToolDef[] = [
     ops: ["GET /keys"],
     description:
       "List the HMAC API keys for the authenticated wallet (key ids and " +
-      "metadata; never the secrets). Authenticates with a session token from " +
-      "`login` — set NEXUS_EXCHANGE_SESSION_TOKEN.",
+      "metadata; never the secrets). Authenticates with the session token " +
+      "from `login`, or NEXUS_EXCHANGE_SESSION_TOKEN.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
@@ -2486,19 +2493,36 @@ export const tools: ToolDef[] = [
     name: "create_api_key",
     ops: ["POST /keys"],
     description:
-      "Create a new HMAC API key for the authenticated wallet. The secret is " +
-      "returned ONCE and never shown again — store it immediately. " +
-      "Authenticates with a session token from `login` — set " +
+      "Create a new HMAC API key for the authenticated wallet. The stdio " +
+      "server keeps the key for the rest of this session, so the account and " +
+      "trading tools work right away. The API shows the secret ONCE: the stdio " +
+      "server saves it for this network in the Nexus CLI config and `secret` " +
+      "comes back redacted, with `saved_to` naming the file. When it could " +
+      "not be saved, `secret` is returned in full and must be stored now. " +
+      "Authenticates with the session token from `login`, or " +
       "NEXUS_EXCHANGE_SESSION_TOKEN.",
     inputSchema: jsonSchema({}),
     zod: z.object({}).strict(),
     requiresAuth: true,
-    handler: (client) =>
-      client.request({
+    handler: async (client) => {
+      const created = await client.request<
+        { key_id?: string; secret?: string } | undefined
+      >({
         method: "POST",
         path: "/keys",
         auth: "bearer",
-      }),
+      });
+      if (!created?.key_id || !created.secret) return created;
+      const kept = client.keepCredentials({
+        apiKey: created.key_id,
+        apiSecret: created.secret,
+      });
+      // Redacted only once it is on disk: until then this result is the only
+      // copy of a secret the API never shows again.
+      return kept.saved_to
+        ? { ...created, secret: "[REDACTED]", ...kept }
+        : { ...created, ...kept };
+    },
   },
   {
     name: "delete_api_key",
@@ -2506,7 +2530,7 @@ export const tools: ToolDef[] = [
     description:
       "Delete (revoke) an HMAC API key by its key id. Destructive: any caller " +
       "using that key stops working. You must pass `confirm: true`. " +
-      "Authenticates with a session token from `login` — set " +
+      "Authenticates with the session token from `login`, or " +
       "NEXUS_EXCHANGE_SESSION_TOKEN.",
     inputSchema: jsonSchema(
       {

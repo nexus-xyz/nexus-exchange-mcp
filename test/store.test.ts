@@ -6,13 +6,14 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import {
+import fs, {
   mkdirSync,
   mkdtempSync,
   readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -313,6 +314,63 @@ test("create_api_key returns the secret in full when it was not saved", async ()
   )) as Record<string, string>;
   assert.equal(failed.secret, "ab");
   assert.match(failed.save_error, /not valid JSON/);
+});
+
+/**
+ * Run `body` with a stale writer racing every save: right after the file is
+ * renamed into place, it is replaced by `stale`, the copy a `nexus` command
+ * loaded before the save (ENG-20052).
+ */
+async function withStaleWriter<T>(
+  path: string,
+  stale: string,
+  body: () => Promise<T>,
+): Promise<T> {
+  const real = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    real(from, to);
+    writeFileSync(path, stale);
+  };
+  syncBuiltinESMExports();
+  try {
+    return await body();
+  } finally {
+    fs.renameSync = real;
+    syncBuiltinESMExports();
+  }
+}
+
+test("create_api_key returns the secret in full when a stale writer erased it", async () => {
+  const { path } = scratch();
+  writeSection(path, "local", { session_token: "t" });
+  const stale = readFileSync(path, "utf8");
+  const result = (await withStaleWriter(path, stale, () =>
+    withFetch({ key_id: "nx_new", secret: "ab" }, () =>
+      findTool("create_api_key")!.handler(
+        client(path, { sessionToken: "t" }),
+        {},
+      ),
+    ),
+  )) as Record<string, string>;
+  // The file lost the key, so the result is the only copy left.
+  assert.deepEqual(readSection(path, "local"), { session_token: "t" });
+  assert.equal(result.secret, "ab");
+  assert.equal(result.saved_to, undefined);
+  assert.match(result.save_error, /another writer.*api_key, api_secret/);
+});
+
+test("login reports a token a stale writer erased as unsaved", async () => {
+  const { path } = scratch();
+  writeSection(path, "local", { api_key: "nx_a", api_secret: "aa" });
+  const stale = readFileSync(path, "utf8");
+  const result = (await withStaleWriter(path, stale, () =>
+    withFetch({ token: "tok" }, () =>
+      findTool("login")!.handler(client(path), { signature: "0x00" }),
+    ),
+  )) as Record<string, string>;
+  assert.equal(readSection(path, "local").session_token, undefined);
+  assert.equal(result.saved_to, undefined);
+  assert.match(result.save_error, /another writer.*session_token/);
 });
 
 test("a hosted session neither keeps nor saves what a tool returns", async () => {

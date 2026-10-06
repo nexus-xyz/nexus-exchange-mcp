@@ -1,0 +1,38 @@
+name: Testnet E2E
+
+# Full circle on testnet through the MCP tools only (ENG-19787): a new wallet,
+# a self-signed login, an API key, the faucet, a market buy, and a reduce-only
+# close back to flat. The steps live in scripts/e2e-testnet.ts; any failed step
+# reds the run and names the step in an annotation.
+#
+# Needs no secrets: each run makes its own wallet in a temp config dir that is
+# deleted at the end, so nothing carries over between runs. The cost is that
+# EACH RUN LEAVES ONE FUNDED TESTNET ACCOUNT BEHIND (flat, holding its faucet
+# USDX). That is play money on testnet, and the run log names the address.
+#
+# Not in ci.yml on purpose: a PR must not go red because testnet is down.
+
+on:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testnet-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run e2e:testnet

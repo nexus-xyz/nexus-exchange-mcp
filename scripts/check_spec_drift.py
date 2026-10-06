@@ -198,7 +198,10 @@ CODE_ONLY_OPS = set()
 #     honest "not_yet_available" payload from a local constant; it issues no
 #     upstream request. When the endpoint ships, this tool gains a real `ops`
 #     declaration and comes off this list.
+#   create_wallet: generates a wallet key locally and saves it to the Nexus CLI
+#     config (ENG-19785). It is a local action by design and calls no endpoint.
 TOOLS_WITHOUT_OPS = {
+    "create_wallet",
     "get_deposit_target",
 }
 

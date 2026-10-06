@@ -34,6 +34,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@noble/curves": "^2.4.0",
+    "@noble/hashes": "^2.4.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

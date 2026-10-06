@@ -150,6 +150,14 @@ export interface ExchangeConfig {
    * return to {@link credentialNamespace}'s section of it.
    */
   credentialStorePath?: string;
+  /**
+   * Wallet private key (hex) the self-signing tools sign with when `signature`
+   * is omitted (ENG-19785). Set only by `withStoredCredentials`, from
+   * `NEXUS_EXCHANGE_PRIVATE_KEY` or the section's `private_key`, and only on a
+   * play-funds target; `create_wallet` sets it for the session. Never returned
+   * by any tool.
+   */
+  privateKey?: string;
 }
 
 /**

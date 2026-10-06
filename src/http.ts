@@ -92,6 +92,7 @@ export function configForRequest(
     apiSecret: header(req, API_SECRET_HEADER) || undefined,
     sessionToken: undefined,
     adminSecret: undefined,
+    privateKey: undefined,
     enableAdminTools: false,
     credentialSource: "headers",
   };

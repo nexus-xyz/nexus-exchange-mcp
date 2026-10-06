@@ -181,6 +181,7 @@ test("configForRequest takes credentials from headers only and tags the User-Age
     apiSecret: "e",
     sessionToken: "env_session",
     adminSecret: "env_admin",
+    privateKey: "0xenv_wallet",
     enableAdminTools: true,
   };
   // Header credentials win over env credentials.
@@ -200,6 +201,7 @@ test("configForRequest takes credentials from headers only and tags the User-Age
   assert.equal(noHeaders.apiSecret, undefined);
   assert.equal(noHeaders.sessionToken, undefined);
   assert.equal(noHeaders.adminSecret, undefined);
+  assert.equal(noHeaders.privateKey, undefined);
   assert.equal(noHeaders.enableAdminTools, false);
   assert.equal(noHeaders.userAgent, HTTP_USER_AGENT);
 });

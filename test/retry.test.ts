@@ -180,3 +180,33 @@ test("the 429 that reaches the agent says how long to wait", async () => {
     );
   });
 });
+
+test("a retried agent-signed read re-signs with the agent key and a higher nonce", async () => {
+  const sent: Record<string, string>[] = [];
+  const replies = [status(429), ok()];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: string, init: RequestInit) => {
+    sent.push(init.headers as Record<string, string>);
+    return replies.shift()!;
+  }) as typeof fetch;
+  try {
+    const client = new ExchangeClient(
+      {
+        baseUrl: "http://example.test",
+        agentPrivateKey:
+          "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318",
+      },
+      async () => {},
+    );
+    await client.request({ path: "/account/summary", signed: true });
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(sent.length, 2);
+  for (const h of sent) {
+    assert.equal(h["x-agent"], "0x2c7536e3605d9c16a7a3d7b1898e529396a65c23");
+    assert.equal(h["x-api-key"], undefined);
+  }
+  assert.ok(Number(sent[1]["x-nonce"]) > Number(sent[0]["x-nonce"]));
+  assert.notEqual(sent[1]["x-signature"], sent[0]["x-signature"]);
+});

@@ -82,10 +82,75 @@ export class ExchangeApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly body: string,
+    /** Parsed `Retry-After`, in ms, when the response carried one. */
+    public readonly retryAfterMs?: number,
   ) {
-    super(`Exchange API ${status}: ${body}`);
+    super(
+      `Exchange API ${status}: ${body}${rateLimitHint(status, retryAfterMs)}`,
+    );
     this.name = "ExchangeApiError";
   }
+}
+
+/**
+ * Tell the agent how long a 429 asks it to wait, so it does not retry at once
+ * (ENG-20359). Reads that end here already spent their automatic retries.
+ */
+function rateLimitHint(status: number, retryAfterMs?: number): string {
+  if (status !== 429) return "";
+  return retryAfterMs === undefined
+    ? " (rate limited; the server sent no Retry-After, so back off before retrying)"
+    : ` (rate limited; retry after ${Math.ceil(retryAfterMs / 1000)}s)`;
+}
+
+// Retry policy, matching nexus-exchange-ts (and through it the Python, Rust and
+// Go SDKs): up to 2 retries, 250ms base doubling to an 8s cap with equal
+// jitter, never shorter than `Retry-After`, which is itself capped at 60s so a
+// hostile or far-future value cannot stall a tool call.
+const MAX_RETRIES = 2;
+const RETRY_BASE_MS = 250;
+const RETRY_MAX_MS = 8_000;
+const RETRY_AFTER_MAX_MS = 60_000;
+
+/**
+ * Methods retried automatically: reads only. A write may already have taken
+ * effect when its error surfaced, so re-sending it is the caller's decision
+ * (`DELETE /orders` would also cancel orders placed since the first attempt).
+ */
+const RETRYABLE_METHODS = new Set(["GET"]);
+
+/**
+ * Parse a `Retry-After` header into ms: delta-seconds or an HTTP-date.
+ * `undefined` when absent or unparseable, so the caller falls back to backoff.
+ */
+function parseRetryAfter(
+  header: string | null,
+  nowMs: number = Date.now(),
+): number | undefined {
+  if (!header) return undefined;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const date = Date.parse(header);
+  if (Number.isNaN(date)) return undefined;
+  return Math.max(0, date - nowMs);
+}
+
+/**
+ * Whether a failed attempt could succeed if sent again: 408, 429, 5xx, or a
+ * network failure (fetch rejects with a TypeError, per the WHATWG spec).
+ */
+function isTransient(err: unknown): boolean {
+  if (err instanceof ExchangeApiError) {
+    return err.status === 408 || err.status === 429 || err.status >= 500;
+  }
+  return err instanceof TypeError;
+}
+
+/** Backoff for retry `attempt` (0-based), as in nexus-exchange-ts. */
+function backoffMs(attempt: number, retryAfterMs?: number): number {
+  const capped = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** attempt);
+  const jittered = capped / 2 + Math.random() * (capped / 2);
+  return Math.max(jittered, Math.min(retryAfterMs ?? 0, RETRY_AFTER_MAX_MS));
 }
 
 /**
@@ -273,7 +338,12 @@ export class ExchangeClient {
    * Not readonly: `keepCredentials` swaps in a copy carrying credentials a tool
    * just obtained. The base URL and target are copied across unchanged.
    */
-  constructor(private cfg: ExchangeConfig) {}
+  constructor(
+    private cfg: ExchangeConfig,
+    /** The wait between retries; tests inject one to skip real time. */
+    private readonly sleep: (ms: number) => Promise<void> = (ms) =>
+      new Promise((resolve) => setTimeout(resolve, ms)),
+  ) {}
 
   /**
    * Keep credentials `login` or `create_api_key` just returned: for the rest of
@@ -512,7 +582,27 @@ export class ExchangeClient {
     return this.send<T>(opts);
   }
 
+  /**
+   * {@link sendOnce}, retrying transient failures of reads with backoff. Each
+   * attempt re-signs, so a retry carries a fresh timestamp. Writes never retry.
+   */
   private async send<T>(opts: RequestOptions): Promise<Page<T>> {
+    const retryable = RETRYABLE_METHODS.has(opts.method ?? "GET");
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.sendOnce<T>(opts);
+      } catch (err) {
+        if (!retryable || attempt >= MAX_RETRIES || !isTransient(err)) {
+          throw err;
+        }
+        const retryAfterMs =
+          err instanceof ExchangeApiError ? err.retryAfterMs : undefined;
+        await this.sleep(backoffMs(attempt, retryAfterMs));
+      }
+    }
+  }
+
+  private async sendOnce<T>(opts: RequestOptions): Promise<Page<T>> {
     const method = opts.method ?? "GET";
 
     // Every route is a bare spec path under one base (EDR-006). A leftover
@@ -588,7 +678,11 @@ export class ExchangeClient {
 
     const text = await res.text();
     if (!res.ok) {
-      throw new ExchangeApiError(res.status, sanitizeErrorBody(text));
+      throw new ExchangeApiError(
+        res.status,
+        sanitizeErrorBody(text),
+        parseRetryAfter(res.headers.get("retry-after")),
+      );
     }
     const nextCursor =
       (res.headers.get(NEXT_CURSOR_HEADER) ?? "").trim() || null;

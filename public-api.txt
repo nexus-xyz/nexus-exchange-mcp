@@ -55,6 +55,8 @@ tool create_orders.orders[].time_in_force string enum=["GTC","IOC","FOK","PostOn
 tool create_orders.orders[].trailing_offset_bps integer minimum=0 optional
 tool create_orders.orders[].trigger_price string optional
 tool create_orders.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool create_wallet object additionalProperties=false
+tool create_wallet.confirm boolean optional
 tool create_ws_token object additionalProperties=false
 tool create_ws_token_legacy object additionalProperties=false
 tool delete_api_key object additionalProperties=false
@@ -243,7 +245,7 @@ tool list_markets object additionalProperties=false
 tool list_tiers object additionalProperties=false admin-only
 tool login object additionalProperties=false
 tool login.message string optional
-tool login.signature string required
+tool login.signature string optional
 tool place_order object additionalProperties=false
 tool place_order.limit_offset_bps integer maximum=9999 minimum=0 optional
 tool place_order.market_id string required
@@ -284,13 +286,13 @@ tool register_agent.agent string required
 tool register_agent.expires_at integer optional
 tool register_agent.label string optional
 tool register_agent.nonce integer required
-tool register_agent.signature string required
-tool register_agent.wallet string required
+tool register_agent.signature string optional
+tool register_agent.wallet string optional
 tool register_bridge_wallet object additionalProperties=false
 tool register_bridge_wallet.address string required
 tool register_bridge_wallet.confirm boolean optional
 tool register_bridge_wallet.message string required
-tool register_bridge_wallet.signature string required
+tool register_bridge_wallet.signature string optional
 tool revoke_agent object additionalProperties=false
 tool revoke_agent.address string required
 tool revoke_agent.confirm boolean optional

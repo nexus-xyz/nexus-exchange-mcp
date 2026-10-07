@@ -76,6 +76,34 @@ PR description is dropped at merge. `release-please-config.json` sets
 ships as a patch — which for this repo means the tool-surface break described
 below would land looking like a bug fix.
 
+## Cutting a release
+
+release-please opens and maintains the release PR (version bump + changelog).
+Merging it is the release: the run on that merge tags it and publishes to npm
+(`.github/workflows/release.yml`).
+
+**Before merging, the pre-publish checks have to be green on the release PR**
+(`.github/workflows/pre-publish.yml`, ENG-18798). release-please opens the PR
+with the default token, so its runs wait for **Approve and run workflows** on
+the PR.
+
+- `prepublish-surface`: the packed package's public surface (its MCP tools with
+  their input schemas, and its `bin` entries) equals `public-api.txt`. It runs
+  on every PR, so a tool-surface change shows up as a diff in the PR that makes
+  it, which is where to ask for the `!`.
+- `prepublish-smoke`: the packed package, installed into a clean consumer,
+  lists markets on the public testnet. _Testnet unreachable_ fails under its
+  own name. It is not a pass, so re-run the job once testnet answers.
+- `prepublish-verdict`: the proposed version fits the spec change since the
+  last published version, graded by the monorepo's classifier
+  (`scripts/release_gate/VENDORED.md`). Below 1.0 a breaking change needs a
+  minor bump. _Could not classify_ fails and needs a person.
+  And the public API change since then: a line of `public-api.txt` at the
+  published version's tag that this branch no longer has is a removed or
+  reshaped export, and needs the same bump. Releases before ENG-18798 carry no
+  `public-api.txt`, so that part starts with the first release after it.
+- `drift` and `spec-drift`, as on every PR.
+
 ## Compatibility & deprecations
 
 This server follows [semver](https://semver.org/) (version in `package.json`).

@@ -7,3 +7,8 @@ package-lock.json
 # does not fail on every release PR.
 CHANGELOG.md
 .release-please-manifest.json
+
+# Kept byte for byte identical in every SDK repo (ENG-18798, see the file), so
+# Prettier must not reformat it. The other shared files beside it are Python
+# and text, which Prettier does not read.
+scripts/release_gate/VENDORED.md

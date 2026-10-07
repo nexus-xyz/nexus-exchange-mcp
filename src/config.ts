@@ -66,6 +66,14 @@ export interface ExchangeConfig {
   /** HMAC secret (hex). Optional — only needed for private tools. */
   apiSecret?: string;
   /**
+   * Private key (hex) of a registered agent (ENG-20358). When set, private
+   * tools sign with `agentAuth` (`x-agent`/`x-timestamp`/`x-nonce`/
+   * `x-signature`) instead of HMAC. An agent key can trade but cannot
+   * withdraw, so it is the recommended credential for an AI agent. Never
+   * returned by any tool.
+   */
+  agentPrivateKey?: string;
+  /**
    * Session token (Bearer) from `POST /auth/login`. Optional — only needed for
    * the API-key-management tools (`/keys`), which authenticate with a session
    * token rather than HMAC. See README "Authentication".
@@ -614,6 +622,7 @@ export function loadConfig(
     credentialNamespace,
     apiKey: env.NEXUS_EXCHANGE_API_KEY || undefined,
     apiSecret: env.NEXUS_EXCHANGE_API_SECRET || undefined,
+    agentPrivateKey: env.NEXUS_EXCHANGE_AGENT_PRIVATE_KEY?.trim() || undefined,
     sessionToken: env.NEXUS_EXCHANGE_SESSION_TOKEN || undefined,
     adminSecret: env.NEXUS_EXCHANGE_ADMIN_SECRET || undefined,
     enableAdminTools: isTruthy(env.NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS),
@@ -627,7 +636,7 @@ function isTruthy(value: string | undefined): boolean {
 }
 
 export function hasCredentials(cfg: ExchangeConfig): boolean {
-  return Boolean(cfg.apiKey && cfg.apiSecret);
+  return Boolean(cfg.agentPrivateKey || (cfg.apiKey && cfg.apiSecret));
 }
 
 export function hasSessionToken(cfg: ExchangeConfig): boolean {

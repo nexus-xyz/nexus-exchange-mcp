@@ -87,6 +87,19 @@ export interface ExchangeConfig {
    */
   enableAdminTools: boolean;
   /**
+   * Read-only mode (ENG-20366): register only the tools whose annotations say
+   * they change nothing, so an agent can read markets and the account but has
+   * no tool that places, cancels, moves funds or mints credentials. Set
+   * `NEXUS_EXCHANGE_READ_ONLY=1` or pass `--read-only`.
+   */
+  readOnly?: boolean;
+  /**
+   * Paper mode (ENG-20366): read-only, plus simulated order tools that fill
+   * against the live public order book and never reach the matching engine.
+   * See src/paper.ts. Set `NEXUS_EXCHANGE_PAPER=1` or pass `--paper`.
+   */
+  paper?: boolean;
+  /**
    * Client identifier sent as `User-Agent` on every gateway request so usage
    * can be attributed to a specific surface (stdio CLI vs. hosted MCP) in the
    * exchange dashboard. Optional; defaults to {@link DEFAULT_USER_AGENT}.
@@ -617,6 +630,8 @@ export function loadConfig(
     sessionToken: env.NEXUS_EXCHANGE_SESSION_TOKEN || undefined,
     adminSecret: env.NEXUS_EXCHANGE_ADMIN_SECRET || undefined,
     enableAdminTools: isTruthy(env.NEXUS_EXCHANGE_ENABLE_ADMIN_TOOLS),
+    readOnly: isTruthy(env.NEXUS_EXCHANGE_READ_ONLY),
+    paper: isTruthy(env.NEXUS_EXCHANGE_PAPER),
   });
 }
 

@@ -60,14 +60,45 @@ test("a GET retries a 429 and waits at least Retry-After", async () => {
 });
 
 test("an HTTP-date Retry-After is honoured too", async () => {
-  const at = new Date(Date.now() + 10_000).toUTCString();
+  // An HTTP-date has whole-second precision, so round up to a second boundary:
+  // the wait is then at least 10s minus the few ms the test itself takes.
+  const at = new Date(
+    Math.ceil((Date.now() + 10_000) / 1000) * 1000,
+  ).toUTCString();
   await withFetch(
     [status(429, { "retry-after": at }), ok()],
     async (client, delays) => {
       await client.request({ path: "/markets" });
-      assert.ok(delays[0] >= 8_000, `waited ${delays[0]}ms`);
+      assert.ok(delays[0] >= 9_500, `waited ${delays[0]}ms`);
     },
   );
+});
+
+test("a Retry-After over 60s is capped at 60s", async () => {
+  await withFetch(
+    [status(429, { "retry-after": "120" }), ok()],
+    async (client, delays) => {
+      await client.request({ path: "/markets" });
+      assert.deepEqual(delays, [60_000]);
+    },
+  );
+});
+
+test("an unparseable Retry-After falls back to backoff", async () => {
+  await withFetch(
+    [status(429, { "retry-after": "abc" }), ok()],
+    async (client, delays) => {
+      await client.request({ path: "/markets" });
+      assert.ok(delays[0] >= 125 && delays[0] <= 250, `${delays[0]}`);
+    },
+  );
+});
+
+test("a GET retries a 408", async () => {
+  const methods = await withFetch([status(408), ok()], async (client) => {
+    await client.request({ path: "/markets" });
+  });
+  assert.deepEqual(methods, ["GET", "GET"]);
 });
 
 test("a GET retries 5xx and network failures with growing backoff", async () => {

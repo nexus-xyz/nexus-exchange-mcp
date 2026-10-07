@@ -12,6 +12,7 @@
  */
 
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import { keccak_256 } from "@noble/hashes/sha3.js";
 import {
   bytesToHex,
@@ -36,16 +37,21 @@ const INVALID_KEY =
   "The wallet key (NEXUS_EXCHANGE_PRIVATE_KEY, or `private_key` in the Nexus " +
   "CLI config) is not a valid secp256k1 private key: expected 32 bytes of hex.";
 
+const INVALID_AGENT_KEY =
+  "The agent key (NEXUS_EXCHANGE_AGENT_PRIVATE_KEY, or the " +
+  "X-Nexus-Agent-Private-Key header) is not a valid secp256k1 private key: " +
+  "expected 32 bytes of hex.";
+
 /** A fresh random secp256k1 private key, `0x`-prefixed hex. */
 export function newPrivateKey(): string {
   return `0x${bytesToHex(secp256k1.utils.randomSecretKey())}`;
 }
 
-function keyBytes(key: string): Uint8Array {
+function keyBytes(key: string, invalid = INVALID_KEY): Uint8Array {
   // Checked here before any library parses it, so no parse error quotes it.
-  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(key)) throw new Error(INVALID_KEY);
+  if (!/^(0x)?[0-9a-fA-F]{64}$/.test(key)) throw new Error(invalid);
   const bytes = hexToBytes(key.replace(/^0x/, ""));
-  if (!secp256k1.utils.isValidSecretKey(bytes)) throw new Error(INVALID_KEY);
+  if (!secp256k1.utils.isValidSecretKey(bytes)) throw new Error(invalid);
   return bytes;
 }
 
@@ -116,4 +122,44 @@ export function signRegisterAgent(
     key,
     keccak_256(concatBytes(new Uint8Array([0x19, 0x01]), domain, struct)),
   );
+}
+
+/**
+ * The four `agentAuth` headers for one request, signed by a registered agent
+ * key (ENG-20358). Ported from the TypeScript SDK's `src/agent.ts`, byte for
+ * byte: the digest is `keccak256` of six LF-joined fields with no EIP-191
+ * prefix,
+ *
+ *     {METHOD}\n{path}\n{query}\n{sha256hex(body)}\n{timestamp_ms}\n{nonce}
+ *
+ * and `path` is the same bare path the HMAC scheme signs. The server refuses a
+ * nonce that is not above the highest it has accepted for the agent on a write,
+ * so the caller issues it (see `ExchangeClient`).
+ */
+export function agentAuthHeaders(
+  key: string,
+  r: {
+    method: string;
+    path: string;
+    query: string;
+    body: Uint8Array;
+    timestampMs: number;
+    nonce: number;
+  },
+): Record<string, string> {
+  keyBytes(key, INVALID_AGENT_KEY);
+  const canonical = [
+    r.method.toUpperCase(),
+    r.path,
+    r.query,
+    bytesToHex(sha256(r.body)),
+    String(r.timestampMs),
+    String(r.nonce),
+  ].join("\n");
+  return {
+    "x-agent": walletAddress(key),
+    "x-timestamp": String(r.timestampMs),
+    "x-nonce": String(r.nonce),
+    "x-signature": signDigest(key, keccakUtf8(canonical)),
+  };
 }

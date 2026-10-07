@@ -405,6 +405,7 @@ credentials — never commit real secrets.
 | `NEXUS_EXCHANGE_FUNDS`              | With `custom`           | Whose money is behind the URL: `real`, `play` or `unknown`. **No default.** Until it is declared, the tools that cannot be undone refuse to run.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `NEXUS_EXCHANGE_FAUCET`             | No                      | Set to `1` if a custom stage has a faucet. Separate from funds and absent until declared: `claim_faucet` / `claim_credit` need play funds **and** a faucet.                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `NEXUS_EXCHANGE_GATEWAY_PATH`       | No                      | Where a custom stage hangs off its host: `/api/exchange` (default) or `/` for a bare indexer serving at its root. Places **both** surfaces since ENG-6221, so a wrong value 404s every tool, not only the legacy ones. Read only with `NEXUS_EXCHANGE_NETWORK=custom` — refused on its own.                                                                                                                                                                                                                                                                                                          |
+| `NEXUS_EXCHANGE_AGENT_PRIVATE_KEY`  | For account/trade tools | Private key (hex) of a registered agent. Signs every account/trade call with `agentAuth` and wins over the HMAC pair. Can trade, cannot withdraw. See [Agent keys](#agent-keys-recommended-for-ai-agents).                                                                                                                                                                                                                                                                                                                                                                                           |
 | `NEXUS_EXCHANGE_API_KEY`            | For account/trade tools | HMAC API key id (`x-api-key`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `NEXUS_EXCHANGE_API_SECRET`         | For account/trade tools | HMAC secret (hex).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `NEXUS_EXCHANGE_PRIVATE_KEY`        | No                      | Wallet private key (hex) the stdio server signs with when `signature` is omitted. Wins over a stored `private_key`. Read only on a play-funds target, ignored elsewhere and by the hosted server. See [Local wallet](#local-wallet).                                                                                                                                                                                                                                                                                                                                                                 |
@@ -708,6 +709,36 @@ never taken from caller input.
 
 ## Authentication
 
+### Agent keys (recommended for AI agents)
+
+An agent key is a secp256k1 key a wallet authorizes to trade for it
+(`POST /agents/register`). It can place, amend and cancel orders and read the
+account, but it **cannot withdraw**, transfer, or manage agents. That makes it
+the credential to hand an AI agent: if the model, its transcript or its host
+leaks the key, nobody can move funds out with it.
+
+Set `NEXUS_EXCHANGE_AGENT_PRIVATE_KEY` (or send `X-Nexus-Agent-Private-Key` to
+the [hosted server](#hosted-http-server-remote-mcp)). Every account and trade
+tool then signs with the `agentAuth` scheme the SDKs use, and the agent key wins
+over an HMAC pair when both are set:
+
+```text
+keccak256(<METHOD>\n<path>\n<query>\n<sha256hex(body)>\n<timestamp_ms>\n<nonce>)
+```
+
+signed with the agent key (recoverable secp256k1, no EIP-191 prefix) and sent
+as `x-signature` alongside `x-agent`, `x-timestamp` and `x-nonce`. The path is
+the same bare path the HMAC scheme signs.
+
+To get one, generate a key (any 32 random bytes, e.g. `openssl rand -hex 32`)
+and register its address with your wallet: `nexus agents register` in the
+[Nexus CLI](https://github.com/nexus-xyz/nexus-exchange-cli), or the
+`register_agent` tool here. The server requires each
+agent's nonce to rise on every write, so this server sends one agent-signed
+write at a time; run one server per agent key.
+
+### HMAC API keys
+
 Signed requests use the same canonical HMAC-SHA256 scheme the indexer verifies
 (`backend/services/indexer/src/auth.rs`):
 
@@ -838,6 +869,13 @@ version.
 > X-Nexus-Api-Secret: <hmac secret, hex>
 > ```
 >
+> or, recommended, a trade-only [agent key](#agent-keys-recommended-for-ai-agents)
+> that cannot withdraw:
+>
+> ```text
+> X-Nexus-Agent-Private-Key: <agent private key, hex>
+> ```
+>
 > These are deliberately **not** named `x-api-key` / `x-signature` (the
 > upstream gateway's own headers) to avoid confusion. With no credential
 > headers a session still serves public market-data tools, and every
@@ -845,8 +883,9 @@ version.
 >
 > **The hosted server never uses server-env credentials** (ENG-4359).
 > `NEXUS_EXCHANGE_API_KEY`, `NEXUS_EXCHANGE_API_SECRET`,
-> `NEXUS_EXCHANGE_SESSION_TOKEN`, `NEXUS_EXCHANGE_ADMIN_SECRET` and
-> `NEXUS_EXCHANGE_PRIVATE_KEY` are ignored in HTTP mode, and so is the
+> `NEXUS_EXCHANGE_AGENT_PRIVATE_KEY`, `NEXUS_EXCHANGE_SESSION_TOKEN`,
+> `NEXUS_EXCHANGE_ADMIN_SECRET` and `NEXUS_EXCHANGE_PRIVATE_KEY` are ignored in
+> HTTP mode, and so is the
 > [stored-credentials](#stored-credentials) file,
 > so a caller that sends no headers can never trade as the server's account.
 > Admin tools are never exposed over HTTP. The stdio server still reads them

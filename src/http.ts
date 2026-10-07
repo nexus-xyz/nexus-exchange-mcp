@@ -58,6 +58,8 @@ import { createServerForClient } from "./server.js";
 /** Header names the caller uses to pass their Exchange HMAC credential. */
 export const API_KEY_HEADER = "x-nexus-api-key";
 export const API_SECRET_HEADER = "x-nexus-api-secret";
+/** Header carrying the caller's agent private key (ENG-20358). */
+export const AGENT_KEY_HEADER = "x-nexus-agent-private-key";
 
 /**
  * `User-Agent` the hosted server sends upstream. Same normalized
@@ -90,6 +92,7 @@ export function configForRequest(
     userAgent: HTTP_USER_AGENT,
     apiKey: header(req, API_KEY_HEADER) || undefined,
     apiSecret: header(req, API_SECRET_HEADER) || undefined,
+    agentPrivateKey: header(req, AGENT_KEY_HEADER)?.trim() || undefined,
     sessionToken: undefined,
     adminSecret: undefined,
     privateKey: undefined,
@@ -125,8 +128,10 @@ export function clientIp(
  */
 export function formatRequestError(req: IncomingMessage, err: unknown): string {
   let detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
-  const secret = header(req, API_SECRET_HEADER);
-  if (secret) detail = detail.split(secret).join("[redacted]");
+  for (const name of [API_SECRET_HEADER, AGENT_KEY_HEADER]) {
+    const secret = header(req, name)?.trim();
+    if (secret) detail = detail.split(secret).join("[redacted]");
+  }
   return `nexus-exchange-mcp-http: request failed ${detail}`;
 }
 

@@ -27,7 +27,7 @@ import {
   type ResolvedTarget,
 } from "./networks.js";
 import { readSection, writeSection } from "./store.js";
-import { newPrivateKey, walletAddress } from "./wallet.js";
+import { agentAuthHeaders, newPrivateKey, walletAddress } from "./wallet.js";
 
 /**
  * Header carrying the compiled-against Exchange API spec tag (see
@@ -185,10 +185,13 @@ export class MissingCredentialsError extends Error {
     super(
       source === "headers"
         ? `Tool "${tool}" requires API credentials. The hosted MCP server never ` +
-            `uses server-side credentials: send both X-Nexus-Api-Key and ` +
-            `X-Nexus-Api-Secret headers on the initialize request (reconnect ` +
-            `to start a new session). Public market-data tools work without them.`
-        : `Tool "${tool}" requires API credentials. Create a key with ` +
+            `uses server-side credentials: send X-Nexus-Agent-Private-Key ` +
+            `(recommended), or both X-Nexus-Api-Key and X-Nexus-Api-Secret, ` +
+            `on the initialize request (reconnect to start a new session). ` +
+            `Public market-data tools work without them.`
+        : `Tool "${tool}" requires API credentials. Set ` +
+            `NEXUS_EXCHANGE_AGENT_PRIVATE_KEY to a registered agent key ` +
+            `(recommended: it can trade but not withdraw), create a key with ` +
             `\`create_api_key\` (kept for this session), or set ` +
             `NEXUS_EXCHANGE_API_KEY and NEXUS_EXCHANGE_API_SECRET in the ` +
             `environment. See the package README.`,
@@ -272,7 +275,9 @@ export class FundsGuardError extends Error {
 
 /**
  * How a request authenticates:
- * - `"hmac"`   — per-account HMAC (x-api-key/x-timestamp/x-signature).
+ * - `"hmac"`   — per-account HMAC (x-api-key/x-timestamp/x-signature), or
+ *                `agentAuth` (x-agent/x-timestamp/x-nonce/x-signature) when an
+ *                agent key is configured.
  * - `"bearer"` — session token from /auth/login (Authorization: Bearer …),
  *                used by the /keys management endpoints.
  * - `"admin"`  — operator admin secret (Authorization: Bearer …), used by the
@@ -344,6 +349,19 @@ export class ExchangeClient {
     private readonly sleep: (ms: number) => Promise<void> = (ms) =>
       new Promise((resolve) => setTimeout(resolve, ms)),
   ) {}
+
+  /** Highest agent nonce issued; see {@link ExchangeClient.agentWrites}. */
+  private agentNonce = 0;
+  /**
+   * Agent-signed writes run one at a time (ENG-20358). The server refuses a
+   * write whose nonce is not above the highest it has accepted for the agent,
+   * so two writes in flight at once (an LLM's parallel tool calls) could land
+   * out of order and the lower one be refused as a replay. Each write is
+   * signed only when its turn comes and holds the queue until its response
+   * arrives, as the Rust SDK does. Reads do not consume a nonce, so they skip
+   * it.
+   */
+  private agentWrites: Promise<unknown> = Promise.resolve();
 
   /**
    * Keep credentials `login` or `create_api_key` just returned: for the rest of
@@ -568,7 +586,16 @@ export class ExchangeClient {
   }
 
   async request<T = unknown>(opts: RequestOptions): Promise<T> {
-    return (await this.send<T>(opts)).items;
+    return (await this.inTurn(opts, () => this.send<T>(opts))).items;
+  }
+
+  /** Queue an agent-signed write behind the previous one; run anything else now. */
+  private inTurn<T>(opts: RequestOptions, run: () => Promise<T>): Promise<T> {
+    const write = (opts.method ?? "GET") !== "GET";
+    if (!(opts.signed && write && this.cfg.agentPrivateKey)) return run();
+    const turn = this.agentWrites.then(run);
+    this.agentWrites = turn.catch(() => undefined);
+    return turn;
   }
 
   /**
@@ -579,7 +606,7 @@ export class ExchangeClient {
    * be sent back, and forwarding it would re-request the first page forever.
    */
   async requestPage<T = unknown>(opts: RequestOptions): Promise<Page<T>> {
-    return this.send<T>(opts);
+    return this.inTurn(opts, () => this.send<T>(opts));
   }
 
   /**
@@ -644,7 +671,24 @@ export class ExchangeClient {
     const authMode: AuthMode | undefined = opts.signed ? "hmac" : opts.auth;
     const where = `${method} ${opts.path}`;
 
-    if (authMode === "hmac") {
+    if (authMode === "hmac" && this.cfg.agentPrivateKey) {
+      // An agent key wins over an HMAC pair, as in the SDKs. The nonce is
+      // `max(last + 1, now)`, so it rises within this process and roughly
+      // tracks the clock across restarts.
+      const timestampMs = Date.now();
+      this.agentNonce = Math.max(this.agentNonce + 1, timestampMs);
+      Object.assign(
+        headers,
+        agentAuthHeaders(this.cfg.agentPrivateKey, {
+          method,
+          path: opts.path,
+          query,
+          body: bodyBytes,
+          timestampMs,
+          nonce: this.agentNonce,
+        }),
+      );
+    } else if (authMode === "hmac") {
       if (!this.hasCredentials()) {
         throw new MissingCredentialsError(where, this.cfg.credentialSource);
       }

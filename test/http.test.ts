@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
+  AGENT_KEY_HEADER,
   API_KEY_HEADER,
   API_SECRET_HEADER,
   HTTP_USER_AGENT,
@@ -182,6 +183,7 @@ test("configForRequest takes credentials from headers only and tags the User-Age
     sessionToken: "env_session",
     adminSecret: "env_admin",
     privateKey: "0xenv_wallet",
+    agentPrivateKey: "0xenv_agent",
     enableAdminTools: true,
   };
   // Header credentials win over env credentials.
@@ -189,10 +191,12 @@ test("configForRequest takes credentials from headers only and tags the User-Age
     headers: {
       [API_KEY_HEADER]: "hdr_key",
       [API_SECRET_HEADER]: "hdr_secret",
+      [AGENT_KEY_HEADER]: "0xhdr_agent",
     },
   } as never);
   assert.equal(withHeaders.apiKey, "hdr_key");
   assert.equal(withHeaders.apiSecret, "hdr_secret");
+  assert.equal(withHeaders.agentPrivateKey, "0xhdr_agent");
   assert.equal(withHeaders.userAgent, HTTP_USER_AGENT);
 
   // With no headers, server-env credentials are NEVER used (ENG-4359).
@@ -202,6 +206,7 @@ test("configForRequest takes credentials from headers only and tags the User-Age
   assert.equal(noHeaders.sessionToken, undefined);
   assert.equal(noHeaders.adminSecret, undefined);
   assert.equal(noHeaders.privateKey, undefined);
+  assert.equal(noHeaders.agentPrivateKey, undefined);
   assert.equal(noHeaders.enableAdminTools, false);
   assert.equal(noHeaders.userAgent, HTTP_USER_AGENT);
 });
@@ -503,6 +508,10 @@ test("the API secret never appears in log output", async () => {
     logged.push(
       formatRequestError(
         { headers: { [API_SECRET_HEADER]: secretHex } } as never,
+        new Error(`boom ${secretHex}`),
+      ),
+      formatRequestError(
+        { headers: { [AGENT_KEY_HEADER]: secretHex } } as never,
         new Error(`boom ${secretHex}`),
       ),
     );

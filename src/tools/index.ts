@@ -20,6 +20,7 @@
  */
 
 import { z } from "zod";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { ExchangeClient, type FundsRequirement } from "../client.js";
 import { CUSTOM_TARGET_ID } from "../networks.js";
 import {
@@ -81,8 +82,43 @@ export interface ToolDef {
    * reaches a handler directly.
    */
   fundsGuard?: FundsRequirement;
+  /**
+   * MCP tool annotations, advertised over `tools/list` (ENG-20366). Absent
+   * means read-only, and that is only allowed when every op is a `GET`: the
+   * check below `tools` throws at module load for a tool that calls anything
+   * else without declaring what it does, so a new write tool cannot ship
+   * unannotated and so cannot leak into read-only mode. `readOnlyHint` is also
+   * what read-only mode keys on (see {@link isReadOnly}).
+   */
+  annotations?: ToolAnnotations;
   handler: (client: ExchangeClient, args: unknown) => Promise<unknown>;
 }
+
+// The MCP defaults are `destructiveHint: true` and `idempotentHint: false` for a
+// tool that is not read-only, so every write states both rather than lean on
+// a default a client may not apply.
+const READ_ONLY: ToolAnnotations = { readOnlyHint: true };
+/** Changes state but is additive (claims, registrations, new credentials). */
+const WRITE: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+};
+/** Sets a value: repeating the call leaves the same state. */
+const WRITE_IDEMPOTENT: ToolAnnotations = { ...WRITE, idempotentHint: true };
+/** Places, amends, or moves funds or margin: cannot be taken back. */
+const MOVES_FUNDS: ToolAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+};
+/** Irreversible, and not safe to repeat. */
+const DESTRUCTIVE: ToolAnnotations = MOVES_FUNDS;
+/** Removes something (an order, a key, an agent); a repeat finds it gone. */
+const DESTRUCTIVE_IDEMPOTENT: ToolAnnotations = {
+  ...MOVES_FUNDS,
+  idempotentHint: true,
+};
 
 function jsonSchema(
   properties: Record<string, unknown>,
@@ -1495,6 +1531,7 @@ export const tools: ToolDef[] = [
   {
     name: "set_cancel_on_disconnect",
     ops: ["PUT /account/cancel-on-disconnect"],
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Enable or disable cancel-on-disconnect (COD) for the authenticated " +
       "account. Pass `enabled: true` to arm the dead man's switch (the " +
@@ -1530,6 +1567,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_order",
     ops: ["POST /orders"],
+    annotations: MOVES_FUNDS,
     description:
       "Place an order on a market, buy/sell. Supports limit, market, stop-loss " +
       "(stop_limit / stop_market), take-profit (take_profit_limit / " +
@@ -1555,6 +1593,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_orders",
     ops: ["POST /orders/batch"],
+    annotations: MOVES_FUNDS,
     description:
       "Submit multiple orders in one request. Each order has the same shape as " +
       "`create_order` (market_id, side, type, size, and the type-dependent " +
@@ -1594,6 +1633,7 @@ export const tools: ToolDef[] = [
   {
     name: "cancel_order",
     ops: ["DELETE /orders/{order_id}"],
+    annotations: DESTRUCTIVE_IDEMPOTENT,
     description:
       "Cancel ONE resting order by `order_id`. `market_id` is required (the " +
       "route uses it for routing). This tool only ever cancels the single " +
@@ -1632,6 +1672,7 @@ export const tools: ToolDef[] = [
   {
     name: "cancel_all_orders",
     ops: ["DELETE /orders"],
+    annotations: DESTRUCTIVE_IDEMPOTENT,
     description:
       "Cancel ALL of the authenticated account's open orders, optionally " +
       "scoped to one market with `market_id`. Destructive: you must pass " +
@@ -1678,6 +1719,7 @@ export const tools: ToolDef[] = [
   {
     name: "edit_order",
     ops: ["PATCH /orders/{order_id}"],
+    annotations: MOVES_FUNDS,
     description:
       "Amend a resting order's price and/or size in one atomic cancel-replace " +
       "operation. At least one of `price` or `size` is required; a pre-trade " +
@@ -1747,6 +1789,7 @@ export const tools: ToolDef[] = [
   {
     name: "preview_order",
     ops: ["POST /orders/preview"],
+    annotations: READ_ONLY,
     description:
       "Preview an order without submitting it: projects the margin, equity, " +
       "and fee impact of the order. Takes the same arguments as `create_order`. " +
@@ -1809,6 +1852,7 @@ export const tools: ToolDef[] = [
   {
     name: "deposit",
     ops: ["POST /account/deposit"],
+    annotations: MOVES_FUNDS,
     description:
       "Deposit USDX collateral into the authenticated account. `amount` is a " +
       "positive decimal string. Requires API credentials. This moves REAL " +
@@ -1839,6 +1883,7 @@ export const tools: ToolDef[] = [
   {
     name: "claim_credit",
     ops: ["POST /account/credit"],
+    annotations: WRITE,
     description:
       "Claim synthetic USDX credit from the testnet faucet, up to a per-key " +
       "daily allowance (default 500 USDX, resets midnight UTC). Pass `amount` " +
@@ -1872,6 +1917,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_deposit",
     ops: ["POST /deposits"],
+    annotations: MOVES_FUNDS,
     description:
       "Submit a (testnet/synthetic) deposit for the authenticated account via " +
       "the deposits ledger (`POST /deposits` — unlike `deposit`, " +
@@ -1914,6 +1960,7 @@ export const tools: ToolDef[] = [
   {
     name: "claim_faucet",
     ops: ["POST /faucet"],
+    annotations: WRITE,
     description:
       "Claim the fixed testnet faucet amount of synthetic USDX for the " +
       "authenticated account, subject to a per-wallet cooldown and cumulative " +
@@ -1933,6 +1980,7 @@ export const tools: ToolDef[] = [
   {
     name: "add_margin",
     ops: ["POST /account/margin"],
+    annotations: MOVES_FUNDS,
     description:
       "Add or remove isolated margin on an open position. Fails if the " +
       "position is not in isolated margin mode (MarginModeNotIsolated), if " +
@@ -2006,6 +2054,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_bridge_deposit_address",
     ops: ["POST /api/v1/bridge/deposit-addresses"],
+    annotations: WRITE_IDEMPOTENT,
     description:
       "Deprecated: no server implements this route (its design was cancelled, " +
       "ENG-11460), so every call fails. " +
@@ -2152,6 +2201,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_bridge_wallet_challenge",
     ops: ["POST /api/v1/bridge/wallets/challenge"],
+    annotations: WRITE,
     description:
       "Step 1 of registering a withdrawal wallet: returns the exact `message` " +
       "to sign with that wallet's key (EIP-191 `personal_sign`) and the " +
@@ -2194,6 +2244,7 @@ export const tools: ToolDef[] = [
   {
     name: "register_bridge_wallet",
     ops: ["POST /api/v1/bridge/wallets"],
+    annotations: DESTRUCTIVE,
     description:
       "Step 2 of registering a withdrawal wallet: submit the `address`, the " +
       "`message` returned by `create_bridge_wallet_challenge` echoed back " +
@@ -2326,6 +2377,7 @@ export const tools: ToolDef[] = [
   {
     name: "register_agent",
     ops: ["POST /agents/register"],
+    annotations: WRITE,
     description:
       "Register a delegated agent key so an AI agent can trade on a wallet's " +
       "behalf without holding the wallet key. Authorized by an EIP-712 " +
@@ -2446,6 +2498,7 @@ export const tools: ToolDef[] = [
   {
     name: "revoke_agent",
     ops: ["DELETE /agents/{address}"],
+    annotations: DESTRUCTIVE_IDEMPOTENT,
     description:
       "Revoke a previously registered delegated agent key by its address. " +
       "Destructive: the agent can no longer trade on the wallet's behalf. To " +
@@ -2489,6 +2542,8 @@ export const tools: ToolDef[] = [
   {
     name: "create_wallet",
     ops: [],
+    // With `confirm` it overwrites the stored key, which is kept nowhere.
+    annotations: DESTRUCTIVE,
     description:
       "Make a new EVM wallet for this server to sign with, on a play-funds " +
       "target only (testnet, local, or a custom stage declared " +
@@ -2518,6 +2573,7 @@ export const tools: ToolDef[] = [
   {
     name: "login",
     ops: ["POST /auth/login"],
+    annotations: WRITE,
     description:
       "Sign in with an EVM wallet to get a 24h session token. Submit an " +
       'EIP-191 personal_sign signature over the exact message "Sign in to ' +
@@ -2591,6 +2647,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_api_key",
     ops: ["POST /keys"],
+    annotations: WRITE,
     description:
       "Create a new HMAC API key for the authenticated wallet. The stdio " +
       "server keeps the key for the rest of this session, so the account and " +
@@ -2626,6 +2683,7 @@ export const tools: ToolDef[] = [
   {
     name: "delete_api_key",
     ops: ["DELETE /keys/{key_id}"],
+    annotations: DESTRUCTIVE_IDEMPOTENT,
     description:
       "Delete (revoke) an HMAC API key by its key id. Destructive: any caller " +
       "using that key stops working. You must pass `confirm: true`. " +
@@ -2669,6 +2727,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_ws_token",
     ops: ["POST /ws/token"],
+    annotations: READ_ONLY,
     description:
       "Mint a short-lived (60s, single-use) token for an authenticated " +
       "per-account WebSocket stream (order/fill/position updates). Uses the " +
@@ -2691,6 +2750,7 @@ export const tools: ToolDef[] = [
   {
     name: "create_ws_token_legacy",
     ops: ["POST /ws-tokens"],
+    annotations: READ_ONLY,
     description:
       "Mint a short-lived (60s, single-use) token for the legacy public " +
       "`/stream` endpoint via `POST /ws-tokens`. Prefer `create_ws_token` " +
@@ -2751,6 +2811,7 @@ export const tools: ToolDef[] = [
   {
     name: "set_tier",
     ops: ["PUT /admin/tiers"],
+    annotations: WRITE_IDEMPOTENT,
     description:
       "ADMIN: set an account's fee tier override. Operator-only and mutates " +
       "ANOTHER account — uses the admin secret and is registered only when " +
@@ -2786,6 +2847,7 @@ export const tools: ToolDef[] = [
   {
     name: "delete_tier",
     ops: ["DELETE /admin/tiers/{address}"],
+    annotations: DESTRUCTIVE_IDEMPOTENT,
     description:
       "ADMIN: reset an account's fee tier override back to default. " +
       "Operator-only, destructive on another account — uses the admin secret " +
@@ -2829,6 +2891,7 @@ export const tools: ToolDef[] = [
   {
     name: "get_deposit_target",
     ops: [],
+    annotations: READ_ONLY,
     description:
       "Get the on-chain deposit target (address/memo) to fund the account. " +
       "This legacy single-target lookup remains unbuilt server-side, and the " +
@@ -2867,6 +2930,15 @@ export const tools: ToolDef[] = [
  * framing.
  */
 for (const tool of tools) {
+  if (
+    !tool.annotations &&
+    (tool.ops.length === 0 || !tool.ops.every((op) => op.startsWith("GET ")))
+  ) {
+    throw new Error(
+      `${tool.name} calls ${JSON.stringify(tool.ops)} and declares no annotations; ` +
+        "only an all-GET tool may default to read-only",
+    );
+  }
   const need = tool.fundsGuard;
   if (need) {
     const inner = tool.handler;
@@ -2970,8 +3042,27 @@ export function findTool(name: string): ToolDef | undefined {
 /**
  * Tools that should be advertised/callable for a given config. Admin tools are
  * hidden unless `enableAdminTools` is set, so a general trading agent never
- * sees operator-only, cross-account mutations.
+ * sees operator-only, cross-account mutations. `readOnly` (ENG-20366) also
+ * drops every tool that is not read-only, so nothing that writes is listed or
+ * callable.
  */
-export function visibleTools(opts: { enableAdminTools: boolean }): ToolDef[] {
-  return tools.filter((t) => !t.adminOnly || opts.enableAdminTools);
+export function visibleTools(opts: {
+  enableAdminTools: boolean;
+  readOnly?: boolean;
+}): ToolDef[] {
+  return tools.filter(
+    (t) =>
+      (!t.adminOnly || opts.enableAdminTools) &&
+      (!opts.readOnly || isReadOnly(t)),
+  );
+}
+
+/** Whether a tool leaves the account untouched, which read-only mode keeps. */
+export function isReadOnly(tool: ToolDef): boolean {
+  return annotationsOf(tool).readOnlyHint === true;
+}
+
+/** What `tools/list` advertises for a tool. */
+export function annotationsOf(tool: ToolDef): ToolAnnotations {
+  return tool.annotations ?? READ_ONLY;
 }

@@ -323,7 +323,7 @@ export function createHttpMcpServer(opts: HttpServerOptions = {}): HttpServer {
       if (!sessionId && isInitializeRequest(body)) {
         const sessionConfig = configForRequest(baseConfig, req);
         const client = new ExchangeClient(sessionConfig);
-        const server = createServerForClient(client);
+        const server = createServerForClient(client, sessionConfig);
 
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),

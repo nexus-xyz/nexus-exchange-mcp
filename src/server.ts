@@ -15,7 +15,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig, PACKAGE_VERSION, type ExchangeConfig } from "./config.js";
 import { ExchangeClient } from "./client.js";
-import { findTool, visibleTools } from "./tools/index.js";
+import { annotationsOf, visibleTools } from "./tools/index.js";
+import { paperTools } from "./paper.js";
 
 /** Package version, surfaced in the MCP server handshake. Single-sourced from
  * {@link PACKAGE_VERSION} so it stays in step with the wire User-Agent. */
@@ -28,11 +29,22 @@ export const SERVER_VERSION = PACKAGE_VERSION;
  * `server.connect(transport)`. Both transports share this function, so the
  * tool surface and behavior never drift between them.
  */
-export function createServerForClient(client: ExchangeClient): Server {
+export function createServerForClient(
+  client: ExchangeClient,
+  mode: Pick<ExchangeConfig, "readOnly" | "paper"> = {},
+): Server {
   // Tools advertised/callable for this client. Admin tools are hidden unless
-  // explicitly enabled, so they never reach a general trading agent.
-  const enabled = visibleTools({ enableAdminTools: client.enableAdminTools() });
-  const enabledNames = new Set(enabled.map((t) => t.name));
+  // explicitly enabled, so they never reach a general trading agent. Read-only
+  // and paper mode drop every tool that writes (ENG-20366); paper mode then
+  // adds back the order tools, simulated against the live public book.
+  const paper = mode.paper ? paperTools() : new Map();
+  const enabled = new Map(
+    visibleTools({
+      enableAdminTools: client.enableAdminTools(),
+      readOnly: mode.readOnly || mode.paper,
+    }).map((t) => [t.name, t]),
+  );
+  for (const [name, tool] of paper) enabled.set(name, tool);
 
   const server = new Server(
     { name: "nexus-exchange-mcp", version: SERVER_VERSION },
@@ -40,17 +52,16 @@ export function createServerForClient(client: ExchangeClient): Server {
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: enabled.map((t) => ({
+    tools: [...enabled.values()].map((t) => ({
       name: t.name,
       description: t.description,
       inputSchema: t.inputSchema,
+      annotations: annotationsOf(t),
     })),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const tool = enabledNames.has(req.params.name)
-      ? findTool(req.params.name)
-      : undefined;
+    const tool = enabled.get(req.params.name);
     if (!tool) {
       return {
         isError: true,
@@ -95,5 +106,5 @@ export function createServerForClient(client: ExchangeClient): Server {
  * Credentials, if any, come from the process environment.
  */
 export function createServer(config: ExchangeConfig = loadConfig()): Server {
-  return createServerForClient(new ExchangeClient(config));
+  return createServerForClient(new ExchangeClient(config), config);
 }

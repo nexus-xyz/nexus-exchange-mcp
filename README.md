@@ -484,6 +484,39 @@ own, so an agent can make an account with nothing signed elsewhere:
   drops `private_key` the next time it writes the file (for example on
   `nexus auth login`), so update the CLI before using both.
 
+## Agent safety modes
+
+Two switches limit what an agent can do, for trying an agent out or giving it
+market access without trading rights (ENG-20366). Each one is an env var or a
+flag in the stdio server's `args`. The hosted HTTP server reads only the env var.
+
+| Mode      | Env var                    | Flag          | What the agent gets                                                                                                  |
+| --------- | -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Read-only | `NEXUS_EXCHANGE_READ_ONLY` | `--read-only` | Only tools that change nothing. Placing, amending, cancelling, deposits, logins and key changes are gone.            |
+| Paper     | `NEXUS_EXCHANGE_PAPER`     | `--paper`     | Read-only, plus simulated `create_order`, `create_orders`, `cancel_order`, `cancel_all_orders`, `fetch_open_orders`. |
+
+```json
+{ "command": "npx", "args": ["-y", "@nexus-xyz/exchange-mcp", "--paper"] }
+```
+
+Read-only keeps a tool only when its `readOnlyHint` annotation is true, so the
+set is exactly what `tools/list` labels as read-only. Every tool carries MCP
+annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`); one that
+calls anything but a `GET` has to declare them or the server refuses to start.
+`preview_order` and the two WebSocket-token tools are `POST`s that count as
+read-only: they change no account state.
+
+Paper mode fetches the market's public order book when an order is placed and
+walks it. A market order takes levels until it fills or the book runs out. A
+limit order fills only the levels its price crosses, and what is left rests in
+an in-memory paper book for the life of the process (`IOC` cancels it, `FOK`
+fills all or nothing, `PostOnly` is rejected if it would cross). Every
+response says `"simulated": true`. It is deliberately simple. It does **not**
+simulate margin or balance checks, fees, funding, liquidation or positions, and
+a resting paper order never fills later, even when the market trades through
+it. Only `limit` and `market` orders are simulated. Nothing in paper mode
+places, amends or cancels a real order.
+
 ## Networks
 
 The target is chosen on a **network** axis — whose money is behind it — not a

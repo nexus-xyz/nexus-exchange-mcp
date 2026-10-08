@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  API_VERSION_HEADER,
   ExchangeClient,
   MissingAdminSecretError,
   MissingCredentialsError,
@@ -206,13 +207,53 @@ test("revoke_agent refuses without confirm, then DELETEs with confirm", async ()
     async () => tool.handler(fullClient(), { address: "0xAGENT" }),
     /confirm: true/,
   );
-
-  const calls = await capture(fullClient(), (c) =>
-    tool.handler(c, { address: "0xA/B", confirm: true }),
+  await assert.rejects(
+    async () =>
+      tool.handler(fullClient(), {
+        address: "0xAGENT",
+        confirm: true,
+        signature: "0xsig",
+      }),
+    /`account` and `nonce` are required/,
   );
-  assert.equal(calls[0].method, "DELETE");
-  assert.equal(calls[0].url, `${BASE}/agents/0xA%2FB`);
-  assert.ok(calls[0].headers.get("x-signature"));
+
+  // The wallet signature is the only credential sent, whatever the client
+  // holds: none, an HMAC pair, or an agent key (ENG-20579).
+  const clients = {
+    none: new ExchangeClient({ baseUrl: BASE }),
+    hmac: fullClient(),
+    agent: new ExchangeClient({
+      baseUrl: BASE,
+      agentPrivateKey: `0x${"11".repeat(32)}`,
+    }),
+  };
+  for (const [name, client] of Object.entries(clients)) {
+    const calls = await capture(client, (c) =>
+      tool.handler(c, {
+        address: "0xA/B",
+        confirm: true,
+        account: "0xABCDEF0000000000000000000000000000000001",
+        nonce: 1790000000000,
+        signature: "0xsig",
+      }),
+    );
+    assert.equal(calls[0].method, "DELETE", name);
+    assert.equal(calls[0].url, `${BASE}/agents/0xA%2FB`, name);
+    const auth = [...calls[0].headers.entries()].filter(
+      ([k]) => k.startsWith("x-") && k !== API_VERSION_HEADER,
+    );
+    assert.deepEqual(
+      Object.fromEntries(auth),
+      {
+        "x-wallet-account": "0xabcdef0000000000000000000000000000000001",
+        "x-wallet-chain-id": "20056",
+        "x-wallet-nonce": "1790000000000",
+        "x-wallet-signature": "0xsig",
+      },
+      name,
+    );
+    assert.equal(calls[0].headers.get("authorization"), null, name);
+  }
 });
 
 test("login POSTs default message + signature, unsigned", async () => {

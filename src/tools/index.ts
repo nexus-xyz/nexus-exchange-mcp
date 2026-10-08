@@ -26,7 +26,9 @@ import { CUSTOM_TARGET_ID } from "../networks.js";
 import {
   LOGIN_MESSAGE,
   personalSign,
+  REGISTER_AGENT_CHAIN_ID,
   signRegisterAgent,
+  signRevokeAgentKey,
   walletAddress,
 } from "../wallet.js";
 
@@ -663,6 +665,38 @@ function withWsEndpoint(
       "Connect with the token as a query parameter, e.g. " +
       `${endpoint}?token=<token>. Tokens are single-use and expire in ~60s.`,
   };
+}
+
+/**
+ * The held wallet, for an agent-management tool that signs for itself when the
+ * caller passed no `signature` (ENG-19785): its key, address and the network
+ * name the signature is salted with. Refused off play funds or without a
+ * wallet (see `walletKey`), on a custom target, which declares no network name
+ * (ENG-15643), and when `claimed` names some other wallet.
+ */
+function agentSigner(
+  client: ExchangeClient,
+  tool: string,
+  field: string,
+  claimed: string | undefined,
+): { key: string; own: string; network: string } {
+  const key = client.walletKey(tool);
+  const network = client.target()!.id;
+  if (network === CUSTOM_TARGET_ID) {
+    throw new Error(
+      `${tool} cannot sign on a custom target: the server binds the ` +
+        "signature to its network name, which a custom target does not " +
+        "declare. Sign in the wallet and pass `signature`.",
+    );
+  }
+  const own = walletAddress(key);
+  if (claimed && claimed.toLowerCase() !== own) {
+    throw new Error(
+      `\`${field}\` ${claimed} is not this server's wallet (${own}). Omit ` +
+        "it, or pass a `signature` made by that wallet.",
+    );
+  }
+  return { key, own, network };
 }
 
 export const tools: ToolDef[] = [
@@ -2362,7 +2396,7 @@ export const tools: ToolDef[] = [
       client.request({ path: "/api/v1/bridge/wallets", signed: true }),
   },
 
-  // ── Agent-key management (requires credentials) ───────────────────────────
+  // ── Agent-key management ──────────────────────────────────────────────────
   {
     name: "fetch_agents",
     ops: ["GET /agents"],
@@ -2447,24 +2481,12 @@ export const tools: ToolDef[] = [
       };
       let { wallet, signature, expires_at } = a;
       if (!signature) {
-        const key = client.walletKey("register_agent");
-        // The server salts this domain with its own network name, which a
-        // custom target does not declare (ENG-15643).
-        const network = client.target()!.id;
-        if (network === CUSTOM_TARGET_ID) {
-          throw new Error(
-            "register_agent cannot sign on a custom target: the server binds " +
-              "a registration to its network name, which a custom target does " +
-              "not declare. Sign in the wallet and pass `signature`.",
-          );
-        }
-        const own = walletAddress(key);
-        if (wallet && wallet.toLowerCase() !== own) {
-          throw new Error(
-            `\`wallet\` ${wallet} is not this server's wallet (${own}). Omit ` +
-              "it, or pass a `signature` made by that wallet.",
-          );
-        }
+        const { key, own, network } = agentSigner(
+          client,
+          "register_agent",
+          "wallet",
+          wallet,
+        );
         wallet = own;
         // Signing needs a concrete expiry; the server's own default is 30 days.
         // Unix milliseconds, as AgentRegistrationRequest.expires_at is in the
@@ -2502,38 +2524,112 @@ export const tools: ToolDef[] = [
     description:
       "Revoke a previously registered delegated agent key by its address. " +
       "Destructive: the agent can no longer trade on the wallet's behalf. To " +
-      "avoid an accidental revoke you must pass `confirm: true`. Requires API " +
-      "credentials.",
+      "avoid an accidental revoke you must pass `confirm: true`. Authorized " +
+      "only by an EIP-712 signature from the OWNER WALLET over " +
+      "`RevokeAgentKey{account, agent, nonce}` (the `register_agent` " +
+      "domain); API credentials and agent keys are not accepted. Sign it in " +
+      "the wallet and pass `account`, `nonce` and `signature`, or omit them " +
+      "to have the stdio server sign with its own wallet (see " +
+      "`create_wallet`; testnet and local only).",
     inputSchema: jsonSchema(
       {
         address: {
           type: "string",
-          description: "Agent address to revoke (0x-prefixed).",
+          description: "Agent address to revoke (0x-prefixed, 20 bytes).",
         },
         confirm: {
           type: "boolean",
           description:
             "Must be true to actually revoke (guards against typos).",
         },
+        account: {
+          type: "string",
+          description:
+            "Owner wallet address (0x-prefixed, 20 bytes). Required with " +
+            "`signature`; defaults to this server's wallet without one.",
+        },
+        nonce: {
+          type: "integer",
+          description:
+            "The nonce signed, as Unix ms: at most 5 minutes old, and above " +
+            "the last one this wallet used to revoke or rename an agent. " +
+            "Required with `signature`; defaults to now without one.",
+        },
+        signature: {
+          type: "string",
+          description:
+            "EIP-712 signature over RevokeAgentKey{account, agent, nonce} " +
+            "from the wallet private key (0x-prefixed). Omit it to have this " +
+            "server sign with its own wallet.",
+        },
+        chain_id: {
+          type: "integer",
+          description:
+            "The domain chainId the wallet signed with. Used only with " +
+            `\`signature\`; defaults to ${REGISTER_AGENT_CHAIN_ID}.`,
+        },
       },
       ["address"],
     ),
     zod: z
-      .object({ address: z.string().min(1), confirm: z.boolean().optional() })
+      .object({
+        address: z.string().min(1),
+        confirm: z.boolean().optional(),
+        account: z.string().min(1).optional(),
+        nonce: z.number().int().nonnegative().optional(),
+        signature: z.string().min(1).optional(),
+        chain_id: z.number().int().positive().optional(),
+      })
       .strict(),
-    requiresAuth: true,
+    requiresAuth: false,
     handler: (client, args) => {
-      const a = args as { address: string; confirm?: boolean };
+      const a = args as {
+        address: string;
+        confirm?: boolean;
+        account?: string;
+        nonce?: number;
+        signature?: string;
+        chain_id?: number;
+      };
       if (!a.confirm) {
         throw new Error(
           "Refusing to revoke: pass `confirm: true` to revoke agent " +
             `${a.address}.`,
         );
       }
+      let { account, nonce, signature, chain_id } = a;
+      if (!signature) {
+        const { key, own, network } = agentSigner(
+          client,
+          "revoke_agent",
+          "account",
+          account,
+        );
+        account = own;
+        nonce ??= Date.now();
+        chain_id = REGISTER_AGENT_CHAIN_ID;
+        signature = signRevokeAgentKey(key, {
+          agent: a.address,
+          nonce,
+          network,
+        });
+      }
+      if (!account || nonce === undefined) {
+        throw new Error(
+          "`account` and `nonce` are required with an explicit `signature`.",
+        );
+      }
+      // The wallet signature is the only credential this route accepts, so
+      // nothing else is sent: no HMAC, agent or session headers.
       return client.request({
         method: "DELETE",
         path: `/agents/${encodeURIComponent(a.address)}`,
-        signed: true,
+        headers: {
+          "x-wallet-account": account.toLowerCase(),
+          "x-wallet-nonce": String(nonce),
+          "x-wallet-signature": signature,
+          "x-wallet-chain-id": String(chain_id ?? REGISTER_AGENT_CHAIN_ID),
+        },
       });
     },
   },
@@ -2550,8 +2646,9 @@ export const tools: ToolDef[] = [
       "NEXUS_EXCHANGE_FUNDS=play). The key is saved in this network's " +
       "section of the Nexus CLI config (0600) and used for the rest of the " +
       "session; only the address comes back, never the key. After it, " +
-      "`login`, `register_agent` and `register_bridge_wallet` sign for " +
-      "themselves when `signature` is omitted, so `create_wallet`, `login`, " +
+      "`login`, `register_agent`, `revoke_agent` and " +
+      "`register_bridge_wallet` sign for themselves when `signature` is " +
+      "omitted, so `create_wallet`, `login`, " +
       "`create_api_key` gets an agent an account with nothing signed " +
       "elsewhere. If a wallet already exists for this network it is " +
       "refused unless `confirm: true`, which overwrites the old key and keeps " +

@@ -312,6 +312,12 @@ interface RequestOptions {
    * with `signed`. Omit for public requests.
    */
   auth?: AuthMode;
+  /**
+   * Headers the caller signed itself, for a scheme the client does not hold
+   * the key to: the wallet signature `DELETE /agents/{address}` takes
+   * (ENG-20579). Set before authentication, so they never replace its headers.
+   */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -666,6 +672,7 @@ export class ExchangeClient {
       [API_VERSION_HEADER]: API_SPEC_VERSION,
     };
     if (opts.body !== undefined) headers["content-type"] = "application/json";
+    Object.assign(headers, opts.headers);
 
     // `signed: true` is shorthand for HMAC; `auth` selects a non-HMAC mode.
     const authMode: AuthMode | undefined = opts.signed ? "hmac" : opts.auth;

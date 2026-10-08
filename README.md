@@ -78,7 +78,7 @@ exception while the pinned spec lacks their bare twins. See
 | `list_bridge_wallets`            | ✅ Live (needs key)                             | `GET /api/v1/bridge/wallets`            |
 | `fetch_agents`                   | ✅ Live (needs key)                             | `GET /agents`                           |
 | `register_agent`                 | ✅ Live (EIP-712 signature or own wallet)       | `POST /agents/register`                 |
-| `revoke_agent`                   | ✅ Live (needs key)                             | `DELETE /agents/{addr}`                 |
+| `revoke_agent`                   | ✅ Live (EIP-712 signature or own wallet)       | `DELETE /agents/{addr}`                 |
 | `create_wallet`                  | ✅ Live (stdio, play funds only)                | none (local key)                        |
 | `login`                          | ✅ Live (EIP-191 signature or own wallet)       | `POST /auth/login`                      |
 | `fetch_api_keys`                 | ✅ Live (needs session token)                   | `GET /keys`                             |
@@ -322,10 +322,12 @@ is `next_cursor: null`, i.e. exactly the pre-pagination single-page behaviour.
   `create_api_key` just made (see [Stored credentials](#stored-credentials)).
   The testnet host verifies it as your own key; see
   [Authentication](#authentication).
-- **Wallet signature**: `login` (EIP-191), `register_agent` (EIP-712) and
-  `register_bridge_wallet` (EIP-191) carry a wallet signature. Pass one made in
-  the wallet as `signature`, or, on a play-funds target only, omit it and the
-  stdio server signs with its own wallet (see [Local wallet](#local-wallet)).
+- **Wallet signature**: `login` (EIP-191), `register_agent` and
+  `revoke_agent` (EIP-712), and `register_bridge_wallet` (EIP-191) carry a
+  wallet signature. `revoke_agent` accepts nothing else: no HMAC key, session
+  or agent key. Pass one made in the wallet as `signature`, or, on a
+  play-funds target only, omit it and the stdio server signs with its own
+  wallet (see [Local wallet](#local-wallet)).
   The server never holds a key for real or undeclared funds, and the hosted
   server never holds one at all.
 - **Session token** — the `*_api_key` tools authenticate with a Bearer session
@@ -470,12 +472,13 @@ own, so an agent can make an account with nothing signed elsewhere:
   old key and keeps it nowhere.
 - To use a key you already have, set `NEXUS_EXCHANGE_PRIVATE_KEY`. It wins over
   the file, and `create_wallet` will not replace it.
-- With a wallet held, `login`, `register_agent` and `register_bridge_wallet`
-  sign for themselves when `signature` is omitted. An explicit `signature` is
-  still accepted everywhere. `login` signs only its fixed message,
-  `register_bridge_wallet` only for the held wallet's own address, and
-  `register_agent` only on testnet and `local` (its signature is bound to the
-  server's network name, which a custom stage does not declare).
+- With a wallet held, `login`, `register_agent`, `revoke_agent` and
+  `register_bridge_wallet` sign for themselves when `signature` is omitted. An
+  explicit `signature` is still accepted everywhere. `login` signs only its
+  fixed message, `register_bridge_wallet` only for the held wallet's own
+  address, and `register_agent` and `revoke_agent` only on testnet and `local`
+  (their signatures are bound to the server's network name, which a custom
+  stage does not declare).
 - On mainnet, and on a custom stage whose funds are `real` or `unknown`,
   `create_wallet` and self-signing refuse before any request, and a key in the
   environment or the file is not even loaded. No tool ever returns the key.
@@ -606,7 +609,7 @@ tools refuse rather than proceed on an assumption:
 | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `create_order`, `create_orders`, `edit_order`, `deposit`, `create_deposit`, `add_margin`, `create_bridge_deposit_address` | funds declared `real` **or** `play` |
 | `claim_faucet`, `claim_credit`                                                                                            | funds `play` **and** a faucet       |
-| `create_wallet`, and `login` / `register_agent` / `register_bridge_wallet` without `signature`                            | funds `play`                        |
+| `create_wallet`, and `login` / `register_agent` / `revoke_agent` / `register_bridge_wallet` without `signature`           | funds `play`                        |
 
 Everything else is unaffected: every read, `preview_order`, and — deliberately —
 `cancel_order`. Blocking a cancel would trap a caller holding open risk, which is

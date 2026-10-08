@@ -33,7 +33,9 @@ import { findTool } from "../src/tools/index.js";
 import {
   LOGIN_MESSAGE,
   personalSign,
+  revokeAgentKeyDigest,
   signRegisterAgent,
+  signRevokeAgentKey,
   walletAddress,
 } from "../src/wallet.js";
 
@@ -50,6 +52,16 @@ const REGISTER_DIGEST =
 const REGISTER_SIG =
   "0x40cc533ba443982d33463c30426a3e81569d07d68be841daefb2bf6baf4c890403efb48f19c76ab06bceec7530b149a5c91d71688f6c7009de47a99d2e68af951c";
 const AGENT = "0xaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbb";
+// The spec's `walletSignature` test vector, the accounts service's
+// `PINNED_REVOKE` (ENG-20579).
+const REVOKE_VECTOR = {
+  account: `0x${"11".repeat(20)}`,
+  agent: `0x${"ab".repeat(20)}`,
+  nonce: 1_790_000_000_000,
+  network: "testnet",
+};
+const REVOKE_DIGEST =
+  "73669adde69e6f7cd9f9ecc0825887403ee05d5fc6322d462e91c42920192bcb";
 
 const env = (over: Record<string, string> = {}) =>
   over as unknown as NodeJS.ProcessEnv;
@@ -87,18 +99,20 @@ function stdioAt(path: string, over: Record<string, string>, fileEnv = {}) {
   );
 }
 
+type Call = { url: string; body: any; headers: Headers };
+
 /** Run `fn` with every fetch answered by `answer`, recording the requests. */
 async function withFetch<T>(
   answer: (url: string, body: any) => unknown,
-  fn: (calls: Array<{ url: string; body: any }>) => Promise<T>,
+  fn: (calls: Call[]) => Promise<T>,
 ): Promise<T> {
-  const calls: Array<{ url: string; body: any }> = [];
+  const calls: Call[] = [];
   const real = globalThis.fetch;
   globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
     const body = init.body
       ? JSON.parse(Buffer.from(init.body as Uint8Array).toString("utf8"))
       : undefined;
-    calls.push({ url, body });
+    calls.push({ url, body, headers: new Headers(init.headers) });
     return new Response(JSON.stringify(answer(url, body) ?? {}), {
       status: 200,
     });
@@ -127,6 +141,16 @@ test("signatures match the cross-SDK known answers and recover the wallet", () =
   });
   assert.equal(reg, REGISTER_SIG);
   assert.equal(recover(reg, hexToBytes(REGISTER_DIGEST)), TEST_ADDR);
+
+  assert.equal(bytesToHex(revokeAgentKeyDigest(REVOKE_VECTOR)), REVOKE_DIGEST);
+  const revoke = signRevokeAgentKey(TEST_KEY, REVOKE_VECTOR);
+  assert.equal(
+    recover(
+      revoke,
+      revokeAgentKeyDigest({ ...REVOKE_VECTOR, account: TEST_ADDR }),
+    ),
+    TEST_ADDR,
+  );
 });
 
 test("a malformed key is refused without being quoted", () => {
@@ -228,6 +252,7 @@ const SELF_SIGNED: Record<string, Record<string, unknown>> = {
   create_wallet: {},
   login: {},
   register_agent: { agent: AGENT, nonce: 1 },
+  revoke_agent: { address: AGENT, confirm: true },
   register_bridge_wallet: { address: TEST_ADDR, message: "m", confirm: true },
 };
 
@@ -272,7 +297,7 @@ test("an explicit signature is still accepted off play funds", async () => {
   });
 });
 
-test("login, register_agent and register_bridge_wallet sign with the held wallet", async () => {
+test("login, register_agent, revoke_agent and register_bridge_wallet sign with the held wallet", async () => {
   const client = new ExchangeClient({
     ...stdio(LOCAL).cfg,
     privateKey: TEST_KEY,
@@ -290,6 +315,10 @@ test("login, register_agent and register_bridge_wallet sign with the held wallet
       await findTool("register_bridge_wallet")!.handler(client, {
         address: TEST_ADDR.toUpperCase().replace("0X", "0x"),
         message: "challenge\n  ",
+        confirm: true,
+      });
+      await findTool("revoke_agent")!.handler(client, {
+        address: AGENT,
         confirm: true,
       });
       return calls;
@@ -317,6 +346,27 @@ test("login, register_agent and register_bridge_wallet sign with the held wallet
 
   assert.equal(
     recover(calls[2].body.signature, eip191("challenge\n  ")),
+    TEST_ADDR,
+  );
+
+  // Revoke: the wallet's four headers and nothing else, though the client
+  // holds an HMAC pair.
+  const revoke = calls[3].headers;
+  assert.equal(revoke.get("x-api-key"), null);
+  assert.equal(revoke.get("x-wallet-account"), TEST_ADDR);
+  assert.equal(revoke.get("x-wallet-chain-id"), "20056");
+  const nonce = Number(revoke.get("x-wallet-nonce"));
+  assert.ok(Math.abs(nonce - Date.now()) < 60_000);
+  assert.equal(
+    recover(
+      revoke.get("x-wallet-signature")!,
+      revokeAgentKeyDigest({
+        account: TEST_ADDR,
+        agent: AGENT,
+        nonce,
+        network: "local",
+      }),
+    ),
     TEST_ADDR,
   );
 });
@@ -351,6 +401,24 @@ test("self-signing refuses what the held wallet should not sign", async () => {
       /not this server's wallet/,
     ],
     [devPlay, "register_agent", { agent: AGENT, nonce: 1 }, /custom target/],
+    [
+      held,
+      "revoke_agent",
+      { address: AGENT, confirm: true, account: other },
+      /not this server's wallet/,
+    ],
+    [
+      held,
+      "revoke_agent",
+      { address: "0xnope", confirm: true },
+      /20-byte hex address/,
+    ],
+    [
+      devPlay,
+      "revoke_agent",
+      { address: AGENT, confirm: true },
+      /custom target/,
+    ],
     [new ExchangeClient(stdio(LOCAL).cfg), "login", {}, /holds no wallet/],
   ];
   for (const [client, tool, args, why] of cases) {

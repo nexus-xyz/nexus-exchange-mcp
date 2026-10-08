@@ -1,7 +1,8 @@
 /**
  * The wallet key the stdio server may hold on a play-funds target (ENG-19785),
  * and the signatures it makes with it: EIP-191 `personal_sign` for `login` and
- * the bridge-wallet challenge, and EIP-712 for `RegisterAgent`.
+ * the bridge-wallet challenge, and EIP-712 for `RegisterAgent` and
+ * `RevokeAgentKey`.
  *
  * Ported from the TypeScript SDK's `src/wallet.ts` (nexus-exchange-ts), which
  * this package does not depend on. `test/wallet.test.ts` pins the same
@@ -29,9 +30,10 @@ export const LOGIN_MESSAGE = "Sign in to Nexus Exchange";
  * request's `chain_id` and falls back to this one (`NEXUS_DEMO_CHAIN_ID`,
  * ENG-9412) when the request carries none. The pinned spec has no `chain_id`
  * request field and `/metadata` publishes no signing domain, so this is the one
- * value a registration sent from here verifies under.
+ * value a registration sent from here verifies under. `RevokeAgentKey` signs
+ * under the same domain and sends it as `x-wallet-chain-id`.
  */
-const REGISTER_AGENT_CHAIN_ID = 20056;
+export const REGISTER_AGENT_CHAIN_ID = 20056;
 
 const INVALID_KEY =
   "The wallet key (NEXUS_EXCHANGE_PRIVATE_KEY, or `private_key` in the Nexus " +
@@ -86,19 +88,21 @@ export function personalSign(key: string, message: string): string {
   return signDigest(key, keccak_256(concatBytes(prefix, bytes)));
 }
 
-/**
- * EIP-712 signature over `RegisterAgent{agent, expiresAt, nonce}` under the
- * `Nexus Exchange` v1 domain, salted with `keccak256(network)` (ENG-15643): the
- * server binds a registration to its own network name, so one signed for
- * `testnet` does not verify anywhere else.
- */
-export function signRegisterAgent(
-  key: string,
-  r: { agent: string; expiresAt: number; nonce: number; network: string },
-): string {
-  if (!/^0x[0-9a-fA-F]{40}$/.test(r.agent)) {
-    throw new Error("`agent` must be a 0x-prefixed 20-byte hex address.");
+/** An address as an EIP-712 `address` word, or a refusal naming `field`. */
+function addressWord(addr: string, field: string): Uint8Array {
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+    throw new Error(`\`${field}\` must be a 0x-prefixed 20-byte hex address.`);
   }
+  return word(BigInt(addr));
+}
+
+/**
+ * The EIP-712 digest of `struct` under the agent-management domain: `Nexus
+ * Exchange` v1, salted with `keccak256(network)` (ENG-15643). The server binds
+ * these messages to its own network name, so one signed for `testnet` does not
+ * verify anywhere else.
+ */
+function agentDomainDigest(network: string, struct: Uint8Array): Uint8Array {
   const domain = keccak_256(
     concatBytes(
       keccakUtf8(
@@ -107,20 +111,62 @@ export function signRegisterAgent(
       keccakUtf8("Nexus Exchange"),
       keccakUtf8("1"),
       word(REGISTER_AGENT_CHAIN_ID),
-      keccakUtf8(r.network),
+      keccakUtf8(network),
     ),
   );
+  return keccak_256(concatBytes(new Uint8Array([0x19, 0x01]), domain, struct));
+}
+
+/** EIP-712 signature over `RegisterAgent{agent, expiresAt, nonce}`. */
+export function signRegisterAgent(
+  key: string,
+  r: { agent: string; expiresAt: number; nonce: number; network: string },
+): string {
   const struct = keccak_256(
     concatBytes(
       keccakUtf8("RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)"),
-      word(BigInt(r.agent)),
+      addressWord(r.agent, "agent"),
       word(r.expiresAt),
       word(r.nonce),
     ),
   );
+  return signDigest(key, agentDomainDigest(r.network, struct));
+}
+
+/**
+ * The EIP-712 digest of `RevokeAgentKey{account, agent, nonce}`, the only
+ * authorization `DELETE /agents/{address}` accepts (ENG-20579). `account` is
+ * the owner wallet and `agent` the path's address.
+ */
+export function revokeAgentKeyDigest(r: {
+  account: string;
+  agent: string;
+  nonce: number;
+  network: string;
+}): Uint8Array {
+  const struct = keccak_256(
+    concatBytes(
+      keccakUtf8("RevokeAgentKey(address account,address agent,uint64 nonce)"),
+      addressWord(r.account, "account"),
+      addressWord(r.agent, "agent"),
+      word(r.nonce),
+    ),
+  );
+  return agentDomainDigest(r.network, struct);
+}
+
+/**
+ * The wallet's signature revoking `agent`. `nonce` is Unix ms: the server
+ * accepts it from 5 minutes old to 60 seconds ahead, once, and only above the
+ * last nonce this wallet used to revoke or rename an agent.
+ */
+export function signRevokeAgentKey(
+  key: string,
+  r: { agent: string; nonce: number; network: string },
+): string {
   return signDigest(
     key,
-    keccak_256(concatBytes(new Uint8Array([0x19, 0x01]), domain, struct)),
+    revokeAgentKeyDigest({ ...r, account: walletAddress(key) }),
   );
 }
 

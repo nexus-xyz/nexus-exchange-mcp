@@ -294,8 +294,12 @@ tool register_bridge_wallet.confirm boolean optional
 tool register_bridge_wallet.message string required
 tool register_bridge_wallet.signature string optional
 tool revoke_agent object additionalProperties=false
+tool revoke_agent.account string optional
 tool revoke_agent.address string required
+tool revoke_agent.chain_id integer optional
 tool revoke_agent.confirm boolean optional
+tool revoke_agent.nonce integer optional
+tool revoke_agent.signature string optional
 tool set_cancel_on_disconnect object additionalProperties=false
 tool set_cancel_on_disconnect.enabled boolean required
 tool set_tier object additionalProperties=false admin-only

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.4.0...v0.5.0) (2026-10-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** `revoke_agent` no longer HMAC-signs. It needs a wallet signature (`account`, `nonce`, `signature`) or a held wallet on a play-funds target, and is refused otherwise.
+* **auth:** keep the credentials login and create_api_key return, in the session and the CLI config (ENG-19784) ([#97](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/97))
+
+### Features
+
+* **auth:** create_wallet, and login / register tools that sign for themselves on play funds (ENG-19785) ([#98](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/98)) ([f8912d4](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/f8912d41d9250d8ace091ead4f60cbd6baab6f92))
+* **auth:** keep the credentials login and create_api_key return, in the session and the CLI config (ENG-19784) ([#97](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/97)) ([87a1248](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/87a124815065dec7190abdbabcdb6b9448cc3d36))
+* read-only and paper modes, and MCP annotations on every tool (ENG-20366) ([#105](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/105)) ([4b11930](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/4b1193006b053dc0efa07fb01f1c3c7d45c7a408))
+* sign account and trade calls with an agent key (ENG-20358) ([#103](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/103)) ([4c3d441](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/4c3d4410a36b7792aca67d15f979537be0b8f85b))
+* **tools:** revoke agents with the wallet signature (ENG-20579) ([#106](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/106)) ([df21577](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/df2157725dd70b2104ccc6d18b4e2cd6ae48e7a0))
+
+
+### Bug Fixes
+
+* **client:** retry transient reads and say how long a 429 asks to wait (ENG-20359) ([#102](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/102)) ([f9af06e](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/f9af06e531a701cdce05c195d624f81ec0f49364))
+* **http:** answer an unknown session id with 404 so clients re-initialize (ENG-19686) ([#94](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/94)) ([164328e](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/164328e4c47cb2d432e9e4b182f9301acd207c1a))
+* **store:** never redact or report as saved credentials a concurrent writer erased (ENG-20052) ([#99](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/99)) ([9430ed1](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/9430ed125eeb9a12128c537b938afbefaee7cf9e))
+
 ## [0.4.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.3.2...v0.4.0) (2026-10-01)
 
 

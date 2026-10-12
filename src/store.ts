@@ -116,15 +116,28 @@ let tmpSeq = 0;
  * Throws when the fields are not in the file after the write, so a caller never
  * reports as saved what another writer erased.
  *
- * ponytail: no lock. The CLI holds a `flock` on `.config.json.lock` for its
- * read-modify-write (ENG-18686), which Node cannot take without a native
- * dependency, so a `nexus` write landing in the same instant can lose one of the
- * two changes. The rename still keeps the file whole, and the re-read below
- * catches a loss that lands before it (ENG-20052). A stale `nexus` write that
- * renames after the re-read still erases the fields unnoticed; closing that
- * needs one lock shared with the CLI.
+ * Holds `.config.json.xlock` across the read, merge and rename, the lock the
+ * CLI takes inside its `flock` (see {@link withXLock}). The re-read after the
+ * rename stays as a check: CLIs from before the xlock take only the `flock`.
  */
 export function writeSection(
+  path: string,
+  network: string,
+  creds: StoredCredentials,
+): void {
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Tighten a directory that already existed too open. Best effort, as in the
+  // CLI: one we do not own stays as it is.
+  try {
+    if (statSync(dir).mode & 0o077) chmodSync(dir, 0o700);
+  } catch {
+    // Not ours to tighten; the file itself is still 0600.
+  }
+  withXLock(dir, () => writeLocked(path, network, creds));
+}
+
+function writeLocked(
   path: string,
   network: string,
   creds: StoredCredentials,
@@ -147,15 +160,6 @@ export function writeSection(
   };
 
   const dir = dirname(path);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // Tighten a directory that already existed too open. Best effort, as in the
-  // CLI: one we do not own stays as it is.
-  try {
-    if (statSync(dir).mode & 0o077) chmodSync(dir, 0o700);
-  } catch {
-    // Not ours to tighten; the file itself is still 0600.
-  }
-
   // Same shape as the CLI's write: a fresh 0600 sibling, flushed, then renamed
   // over the file. Two-space JSON, no trailing newline, as serde writes it.
   const tmp = join(dir, `.config.json.tmp.${process.pid}.${tmpSeq++}`);
@@ -177,9 +181,81 @@ export function writeSection(
   const lost = given.filter(([k, v]) => saved[k] !== v).map(([k]) => k);
   if (lost.length) {
     throw new Error(
-      `${path} was replaced by another writer (a \`nexus\` command or another ` +
-        `MCP server) as this save landed, so it does not hold ${lost.join(", ")}.`,
+      `${path} was replaced by another writer (a \`nexus\` command older than ` +
+        `the shared lock) as this save landed, so it does not hold ${lost.join(", ")}.`,
     );
+  }
+}
+
+/**
+ * ponytail: a lock older than 10 s is taken as left by a crashed writer and
+ * broken. A real write takes milliseconds, so the only cost is a write stalled
+ * past 10 s losing its lock. Two waiters breaking the same stale lock at once
+ * can both win; that needs a crash first, and a lock with an owner token to fix.
+ */
+export const XLOCK_STALE_MS = 10_000;
+/** Longer than {@link XLOCK_STALE_MS}, so a waiter always outlasts a dead lock. */
+const XLOCK_WAIT_MS = 15_000;
+const sleeper = new Int32Array(new SharedArrayBuffer(4));
+
+/**
+ * Run `body` holding `<dir>/.config.json.xlock`, the lock shared with the CLI
+ * (`nexus-exchange-cli` `src/credentials.rs`, `XLock`; ENG-20052). Same
+ * protocol on both sides: create it exclusively (`O_CREAT|O_EXCL`), write
+ * `pid=<pid> created_ms=<unix ms>` into it, delete it when done. A writer that
+ * finds it retries with backoff, and deletes it once its mtime is
+ * {@link XLOCK_STALE_MS} old. The wait blocks the event loop, which a write
+ * that is synchronous already does.
+ */
+function withXLock<T>(dir: string, body: () => T): T {
+  const lock = join(dir, ".config.json.xlock");
+  const deadline = Date.now() + XLOCK_WAIT_MS;
+  let backoff = 5;
+  for (;;) {
+    let fd: number;
+    try {
+      fd = openSync(lock, "wx", 0o600);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      let age: number;
+      try {
+        age = Date.now() - statSync(lock).mtimeMs;
+      } catch {
+        continue; // Released between the open and the stat.
+      }
+      if (age > XLOCK_STALE_MS) {
+        rmSync(lock, { force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        let holder = "";
+        try {
+          holder = readFileSync(lock, "utf8");
+        } catch {
+          // Gone already; the message still names the file.
+        }
+        throw new Error(
+          `${lock} is held (${holder}) by another nexus or MCP process; ` +
+            "delete it if neither is running.",
+          { cause: err },
+        );
+      }
+      Atomics.wait(sleeper, 0, 0, backoff);
+      backoff = Math.min(backoff * 2, 100);
+      continue;
+    }
+    try {
+      // Informational only: staleness is judged by mtime, so a crash before
+      // this write still leaves a breakable lock.
+      writeSync(fd, `pid=${process.pid} created_ms=${Date.now()}`);
+    } finally {
+      closeSync(fd);
+    }
+    try {
+      return body();
+    } finally {
+      rmSync(lock, { force: true });
+    }
   }
 }
 

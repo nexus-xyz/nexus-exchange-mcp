@@ -6,11 +6,15 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import fs, {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -25,6 +29,7 @@ import {
   storePath,
   withStoredCredentials,
   writeSection,
+  XLOCK_STALE_MS,
 } from "../src/store.js";
 import { findTool } from "../src/tools/index.js";
 
@@ -314,6 +319,53 @@ test("create_api_key returns the secret in full when it was not saved", async ()
   )) as Record<string, string>;
   assert.equal(failed.secret, "ab");
   assert.match(failed.save_error, /not valid JSON/);
+});
+
+test("create_api_key waits out a held xlock, then saves and redacts", async () => {
+  // A `nexus` write mid-flight (ENG-20052). The write blocks the event loop, so
+  // a separate process releases the lock.
+  const { path } = scratch();
+  mkdirSync(join(path, ".."), { recursive: true });
+  const lock = join(path, "..", ".config.json.xlock");
+  writeFileSync(lock, "pid=1 created_ms=0");
+  const releaser = spawn(process.execPath, [
+    "-e",
+    "setTimeout(() => require('fs').rmSync(process.argv[1]), 300)",
+    lock,
+  ]);
+  const start = Date.now();
+  const result = await withFetch({ key_id: "nx_new", secret: "ab" }, () =>
+    findTool("create_api_key")!.handler(
+      client(path, { sessionToken: "t" }),
+      {},
+    ),
+  );
+  assert.ok(Date.now() - start >= 250, "wrote while the xlock was held");
+  await once(releaser, "exit");
+  assert.deepEqual(result, {
+    key_id: "nx_new",
+    secret: "[REDACTED]",
+    saved_to: path,
+  });
+  assert.deepEqual(readSection(path, "local"), {
+    api_key: "nx_new",
+    api_secret: "ab",
+  });
+  assert.equal(existsSync(lock), false, "the write left its xlock behind");
+});
+
+test("a stale xlock, left by a crashed writer, is broken", () => {
+  const { path } = scratch();
+  mkdirSync(join(path, ".."), { recursive: true });
+  const lock = join(path, "..", ".config.json.xlock");
+  writeFileSync(lock, "");
+  const old = (Date.now() - 2 * XLOCK_STALE_MS) / 1000;
+  utimesSync(lock, old, old);
+  const start = Date.now();
+  writeSection(path, "local", { session_token: "t" });
+  assert.ok(Date.now() - start < XLOCK_STALE_MS, "waited out a stale lock");
+  assert.deepEqual(readSection(path, "local"), { session_token: "t" });
+  assert.equal(existsSync(lock), false);
 });
 
 /**

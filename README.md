@@ -452,7 +452,16 @@ with nothing copied into the environment and no restart, and the key still
 works after one.
 
 The file is written `0600` in a `0700` directory, through a temp file and a
-rename. One network's credentials never go into another's section: a bare
+rename. Each write holds `.config.json.xlock` across its read, merge and
+rename, the lock `nexus` also takes
+([concurrent writers](https://github.com/nexus-xyz/nexus-exchange-cli#concurrent-writers)),
+so a `nexus` command and the server never overwrite each other's change. The
+lock is created exclusively (`O_CREAT|O_EXCL`), holds
+`pid=<pid> created_ms=<unix ms>`, and is deleted when the write ends; a writer
+that finds it retries for up to 15 s and deletes it once its mtime is over
+10 s old. A `nexus` older than the lock does not take it, so the server still
+re-reads after each write and reports a field such a write erased as unsaved
+(the secret comes back in full). One network's credentials never go into another's section: a bare
 `NEXUS_EXCHANGE_API_URL`, and a custom stage whose label spells a network name,
 have no section, so what `login` and `create_api_key` return is kept for the
 session only and the secret comes back in full. The hosted HTTP server never

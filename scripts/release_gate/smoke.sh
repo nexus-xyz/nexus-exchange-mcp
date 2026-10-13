@@ -23,7 +23,8 @@
 #   - stub_server.py 503, which answers every request with a 503: must exit 2,
 #     because an outage reads as unreachable, never as failed or passed.
 # Exit 0 (passed) is exercised only by the real read, which runs on a release PR
-# or a change to this gate. Each probe has a 60 s timeout. A wrong code, or a
+# or a change to this gate. Each probe has a 180 s timeout
+# (the package retries transient errors with backoff, so a shorter one races it). A wrong code, or a
 # timeout, is its own failure, named "(outcomes)". The probes run smoke.mjs
 # directly with stdout and stderr captured, so they emit no annotations; each
 # prints one plain log line instead: case, exit code, first line of output.
@@ -62,16 +63,28 @@ summary() {
   fi
 }
 
-# Run the just-built smoke against $2 with NEXUS_SMOKE_BASE_URL set, 60 s at
+# Run the just-built smoke against $2 with NEXUS_SMOKE_BASE_URL set, 180 s at
 # most, and fail the job unless it exits $3. $1 names the case, $4 says what it
 # is pointed at. Stdout and stderr are both captured (the real smoke's `::error`
 # lines may go to either), and one plain log line is printed: case, exit code,
 # first line of output, with a leading `::` defanged so it cannot be read as an
 # annotation.
+# `timeout` is GNU coreutils: macOS has none by default (Homebrew's coreutils
+# installs it as `gtimeout`). Without either, the probes run with no time limit,
+# and the job's own timeout is the backstop.
+limit=()
+if command -v timeout > /dev/null 2>&1; then
+  limit=(timeout 180)
+elif command -v gtimeout > /dev/null 2>&1; then
+  limit=(gtimeout 180)
+else
+  echo "note: neither timeout nor gtimeout is installed, so the probes run with no time limit"
+fi
+
 expect_exit() {
   local label="$1" url="$2" want="$3" what="$4" got out first
   set +e
-  out="$(cd "$work/consumer" && NEXUS_SMOKE_BASE_URL="$url" timeout 60 node smoke.mjs "$name" 2>&1)"
+  out="$(cd "$work/consumer" && NEXUS_SMOKE_BASE_URL="$url" ${limit[@]+"${limit[@]}"} node smoke.mjs "$name" 2>&1)"
   got=$?
   set -e
   first="$(printf '%s\n' "$out" | head -n 1)"
@@ -79,7 +92,7 @@ expect_exit() {
   echo "probe ${label}: exit ${got}: ${first}"
   if [ "$got" -ne "$want" ]; then
     local why="expected exit ${want} from ${what}, got ${got}"
-    [ "$got" -eq 124 ] && why="expected exit ${want} from ${what}, but the probe hit its 60s timeout"
+    [ "$got" -eq 124 ] && why="expected exit ${want} from ${what}, but the probe hit its 180s timeout"
     echo "::error title=prepublish-smoke (outcomes)::The smoke does not keep its outcomes apart, so a testnet read through it would prove nothing. ${label} case: ${why}."
     summary "❌ OUTCOMES WRONG: nothing was read" "${label} case: ${why}."
     exit 1

@@ -24,11 +24,25 @@ const CONSTRAINTS = [
 /** Thrown for a schema feature the walk below does not follow. */
 export class UnsupportedSchema extends Error {}
 
-// Keywords that point at a schema defined elsewhere. `walk` follows none of
-// them, so a field changed behind one would move no line: refuse, rather than
-// list the property as a bare `any` and miss the change. No tool uses one
-// today. If one has to, teach `walk` to resolve it (cycle-safe) first.
-const REFERENCES = ["$ref", "$dynamicRef", "$defs", "definitions"];
+// Keywords that put a schema somewhere `walk` does not look: behind a
+// reference, or in a tuple, a pattern, a negation, a condition or a dependency.
+// A field changed there would move no line, so refuse, rather than list the
+// property without it and miss the change. zod v4 emits `prefixItems` for
+// z.tuple(). No tool's inputSchema uses any of them today (the 119 were
+// checked). If one has to, teach `walk` to follow it (cycle-safe) first.
+const UNFOLLOWED = [
+  "$ref",
+  "$dynamicRef",
+  "$defs",
+  "definitions",
+  "prefixItems",
+  "patternProperties",
+  "not",
+  "if",
+  "then",
+  "else",
+  "dependentSchemas",
+];
 
 export function describe(schema) {
   const type = Array.isArray(schema.type)
@@ -50,7 +64,7 @@ export function describe(schema) {
 
 /** The lines below `path`: properties, items, extra properties and branches. */
 export function walk(schema, path, out) {
-  for (const key of REFERENCES) {
+  for (const key of UNFOLLOWED) {
     if (key in schema) {
       throw new UnsupportedSchema(
         `${path} uses ${key}, which the surface listing does not follow`,

@@ -32,7 +32,7 @@
 //
 // The schema-to-lines rules and the advertised-vs-zod comparison live in
 // surface-lib.mjs, tested by surface.test.mjs, which public_api.sh runs first.
-// A schema feature the walk does not follow ($ref, $defs) fails loudly instead
+// A schema feature the walk does not follow ($ref, $defs, prefixItems, ...) fails loudly instead
 // of being skipped.
 //
 //   node surface.mjs <package name>

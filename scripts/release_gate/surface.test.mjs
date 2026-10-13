@@ -50,7 +50,19 @@ suite("walk", () => {
     );
   });
 
-  for (const key of ["$ref", "$dynamicRef", "$defs", "definitions"]) {
+  for (const key of [
+    "$ref",
+    "$dynamicRef",
+    "$defs",
+    "definitions",
+    "prefixItems",
+    "patternProperties",
+    "not",
+    "if",
+    "then",
+    "else",
+    "dependentSchemas",
+  ]) {
     test(`${key} fails loudly instead of being skipped`, () => {
       const schema = {
         type: "object",
@@ -65,6 +77,16 @@ suite("walk", () => {
       );
     });
   }
+
+  test("a property merely named like one of those keywords is not refused", () => {
+    assert.deepEqual(
+      lines({
+        type: "object",
+        properties: { not: { type: "string" }, if: { type: "string" } },
+      }),
+      ["tool t.not string optional", "tool t.if string optional"],
+    );
+  });
 
   test("a reference below an array's items is found too", () => {
     assert.throws(

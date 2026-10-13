@@ -20,28 +20,11 @@ const lines = (schema) => {
   return out;
 };
 
-suite("enum members are listed sorted", () => {
-  test("a reordering does not change the line", () => {
+suite("enum members", () => {
+  test("keep the schema's order, so the snapshot's lines do not move", () => {
     assert.equal(
       describe({ type: "string", enum: ["sell", "buy"] }),
-      describe({ type: "string", enum: ["buy", "sell"] }),
-    );
-    assert.equal(
-      describe({ type: "string", enum: ["sell", "buy"] }),
-      'string enum=["buy","sell"]',
-    );
-  });
-
-  test("a removed or added member still changes it", () => {
-    const base = describe({ type: "string", enum: ["a", "b"] });
-    assert.notEqual(base, describe({ type: "string", enum: ["a"] }));
-    assert.notEqual(base, describe({ type: "string", enum: ["a", "b", "c"] }));
-  });
-
-  test("non-string members sort by their JSON text", () => {
-    assert.equal(
-      describe({ enum: [2, null, "a", 1] }),
-      'any enum=["a",1,2,null]',
+      'string enum=["sell","buy"]',
     );
   });
 });

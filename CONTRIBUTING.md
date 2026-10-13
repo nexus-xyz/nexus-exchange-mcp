@@ -80,7 +80,10 @@ below would land looking like a bug fix.
 
 release-please opens and maintains the release PR (version bump + changelog).
 Merging it is the release: the run on that merge tags it and publishes to npm
-(`.github/workflows/release.yml`).
+(`.github/workflows/release.yml`). The only other way to publish is a person
+dispatching that workflow for an existing tag. The pre-publish checks below run
+on pull requests only, so they do not run on that path: whoever dispatches is
+the check, and should have the tag's release PR checks green before doing it.
 
 **Before merging, the pre-publish checks have to be green on the release PR**
 (`.github/workflows/pre-publish.yml`, ENG-18798). release-please opens the PR

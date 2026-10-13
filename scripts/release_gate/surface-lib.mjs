@@ -35,10 +35,10 @@ export function describe(schema) {
     ? schema.type.join("|")
     : (schema.type ?? "any");
   const parts = [type];
-  // Sorted, so reordering the members of an enum is not an API change.
-  if (schema.enum) {
-    parts.push(`enum=[${schema.enum.map((m) => JSON.stringify(m)).sort()}]`);
-  }
+  // Members keep the schema's order, on purpose. Sorting them would itself
+  // reorder lines against the published snapshot and force a minor bump on the
+  // next release; a real reorder reading as breaking is the cheap side below 1.0.
+  if (schema.enum) parts.push(`enum=${JSON.stringify(schema.enum)}`);
   for (const key of CONSTRAINTS) {
     if (key in schema) parts.push(`${key}=${JSON.stringify(schema[key])}`);
   }

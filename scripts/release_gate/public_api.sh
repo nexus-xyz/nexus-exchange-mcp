@@ -36,6 +36,13 @@ cd "$root"
 
 name="$(node -p 'require("./package.json").name')"
 
+# A missing snapshot is not "no difference": say how to write it, before any
+# test, build or install, so a forgotten snapshot fails in seconds.
+if [ "$mode" = "check" ] && [ ! -f "$SNAPSHOT" ]; then
+  echo "::error title=prepublish-surface::$SNAPSHOT is missing. Run scripts/release_gate/public_api.sh --write and commit it."
+  exit 1
+fi
+
 # The listing's own tests, before anything is built or compared. Needs `npm ci`
 # (zod, for the schema comparison).
 if ! node --test scripts/release_gate/surface.test.mjs; then
@@ -61,13 +68,6 @@ if [ "$mode" = "write" ]; then
   cp "$work/public-api.txt" "$SNAPSHOT"
   echo "wrote $SNAPSHOT ($(wc -l < "$SNAPSHOT") items) from ${tarball}"
   exit 0
-fi
-
-# A missing snapshot is not "no difference": say how to write it, instead of a
-# diff against nothing that reads as "0 item(s) gone or changed, 0 new".
-if [ ! -f "$SNAPSHOT" ]; then
-  echo "::error title=prepublish-surface::$SNAPSHOT is missing. Run scripts/release_gate/public_api.sh --write and commit it."
-  exit 1
 fi
 
 if diff -u --label "$SNAPSHOT (committed)" --label "$SNAPSHOT (packed ${tarball})" \

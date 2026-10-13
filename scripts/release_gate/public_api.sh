@@ -63,6 +63,13 @@ if [ "$mode" = "write" ]; then
   exit 0
 fi
 
+# A missing snapshot is not "no difference": say how to write it, instead of a
+# diff against nothing that reads as "0 item(s) gone or changed, 0 new".
+if [ ! -f "$SNAPSHOT" ]; then
+  echo "::error title=prepublish-surface::$SNAPSHOT is missing. Run scripts/release_gate/public_api.sh --write and commit it."
+  exit 1
+fi
+
 if diff -u --label "$SNAPSHOT (committed)" --label "$SNAPSHOT (packed ${tarball})" \
   "$SNAPSHOT" "$work/public-api.txt" > "$work/diff.txt"; then
   echo "public surface matches $SNAPSHOT ($(wc -l < "$SNAPSHOT") items)"

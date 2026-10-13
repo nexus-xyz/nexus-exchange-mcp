@@ -30,6 +30,11 @@
 // does not depend on who runs it. Lines are sorted by code unit, not by locale,
 // so the output is the same on every machine.
 //
+// The schema-to-lines rules and the advertised-vs-zod comparison live in
+// surface-lib.mjs, tested by surface.test.mjs, which public_api.sh runs first.
+// A schema feature the walk does not follow ($ref, $defs, prefixItems, ...) fails loudly instead
+// of being skipped.
+//
 //   node surface.mjs <package name>
 
 import { readFileSync } from "node:fs";
@@ -38,6 +43,12 @@ import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import {
+  UnsupportedSchema,
+  describe,
+  findMismatches,
+  walk,
+} from "./surface-lib.mjs";
 
 const pkg = process.argv[2];
 if (!pkg) {
@@ -47,23 +58,6 @@ if (!pkg) {
 const { loadConfig } = await import(`${pkg}/dist/config.js`);
 const { createServer } = await import(`${pkg}/dist/server.js`);
 const { tools: registry } = await import(`${pkg}/dist/tools/index.js`);
-
-// Validation keywords that narrow what an argument accepts. Tightening any of
-// them breaks a caller that relied on the old range, so each one is part of the
-// property's line.
-const CONSTRAINTS = [
-  "const",
-  "exclusiveMaximum",
-  "exclusiveMinimum",
-  "format",
-  "maxItems",
-  "maxLength",
-  "maximum",
-  "minItems",
-  "minLength",
-  "minimum",
-  "pattern",
-];
 
 /** tools/list over the SDK's in-memory transport, as scripts/smoke.ts does. */
 async function listTools(env) {
@@ -91,54 +85,6 @@ async function listTools(env) {
   }
 }
 
-function describe(schema) {
-  const type = Array.isArray(schema.type)
-    ? schema.type.join("|")
-    : (schema.type ?? "any");
-  const parts = [type];
-  if (schema.enum) parts.push(`enum=${JSON.stringify(schema.enum)}`);
-  for (const key of CONSTRAINTS) {
-    if (key in schema) parts.push(`${key}=${JSON.stringify(schema[key])}`);
-  }
-  if (typeof schema.additionalProperties === "boolean") {
-    parts.push(`additionalProperties=${schema.additionalProperties}`);
-  }
-  return parts.join(" ");
-}
-
-/** The lines below `path`: properties, items, extra properties and branches. */
-function walk(schema, path, out) {
-  const properties = schema.properties ?? {};
-  const required = new Set(schema.required ?? []);
-  for (const [name, sub] of Object.entries(properties)) {
-    const need = required.has(name) ? "required" : "optional";
-    out.push(`${path}.${name} ${describe(sub)} ${need}`);
-    walk(sub, `${path}.${name}`, out);
-  }
-  for (const name of required) {
-    if (!(name in properties)) out.push(`${path}.${name} undeclared required`);
-  }
-  const nested = [];
-  if (schema.items && typeof schema.items === "object") {
-    nested.push([`${path}[]`, schema.items]);
-  }
-  if (
-    schema.additionalProperties &&
-    typeof schema.additionalProperties === "object"
-  ) {
-    nested.push([`${path}{}`, schema.additionalProperties]);
-  }
-  for (const key of ["allOf", "anyOf", "oneOf"]) {
-    (schema[key] ?? []).forEach((branch, i) => {
-      nested.push([`${path}<${key}[${i}]>`, branch]);
-    });
-  }
-  for (const [subPath, sub] of nested) {
-    out.push(`${subPath} ${describe(sub)}`);
-    walk(sub, subPath, out);
-  }
-}
-
 const lines = [];
 
 const visible = await listTools({});
@@ -147,7 +93,15 @@ const visibleNames = new Set(visible.map((tool) => tool.name));
 for (const tool of all) {
   const admin = visibleNames.has(tool.name) ? "" : " admin-only";
   lines.push(`tool ${tool.name} ${describe(tool.inputSchema)}${admin}`);
-  walk(tool.inputSchema, `tool ${tool.name}`, lines);
+  try {
+    walk(tool.inputSchema, `tool ${tool.name}`, lines);
+  } catch (err) {
+    if (!(err instanceof UnsupportedSchema)) throw err;
+    console.error(
+      `::error title=prepublish-surface (unsupported schema)::${err.message}. A field changed behind it would not move a line of public-api.txt, so teach scripts/release_gate/surface-lib.mjs to follow it before shipping one.`,
+    );
+    process.exit(1);
+  }
 }
 
 // This file sits in the consumer's root, so this finds the installed package.
@@ -160,36 +114,7 @@ const root = dirname(
 const { z } = await import(
   pathToFileURL(createRequire(join(root, "package.json")).resolve("zod")).href
 );
-const sorted = (values) => JSON.stringify([...(values ?? [])].sort());
-const mismatches = [];
-for (const tool of registry) {
-  const validated = z.toJSONSchema(tool.zod, {
-    io: "input",
-    unrepresentable: "any",
-  });
-  const advertised = tool.inputSchema;
-  const differs = [];
-  const names = (schema) => Object.keys(schema.properties ?? {});
-  if (sorted(names(validated)) !== sorted(names(advertised))) {
-    differs.push(
-      `properties ${sorted(names(advertised))} advertised, ${sorted(names(validated))} validated`,
-    );
-  }
-  if (sorted(validated.required) !== sorted(advertised.required)) {
-    differs.push(
-      `required ${sorted(advertised.required)} advertised, ${sorted(validated.required)} validated`,
-    );
-  }
-  for (const [name, sub] of Object.entries(advertised.properties ?? {})) {
-    const other = validated.properties?.[name] ?? {};
-    if ((sub.enum || other.enum) && sorted(sub.enum) !== sorted(other.enum)) {
-      differs.push(
-        `${name} enum ${sorted(sub.enum)} advertised, ${sorted(other.enum)} validated`,
-      );
-    }
-  }
-  if (differs.length) mismatches.push(`${tool.name}: ${differs.join("; ")}`);
-}
+const mismatches = findMismatches(registry, z);
 if (mismatches.length) {
   for (const line of mismatches) {
     console.error(

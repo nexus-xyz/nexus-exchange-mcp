@@ -14,11 +14,15 @@ const CONSTRAINTS = [
   "format",
   "maxItems",
   "maxLength",
+  "maxProperties",
   "maximum",
   "minItems",
   "minLength",
+  "minProperties",
   "minimum",
+  "multipleOf",
   "pattern",
+  "uniqueItems",
 ];
 
 /** Thrown for a schema feature the walk below does not follow. */
@@ -29,7 +33,8 @@ export class UnsupportedSchema extends Error {}
 // A field changed there would move no line, so refuse, rather than list the
 // property without it and miss the change. zod v4 emits `prefixItems` for
 // z.tuple(). No tool's inputSchema uses any of them today (the 119 were
-// checked). If one has to, teach `walk` to follow it (cycle-safe) first.
+// checked, and nothing uses the constraint keywords above either, so adding
+// those moved no line). If one has to, teach `walk` to follow it (cycle-safe) first.
 const UNFOLLOWED = [
   "$ref",
   "$dynamicRef",
@@ -42,6 +47,10 @@ const UNFOLLOWED = [
   "then",
   "else",
   "dependentSchemas",
+  "contains",
+  "propertyNames",
+  "unevaluatedProperties",
+  "unevaluatedItems",
 ];
 
 export function describe(schema) {
@@ -70,6 +79,13 @@ export function walk(schema, path, out) {
         `${path} uses ${key}, which the surface listing does not follow`,
       );
     }
+  }
+  // The draft-07 tuple form, `items: [schemaA, schemaB]`, is a list of schemas
+  // by position; the walk below reads `items` as one schema.
+  if (Array.isArray(schema.items)) {
+    throw new UnsupportedSchema(
+      `${path} uses items as an array (a tuple), which the surface listing does not follow`,
+    );
   }
   const properties = schema.properties ?? {};
   const required = new Set(schema.required ?? []);

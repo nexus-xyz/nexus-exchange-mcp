@@ -29,6 +29,23 @@ suite("enum members", () => {
   });
 });
 
+suite("constraints", () => {
+  test("multipleOf, uniqueItems, minProperties and maxProperties are listed", () => {
+    assert.equal(
+      describe({ type: "number", multipleOf: 5 }),
+      "number multipleOf=5",
+    );
+    assert.equal(
+      describe({ type: "array", uniqueItems: true }),
+      "array uniqueItems=true",
+    );
+    assert.equal(
+      describe({ type: "object", minProperties: 1, maxProperties: 3 }),
+      "object maxProperties=3 minProperties=1",
+    );
+  });
+});
+
 suite("walk", () => {
   test("lists properties, required-ness, items and branches", () => {
     assert.deepEqual(
@@ -62,6 +79,10 @@ suite("walk", () => {
     "then",
     "else",
     "dependentSchemas",
+    "contains",
+    "propertyNames",
+    "unevaluatedProperties",
+    "unevaluatedItems",
   ]) {
     test(`${key} fails loudly instead of being skipped`, () => {
       const schema = {
@@ -85,6 +106,25 @@ suite("walk", () => {
         properties: { not: { type: "string" }, if: { type: "string" } },
       }),
       ["tool t.not string optional", "tool t.if string optional"],
+    );
+  });
+
+  test("the draft-07 tuple form of items is refused, not walked as a schema", () => {
+    assert.throws(
+      () =>
+        lines({
+          type: "object",
+          properties: {
+            pair: {
+              type: "array",
+              items: [{ type: "string" }, { type: "number" }],
+            },
+          },
+        }),
+      (err) =>
+        err instanceof UnsupportedSchema &&
+        err.message.includes("tool t.pair") &&
+        err.message.includes("items as an array"),
     );
   });
 

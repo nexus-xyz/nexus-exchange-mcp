@@ -38,10 +38,10 @@ tool create_order.price string optional
 tool create_order.reduce_only boolean optional
 tool create_order.side string enum=["buy","sell"] required
 tool create_order.size string required
-tool create_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool create_order.time_in_force string enum=["FOK","GTC","IOC","PostOnly"] optional
 tool create_order.trailing_offset_bps integer minimum=0 optional
 tool create_order.trigger_price string optional
-tool create_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool create_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_limit","trailing_stop"] required
 tool create_orders object additionalProperties=false
 tool create_orders.orders array maxItems=100 minItems=1 required
 tool create_orders.orders[] object additionalProperties=false
@@ -51,10 +51,10 @@ tool create_orders.orders[].price string optional
 tool create_orders.orders[].reduce_only boolean optional
 tool create_orders.orders[].side string enum=["buy","sell"] required
 tool create_orders.orders[].size string required
-tool create_orders.orders[].time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool create_orders.orders[].time_in_force string enum=["FOK","GTC","IOC","PostOnly"] optional
 tool create_orders.orders[].trailing_offset_bps integer minimum=0 optional
 tool create_orders.orders[].trigger_price string optional
-tool create_orders.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool create_orders.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_limit","trailing_stop"] required
 tool create_wallet object additionalProperties=false
 tool create_wallet.confirm boolean optional
 tool create_ws_token object additionalProperties=false
@@ -92,7 +92,7 @@ tool fetch_bridge_deposits object additionalProperties=false
 tool fetch_bridge_deposits.asset string enum=["USDC","USDX"] optional
 tool fetch_bridge_deposits.chain string optional
 tool fetch_bridge_deposits.limit integer optional
-tool fetch_bridge_deposits.status string enum=["detected","confirming","credited","failed"] optional
+tool fetch_bridge_deposits.status string enum=["confirming","credited","detected","failed"] optional
 tool fetch_cancel_on_disconnect object additionalProperties=false
 tool fetch_deposits object additionalProperties=false
 tool fetch_deposits.limit integer optional
@@ -122,7 +122,7 @@ tool fetch_my_trades.limit integer optional
 tool fetch_ohlcv object additionalProperties=false
 tool fetch_ohlcv.limit integer optional
 tool fetch_ohlcv.market_id string required
-tool fetch_ohlcv.timeframe string enum=["1s","1m","5m","1h"] optional
+tool fetch_ohlcv.timeframe string enum=["1h","1m","1s","5m"] optional
 tool fetch_open_orders object additionalProperties=false
 tool fetch_order object additionalProperties=false
 tool fetch_order.market_id string optional
@@ -134,7 +134,7 @@ tool fetch_orders.cursor string optional
 tool fetch_orders.limit integer optional
 tool fetch_portfolio_history object additionalProperties=false
 tool fetch_portfolio_history.limit integer maximum=366 minimum=1 optional
-tool fetch_portfolio_history.window string enum=["day","week","month","all"] optional
+tool fetch_portfolio_history.window string enum=["all","day","month","week"] optional
 tool fetch_positions object additionalProperties=false
 tool fetch_positions_history object additionalProperties=false
 tool fetch_positions_history.cursor string optional
@@ -168,7 +168,7 @@ tool get_cancel_on_disconnect object additionalProperties=false
 tool get_candles object additionalProperties=false
 tool get_candles.limit integer optional
 tool get_candles.market_id string required
-tool get_candles.timeframe string enum=["1s","1m","5m","1h"] optional
+tool get_candles.timeframe string enum=["1h","1m","1s","5m"] optional
 tool get_closed_positions object additionalProperties=false
 tool get_closed_positions.cursor string optional
 tool get_closed_positions.limit integer optional
@@ -212,7 +212,7 @@ tool get_orderbook object additionalProperties=false
 tool get_orderbook.market_id string required
 tool get_portfolio_history object additionalProperties=false
 tool get_portfolio_history.limit integer maximum=366 minimum=1 optional
-tool get_portfolio_history.window string enum=["day","week","month","all"] optional
+tool get_portfolio_history.window string enum=["all","day","month","week"] optional
 tool get_positions object additionalProperties=false
 tool get_rate_limit_status object additionalProperties=false
 tool get_service_status object additionalProperties=false
@@ -236,7 +236,7 @@ tool list_bridge_deposits object additionalProperties=false
 tool list_bridge_deposits.asset string enum=["USDC","USDX"] optional
 tool list_bridge_deposits.chain string optional
 tool list_bridge_deposits.limit integer optional
-tool list_bridge_deposits.status string enum=["detected","confirming","credited","failed"] optional
+tool list_bridge_deposits.status string enum=["confirming","credited","detected","failed"] optional
 tool list_bridge_wallets object additionalProperties=false
 tool list_deposits object additionalProperties=false
 tool list_deposits.limit integer optional
@@ -253,10 +253,10 @@ tool place_order.price string optional
 tool place_order.reduce_only boolean optional
 tool place_order.side string enum=["buy","sell"] required
 tool place_order.size string required
-tool place_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool place_order.time_in_force string enum=["FOK","GTC","IOC","PostOnly"] optional
 tool place_order.trailing_offset_bps integer minimum=0 optional
 tool place_order.trigger_price string optional
-tool place_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool place_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_limit","trailing_stop"] required
 tool place_orders_batch object additionalProperties=false
 tool place_orders_batch.orders array maxItems=100 minItems=1 required
 tool place_orders_batch.orders[] object additionalProperties=false
@@ -266,10 +266,10 @@ tool place_orders_batch.orders[].price string optional
 tool place_orders_batch.orders[].reduce_only boolean optional
 tool place_orders_batch.orders[].side string enum=["buy","sell"] required
 tool place_orders_batch.orders[].size string required
-tool place_orders_batch.orders[].time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool place_orders_batch.orders[].time_in_force string enum=["FOK","GTC","IOC","PostOnly"] optional
 tool place_orders_batch.orders[].trailing_offset_bps integer minimum=0 optional
 tool place_orders_batch.orders[].trigger_price string optional
-tool place_orders_batch.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool place_orders_batch.orders[].type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_limit","trailing_stop"] required
 tool preview_order object additionalProperties=false
 tool preview_order.limit_offset_bps integer maximum=9999 minimum=0 optional
 tool preview_order.market_id string required
@@ -277,10 +277,10 @@ tool preview_order.price string optional
 tool preview_order.reduce_only boolean optional
 tool preview_order.side string enum=["buy","sell"] required
 tool preview_order.size string required
-tool preview_order.time_in_force string enum=["GTC","IOC","FOK","PostOnly"] optional
+tool preview_order.time_in_force string enum=["FOK","GTC","IOC","PostOnly"] optional
 tool preview_order.trailing_offset_bps integer minimum=0 optional
 tool preview_order.trigger_price string optional
-tool preview_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_stop","trailing_limit"] required
+tool preview_order.type string enum=["limit","market","stop_limit","stop_market","take_profit_limit","take_profit_market","trailing_limit","trailing_stop"] required
 tool register_agent object additionalProperties=false
 tool register_agent.agent string required
 tool register_agent.expires_at integer optional

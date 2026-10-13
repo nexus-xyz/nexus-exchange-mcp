@@ -12,7 +12,10 @@
 # PR as the code. A removed or reshaped tool then shows up as a `-` line in the
 # diff a reviewer reads, instead of first surfacing as an agent's failed call.
 # What counts as the surface (the MCP tools with their input schemas, and the
-# `bin` entries) is described in scripts/release_gate/surface.mjs.
+# `bin` entries) is described in scripts/release_gate/surface.mjs. The rules
+# that turn a schema into lines are tested on synthetic input by
+# scripts/release_gate/surface.test.mjs, which runs first in every mode, so a
+# broken listing fails as a broken listing and not as a spurious diff.
 #
 # Needs the repo's dev dependencies (`npm ci`) for the build, and the registry
 # for the consumer's install, which resolves the package's dependencies the way
@@ -33,6 +36,13 @@ cd "$root"
 
 name="$(node -p 'require("./package.json").name')"
 
+# The listing's own tests, before anything is built or compared. Needs `npm ci`
+# (zod, for the schema comparison).
+if ! node --test scripts/release_gate/surface.test.mjs; then
+  echo "::error title=prepublish-surface (self-test)::The surface listing's own tests (scripts/release_gate/surface.test.mjs) failed, so a listing from it can't be trusted. Nothing was compared with $SNAPSHOT."
+  exit 1
+fi
+
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -44,7 +54,7 @@ tarball="$(npm pack --loglevel=error --pack-destination "$work")"
 mkdir "$work/consumer"
 echo '{ "name": "prepublish-surface", "private": true, "type": "module" }' > "$work/consumer/package.json"
 (cd "$work/consumer" && npm install --loglevel=error --no-audit --no-fund "$work/$tarball")
-cp scripts/release_gate/surface.mjs "$work/consumer/surface.mjs"
+cp scripts/release_gate/surface.mjs scripts/release_gate/surface-lib.mjs "$work/consumer/"
 (cd "$work/consumer" && node surface.mjs "$name") > "$work/public-api.txt"
 
 if [ "$mode" = "write" ]; then

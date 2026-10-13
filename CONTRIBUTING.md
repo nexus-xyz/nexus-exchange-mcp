@@ -87,8 +87,11 @@ the check, and should have the tag's release PR checks green before doing it.
 
 **Before merging, the pre-publish checks have to be green on the release PR**
 (`.github/workflows/pre-publish.yml`, ENG-18798). release-please opens the PR
-with the default token, so its runs wait for **Approve and run workflows** on
-the PR.
+with a token minted from the org release App, `nexus-release-bot2` (ENG-21502),
+so its runs start on their own. The workflow reads the App's credentials from
+the `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY` secrets, which an org
+admin shares with this repo; without them the release job fails at its first
+step and no release PR opens.
 
 - `prepublish-surface`: the packed package's public surface (its MCP tools with
   their input schemas, and its `bin` entries) equals `public-api.txt`. It runs

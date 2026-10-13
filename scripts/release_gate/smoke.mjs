@@ -66,7 +66,14 @@ let config;
 try {
   config = loadConfig(env);
 } catch (err) {
-  finish(1, `NEXUS_SMOKE_BASE_URL is not usable: ${err.message}`);
+  // Blame the override only when there is one; otherwise this is the package's
+  // own config refusing the explicit testnet env above, and says so itself.
+  finish(
+    1,
+    override
+      ? `NEXUS_SMOKE_BASE_URL is not usable: ${err.message}`
+      : `loadConfig refused the testnet config: ${err.message}`,
+  );
 }
 const target = config.baseUrl;
 

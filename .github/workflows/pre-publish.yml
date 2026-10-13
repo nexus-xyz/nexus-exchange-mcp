@@ -57,11 +57,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Node 22, the version release.yml publishes with.
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: "npm"
@@ -73,11 +73,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: "npm"
@@ -86,12 +86,19 @@ jobs:
         id: mode
         env:
           HEAD_REF: ${{ github.head_ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # HEAD is the PR's merge commit (actions/checkout's default on pull_request), and its first
+          # parent is the base it was merged onto, so this lists the PR's own changes. Diffing from the
+          # event's base.sha also listed whatever landed on the base since, which flipped unrelated PRs
+          # into the testnet read.
+          if ! git rev-parse --verify --quiet 'HEAD^2' > /dev/null; then
+            echo "::error title=prepublish-smoke::HEAD is not a merge commit, so the PR's own changes can't be listed"
+            exit 1
+          fi
           # Into a file, not a pipe: under pipefail a failed `git diff`, or one cut short by
           # `grep -q` (SIGPIPE), would read as "not a gate change" and skip the read quietly.
-          git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/changed.txt"
+          git diff --name-only 'HEAD^1' HEAD > "$RUNNER_TEMP/changed.txt"
           if [[ "$HEAD_REF" == release-please--* ]]; then
             echo "mode=release" >> "$GITHUB_OUTPUT"
           elif grep -qE '^(\.github/workflows/pre-publish\.yml|scripts/release_gate/)' "$RUNNER_TEMP/changed.txt"; then
@@ -113,7 +120,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The release tags: the spec pin of the published version is read at
           # `v<version>`.
@@ -131,6 +138,10 @@ jobs:
       # gate fails as a broken gate, and a vendored file that drifted from the
       # monorepo fails here.
       - name: Self-test the gate
+        env:
+          # The end-to-end tests fail instead of skipping if oasdiff is missing, so this step can't
+          # go green without running the classifier.
+          RELEASE_GATE_REQUIRE_OASDIFF: "1"
         run: python3 scripts/release_gate/test_release_verdict.py
       - name: Version proposed vs the spec change since the last publish
         env:

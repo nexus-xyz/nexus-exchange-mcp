@@ -59,10 +59,21 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
+      # Mint a short-lived token from the org release App (nexus-release-bot2),
+      # the same way nexus-exchange-cli does. The default GITHUB_TOKEN can't
+      # open PRs here ("GitHub Actions is not permitted to create or approve
+      # pull requests"), and a PR it opens would start no workflows, so the
+      # release PR would merge with no CI run on it. An App token does both.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       - uses: googleapis/release-please-action@v5
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
@@ -143,8 +154,10 @@ jobs:
 
   # Pushes the hosted HTTP server's image to the exchange Artifact Registry on
   # the same release trigger as the npm publish (a release-please tag, or the
-  # manual re-publish hatch). Not `on: push: tags`: release-please creates its
-  # tag with GITHUB_TOKEN, and a tag pushed by that token triggers no workflow.
+  # manual re-publish hatch). Not `on: push: tags`, by choice: since the release
+  # App pushes the tag, a tag trigger would now fire, but keying off
+  # release-please's outputs keeps one trigger for npm and the image, and it
+  # also covers the manual re-publish hatch, which pushes no tag.
   #
   # Mirrors the exchange component lanes in nexus-xyz/nexus (e.g.
   # eng-exchange-bff.yml): same registry vars, same `GCP_SHARED_SA_KEY` JSON-key

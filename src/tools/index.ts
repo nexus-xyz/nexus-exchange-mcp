@@ -2419,7 +2419,8 @@ export const tools: ToolDef[] = [
       "nonce}` (domain `Nexus Exchange` v1). Sign it in the wallet and pass " +
       "`wallet` and `signature`, or omit both to have the stdio server sign " +
       "with its own wallet (see `create_wallet`; testnet and local only, " +
-      "expiry defaulting to now+30d). No API credentials are needed; the " +
+      "nonce defaulting to now and expiry to now+30d). The nonce is the " +
+      "signing time in Unix ms. No API credentials are needed; the " +
       "signature is the authorization.",
     inputSchema: jsonSchema(
       {
@@ -2437,7 +2438,10 @@ export const tools: ToolDef[] = [
         nonce: {
           type: "integer",
           description:
-            "Monotonic nonce. Use the current Unix time in ms as a safe start.",
+            "The signing time in Unix ms (read the clock right before signing): " +
+            "refused when older than 5 minutes or more than 60 s ahead of the " +
+            "server clock, so never a constant or a counter. Required with " +
+            "`signature`; defaults to now without one.",
         },
         signature: {
           type: "string",
@@ -2457,13 +2461,13 @@ export const tools: ToolDef[] = [
           description: "Optional human-readable label for the agent.",
         },
       },
-      ["agent", "nonce"],
+      ["agent"],
     ),
     zod: z
       .object({
         wallet: z.string().min(1).optional(),
         agent: z.string().min(1),
-        nonce: z.number().int().nonnegative(),
+        nonce: z.number().int().nonnegative().optional(),
         signature: z.string().min(1).optional(),
         expires_at: z.number().int().positive().optional(),
         label: z.string().optional(),
@@ -2474,12 +2478,12 @@ export const tools: ToolDef[] = [
       const a = args as {
         wallet?: string;
         agent: string;
-        nonce: number;
+        nonce?: number;
         signature?: string;
         expires_at?: number;
         label?: string;
       };
-      let { wallet, signature, expires_at } = a;
+      let { wallet, nonce, signature, expires_at } = a;
       if (!signature) {
         const { key, own, network } = agentSigner(
           client,
@@ -2488,24 +2492,30 @@ export const tools: ToolDef[] = [
           wallet,
         );
         wallet = own;
+        // One clock read: the nonce is the signing time, and the server
+        // refuses it outside [now-5min, now+60s].
+        const now = Date.now();
+        nonce ??= now;
         // Signing needs a concrete expiry; the server's own default is 30 days.
         // Unix milliseconds, as AgentRegistrationRequest.expires_at is in the
         // spec: the server refuses anything outside [now+1d, now+180d] in ms.
-        expires_at ??= Date.now() + 30 * 24 * 60 * 60 * 1000;
+        expires_at ??= now + 30 * 24 * 60 * 60 * 1000;
         signature = signRegisterAgent(key, {
           agent: a.agent,
           expiresAt: expires_at,
-          nonce: a.nonce,
+          nonce,
           network,
         });
       }
-      if (!wallet) {
-        throw new Error("`wallet` is required with an explicit `signature`.");
+      if (!wallet || nonce === undefined) {
+        throw new Error(
+          "`wallet` and `nonce` are required with an explicit `signature`.",
+        );
       }
       const body: Record<string, unknown> = {
         wallet,
         agent: a.agent,
-        nonce: a.nonce,
+        nonce,
         signature,
       };
       if (expires_at !== undefined) body.expires_at = expires_at;

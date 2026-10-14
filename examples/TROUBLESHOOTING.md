@@ -88,7 +88,8 @@ wallet key and cannot sign for you (on a play-funds target, see
 - `login`: EIP-191 `personal_sign` over exactly `"Sign in to Nexus Exchange"`.
 - `register_agent`: EIP-712 over `RegisterAgent{agent, expiresAt, nonce}`
   (domain `Nexus Exchange` v1, salted with the network name), signed by the
-  **owner wallet**, not the agent key.
+  **owner wallet**, not the agent key. The nonce is the signing time in Unix
+  ms: the server refuses one older than 5 minutes or more than 60 s ahead.
 - `revoke_agent`: EIP-712 over `RevokeAgentKey{account, agent, nonce}`, same
   domain and signer. It is the only credential the revoke accepts: an HMAC
   key, session or agent key alone gets `401 WALLET_SIGNATURE_REQUIRED`. The
@@ -96,7 +97,8 @@ wallet key and cannot sign for you (on a play-funds target, see
   wallet used to revoke or rename (`WALLET_NONCE_REPLAY` otherwise).
 
 Sign in the wallet (or an external script) and pass the hex signature as the
-`signature` argument (with `account` and `nonce` for `revoke_agent`).
+`signature` argument (with `wallet` and `nonce` for `register_agent`, and
+`account` and `nonce` for `revoke_agent`).
 
 ## `*_api_key` tools throw `requires a session token`
 

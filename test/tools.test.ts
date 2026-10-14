@@ -181,24 +181,37 @@ test("register_agent omits optional fields when not provided", async () => {
     findTool("register_agent")!.handler(c, {
       wallet: "0xW",
       agent: "0xA",
-      nonce: 1,
+      nonce: 1781913600000,
       signature: "0xsig",
     }),
   );
   assert.deepEqual(calls[0].body, {
     wallet: "0xW",
     agent: "0xA",
-    nonce: 1,
+    nonce: 1781913600000,
     signature: "0xsig",
   });
 });
 
-test("register_agent schema requires wallet/agent/nonce/signature", () => {
-  const tool = findTool("register_agent")!;
-  assert.equal(
-    tool.zod.safeParse({ wallet: "0xW", agent: "0xA" }).success,
-    false,
+test("register_agent needs the signed nonce with an explicit signature", async () => {
+  const client = new ExchangeClient({ baseUrl: BASE });
+  await assert.rejects(
+    () =>
+      capture(client, (c) =>
+        findTool("register_agent")!.handler(c, {
+          wallet: "0xW",
+          agent: "0xA",
+          signature: "0xsig",
+        }),
+      ),
+    /`wallet` and `nonce` are required/,
   );
+});
+
+test("register_agent schema requires agent, and nonce defaults", () => {
+  const tool = findTool("register_agent")!;
+  assert.equal(tool.zod.safeParse({ wallet: "0xW" }).success, false);
+  assert.equal(tool.zod.safeParse({ agent: "0xA" }).success, true);
 });
 
 test("revoke_agent refuses without confirm, then DELETEs with confirm", async () => {

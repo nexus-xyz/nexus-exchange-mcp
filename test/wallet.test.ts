@@ -310,7 +310,6 @@ test("login, register_agent, revoke_agent and register_bridge_wallet sign with t
       await findTool("login")!.handler(client, {});
       await findTool("register_agent")!.handler(client, {
         agent: AGENT,
-        nonce: 7,
       });
       await findTool("register_bridge_wallet")!.handler(client, {
         address: TEST_ADDR.toUpperCase().replace("0X", "0x"),
@@ -332,14 +331,16 @@ test("login, register_agent, revoke_agent and register_bridge_wallet sign with t
   const reg = calls[1].body;
   assert.equal(reg.wallet, TEST_ADDR);
   const day = 24 * 60 * 60 * 1000;
-  assert.ok(Math.abs(reg.expires_at - (Date.now() + 30 * day)) < 60_000);
+  // The nonce is the signing time, and the expiry counts from the same read.
+  assert.ok(Math.abs(reg.nonce - Date.now()) < 60_000);
+  assert.equal(reg.expires_at, reg.nonce + 30 * day);
   // Salted with the target's own network name.
   assert.equal(
     reg.signature,
     signRegisterAgent(TEST_KEY, {
       agent: AGENT,
       expiresAt: reg.expires_at,
-      nonce: 7,
+      nonce: reg.nonce,
       network: "local",
     }),
   );

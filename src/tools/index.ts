@@ -2439,9 +2439,10 @@ export const tools: ToolDef[] = [
           type: "integer",
           description:
             "The signing time in Unix ms (read the clock right before signing): " +
-            "refused when older than 5 minutes or more than 60 s ahead of the " +
-            "server clock, so never a constant or a counter. Required with " +
-            "`signature`; defaults to now without one.",
+            "refused when not above the last nonce served for this agent key, " +
+            "and once freshness is enforced (ENG-21517), when older than 5 " +
+            "minutes or more than 60 s ahead of the server clock. Required " +
+            "with `signature`; defaults to now without one.",
         },
         signature: {
           type: "string",
@@ -2492,8 +2493,9 @@ export const tools: ToolDef[] = [
           wallet,
         );
         wallet = own;
-        // One clock read: the nonce is the signing time, and the server
-        // refuses it outside [now-5min, now+60s].
+        // One clock read: the nonce is the signing time, and once freshness
+        // is enforced (ENG-21517) the server refuses it outside
+        // [now-5min, now+60s].
         const now = Date.now();
         nonce ??= now;
         // Signing needs a concrete expiry; the server's own default is 30 days.

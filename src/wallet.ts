@@ -117,19 +117,33 @@ function agentDomainDigest(network: string, struct: Uint8Array): Uint8Array {
   return keccak_256(concatBytes(new Uint8Array([0x19, 0x01]), domain, struct));
 }
 
-/** EIP-712 signature over `RegisterAgent{agent, expiresAt, nonce}`. */
+/**
+ * EIP-712 signature over `RegisterAgent{agent, expiresAt, nonce}`, or with
+ * `uint32 termsVersion` appended when `termsVersion` is set (the server's
+ * `register_agent::digest_with_terms`).
+ */
 export function signRegisterAgent(
   key: string,
-  r: { agent: string; expiresAt: number; nonce: number; network: string },
+  r: {
+    agent: string;
+    expiresAt: number;
+    nonce: number;
+    network: string;
+    termsVersion?: number;
+  },
 ): string {
-  const struct = keccak_256(
-    concatBytes(
-      keccakUtf8("RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)"),
-      addressWord(r.agent, "agent"),
-      word(r.expiresAt),
-      word(r.nonce),
-    ),
-  );
+  const fields = [
+    addressWord(r.agent, "agent"),
+    word(r.expiresAt),
+    word(r.nonce),
+  ];
+  let type = "RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)";
+  if (r.termsVersion !== undefined) {
+    type =
+      "RegisterAgent(address agent,uint64 expiresAt,uint64 nonce,uint32 termsVersion)";
+    fields.push(word(r.termsVersion));
+  }
+  const struct = keccak_256(concatBytes(keccakUtf8(type), ...fields));
   return signDigest(key, agentDomainDigest(r.network, struct));
 }
 

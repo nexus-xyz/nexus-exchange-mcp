@@ -2447,7 +2447,8 @@ export const tools: ToolDef[] = [
         signature: {
           type: "string",
           description:
-            "EIP-712 signature over RegisterAgent{agent, expiresAt, nonce} from " +
+            "EIP-712 signature over RegisterAgent{agent, expiresAt, nonce} (plus " +
+            "termsVersion with `terms_version`) from " +
             "the wallet private key (0x-prefixed). Omit it to have this " +
             "server sign with its own wallet.",
         },
@@ -2461,6 +2462,17 @@ export const tools: ToolDef[] = [
           type: "string",
           description: "Optional human-readable label for the agent.",
         },
+        terms_version: {
+          type: "integer",
+          description:
+            "The terms-of-use version the user accepted. When set, it is " +
+            "signed into RegisterAgent as `uint32 termsVersion` (sign it " +
+            "yourself the same way with an explicit `signature`) and sent " +
+            "as `terms_version`. Once the exchange requires a version, a " +
+            "registration without the current one is refused with 403 " +
+            "TermsVersionNotCurrent. Until the exchange verifies this shape " +
+            "(ENG-20416) it answers 401 signer_mismatch, so omit it until then.",
+        },
       },
       ["agent"],
     ),
@@ -2472,6 +2484,7 @@ export const tools: ToolDef[] = [
         signature: z.string().min(1).optional(),
         expires_at: z.number().int().positive().optional(),
         label: z.string().optional(),
+        terms_version: z.number().int().nonnegative().max(0xffffffff).optional(),
       })
       .strict(),
     requiresAuth: false,
@@ -2483,6 +2496,7 @@ export const tools: ToolDef[] = [
         signature?: string;
         expires_at?: number;
         label?: string;
+        terms_version?: number;
       };
       let { wallet, nonce, signature, expires_at } = a;
       if (!signature) {
@@ -2507,6 +2521,7 @@ export const tools: ToolDef[] = [
           expiresAt: expires_at,
           nonce,
           network,
+          termsVersion: a.terms_version,
         });
       }
       if (!wallet || nonce === undefined) {
@@ -2522,6 +2537,7 @@ export const tools: ToolDef[] = [
       };
       if (expires_at !== undefined) body.expires_at = expires_at;
       if (a.label !== undefined) body.label = a.label;
+      if (a.terms_version !== undefined) body.terms_version = a.terms_version;
       return client.request({
         method: "POST",
         path: "/agents/register",

@@ -160,8 +160,7 @@ jobs:
   # also covers the manual re-publish hatch, which pushes no tag.
   #
   # Mirrors the exchange component lanes in nexus-xyz/nexus (e.g.
-  # eng-exchange-bff.yml): same registry vars, same `GCP_SHARED_SA_KEY` JSON-key
-  # login, and the same tags nexus-xyz/gh-actions' docker-push-with-artifact
+  # eng-exchange-bff.yml): the same tags nexus-xyz/gh-actions' docker-push-with-artifact
   # applies (`latest`, `main-<sha7>`, full sha), plus the release's `vX.Y.Z`,
   # which is the name the monorepo's release-tag reconciler gives a release
   # image. apps-dev's ArgoCD Image Updater tracks `latest` by digest. Inlined
@@ -173,11 +172,16 @@ jobs:
       (needs.release-please.outputs.release_created == 'true' ||
        github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    # The registry's Workload Identity provider only accepts this job of
+    # release.yml, on main, in the `gar-push` environment (ENG-17437).
+    environment: gar-push
     permissions:
       contents: read
+      id-token: write
     env:
       TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag }}
-      IMAGE: ${{ vars.GCP_SHARED_REGION }}-docker.pkg.dev/${{ vars.GCP_SHARED_PROJECT_ID }}/${{ vars.GCP_SHARED_REGISTRY_NAME }}/nexus-exchange-mcp
+      # This image has its own registry, not the shared one (ENG-17437).
+      IMAGE: us-central1-docker.pkg.dev/shared-services-nexusxyz/nexus-exchange-mcp/nexus-exchange-mcp
     steps:
       - name: Validate tag
         run: |
@@ -198,12 +202,21 @@ jobs:
       - name: Smoke image
         run: scripts/container-smoke.sh nexus-exchange-mcp:release
 
+      # Keyless: the repo is public, so no JSON key lives here.
+      - name: Authenticate to Google Cloud
+        id: gcp
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: projects/551605323577/locations/global/workloadIdentityPools/github-nexus-exchange-mcp/providers/release
+          service_account: mcp-image-pusher-sa@shared-services-nexusxyz.iam.gserviceaccount.com
+          token_format: access_token
+
       - name: Log in to Artifact Registry
         uses: docker/login-action@v4
         with:
-          registry: ${{ vars.GCP_SHARED_REGION }}-docker.pkg.dev
-          username: _json_key
-          password: ${{ secrets.GCP_SHARED_SA_KEY }}
+          registry: us-central1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.gcp.outputs.access_token }}
 
       - name: Tag and push
         env:

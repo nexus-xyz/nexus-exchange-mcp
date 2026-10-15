@@ -157,9 +157,18 @@ test("signatures match the cross-SDK known answers and recover the wallet", () =
 // `register_agent::tests::the_digest_with_terms_for_each_network_matches_its_pinned_vector`.
 test("signRegisterAgent with termsVersion signs the server's pinned digests", () => {
   for (const [network, digest] of [
-    ["mainnet", "422802a8fc760529083693ce0a8cc3b06b2492b25723b0a4b88a26a28ec86a85"],
-    ["testnet", "92cd47c15ae7986416f4508923012810d6e12a22d8d8e7d734aa75d07025ad7d"],
-    ["local", "43c47ae217cff37b5e7b8aa5c0b82ede02d73953a3ea749270213296e1825dd9"],
+    [
+      "mainnet",
+      "422802a8fc760529083693ce0a8cc3b06b2492b25723b0a4b88a26a28ec86a85",
+    ],
+    [
+      "testnet",
+      "92cd47c15ae7986416f4508923012810d6e12a22d8d8e7d734aa75d07025ad7d",
+    ],
+    [
+      "local",
+      "43c47ae217cff37b5e7b8aa5c0b82ede02d73953a3ea749270213296e1825dd9",
+    ],
   ]) {
     const sig = signRegisterAgent(TEST_KEY, {
       agent: AGENT,

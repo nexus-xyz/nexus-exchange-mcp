@@ -2484,7 +2484,12 @@ export const tools: ToolDef[] = [
         signature: z.string().min(1).optional(),
         expires_at: z.number().int().positive().optional(),
         label: z.string().optional(),
-        terms_version: z.number().int().nonnegative().max(0xffffffff).optional(),
+        terms_version: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(0xffffffff)
+          .optional(),
       })
       .strict(),
     requiresAuth: false,

@@ -287,6 +287,7 @@ tool register_agent.expires_at integer optional
 tool register_agent.label string optional
 tool register_agent.nonce integer optional
 tool register_agent.signature string optional
+tool register_agent.terms_version integer optional
 tool register_agent.wallet string optional
 tool register_bridge_wallet object additionalProperties=false
 tool register_bridge_wallet.address string required

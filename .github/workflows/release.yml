@@ -64,11 +64,16 @@ jobs:
       # open PRs here ("GitHub Actions is not permitted to create or approve
       # pull requests"), and a PR it opens would start no workflows, so the
       # release PR would merge with no CI run on it. An App token does both.
-      - uses: actions/create-github-app-token@v3
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          client-id: ${{ secrets.RELEASE_BOT_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # Ask for only what this job needs. Without these the token gets
+          # every permission the App's installation has; the job's own
+          # `permissions:` block does not cap an App token.
+          permission-contents: write
+          permission-pull-requests: write
 
       - uses: googleapis/release-please-action@v5
         id: release

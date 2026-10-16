@@ -25,9 +25,11 @@
 # Exit 0 (passed) is exercised only by the real read, which runs on a release PR
 # or a change to this gate. Each probe has a 180 s timeout
 # (the package retries transient errors with backoff, so a shorter one races it). A wrong code, or a
-# timeout, is its own failure, named "(outcomes)". The probes run smoke.mjs
-# directly with stdout and stderr captured, so they emit no annotations; each
-# prints one plain log line instead: case, exit code, first line of output.
+# timeout, is its own failure, named "(outcomes)", and so is a probe that could
+# not enter the consumer (exit 99, so a failed `cd` never reads as an expected
+# exit 1). The probes run smoke.mjs directly with stdout and stderr captured, so
+# they emit no annotations; each prints one plain log line instead: case, exit
+# code, first line of output.
 set -euo pipefail
 
 mode="read"
@@ -68,7 +70,8 @@ summary() {
 # is pointed at. Stdout and stderr are both captured (the real smoke's `::error`
 # lines may go to either), and one plain log line is printed: case, exit code,
 # first line of output, with a leading `::` defanged so it cannot be read as an
-# annotation.
+# annotation. A `cd` that fails exits 99, which no smoke outcome or `timeout`
+# uses, so it is reported as the probe not running rather than as its outcome.
 # `timeout` is GNU coreutils: macOS has none by default (Homebrew's coreutils
 # installs it as `gtimeout`). Without either, the probes run with no time limit,
 # and the job's own timeout is the backstop.
@@ -84,12 +87,20 @@ fi
 expect_exit() {
   local label="$1" url="$2" want="$3" what="$4" got out first
   set +e
-  out="$(cd "$work/consumer" && NEXUS_SMOKE_BASE_URL="$url" ${limit[@]+"${limit[@]}"} node smoke.mjs "$name" 2>&1)"
+  out="$(cd "$work/consumer" || exit 99; NEXUS_SMOKE_BASE_URL="$url" ${limit[@]+"${limit[@]}"} node smoke.mjs "$name" 2>&1)"
   got=$?
   set -e
-  first="$(printf '%s\n' "$out" | head -n 1)"
+  # Parameter expansion, not `printf | head`: under pipefail, head closing the
+  # pipe early can kill printf with SIGPIPE, and set -e then ends the script
+  # with no annotation.
+  first="${out%%$'\n'*}"
   first="${first/#::/: :}"
   echo "probe ${label}: exit ${got}: ${first}"
+  if [ "$got" -eq 99 ]; then
+    echo "::error title=prepublish-smoke (outcomes)::The ${label} probe could not enter the consumer (${work}/consumer), so the smoke never ran and its outcomes were not checked."
+    summary "❌ OUTCOMES NOT CHECKED: nothing was read" "${label} case: could not enter the consumer, so the smoke never ran."
+    exit 1
+  fi
   if [ "$got" -ne "$want" ]; then
     local why="expected exit ${want} from ${what}, got ${got}"
     [ "$got" -eq 124 ] && why="expected exit ${want} from ${what}, but the probe hit its 180s timeout"
@@ -106,14 +117,15 @@ start_stub() {
   : > "$work/stub.out"
   python3 -I scripts/release_gate/stub_server.py ${1:+"$1"} > "$work/stub.out" &
   stub_pid=$!
-  port=""
+  # Wait for the first line to end (a newline in the file), or for the stub to die: a non-empty
+  # file can still hold half the port (ENG-21487).
   for _ in $(seq 1 50); do
-    port="$(head -n 1 "$work/stub.out")"
-    [ -n "$port" ] && break
+    if [ "$(wc -l < "$work/stub.out")" -ge 1 ] || ! kill -0 "$stub_pid" 2>/dev/null; then break; fi
     sleep 0.1
   done
-  if [ -z "$port" ]; then
-    echo "::error title=prepublish-smoke (outcomes)::scripts/release_gate/stub_server.py ${1:-} printed no port, so a probe could not run."
+  port="$(head -n 1 "$work/stub.out")"
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    echo "::error title=prepublish-smoke (outcomes)::scripts/release_gate/stub_server.py ${1:-} printed no port (got '${port}'), so a probe could not run."
     summary "❌ OUTCOMES WRONG: nothing was read" "stub_server.py printed no port."
     exit 1
   fi
@@ -131,11 +143,12 @@ stop_stub
 start_stub 503
 expect_exit "outage" "http://127.0.0.1:${port}" 2 "a server that answers every request with 503"
 stop_stub
-echo "the smoke's outcomes hold: nothing listening exits 2, an empty answer exits 1, a 503 exits 2"
+outcomes="nothing listening exits 2, an empty answer exits 1, a 503 exits 2"
+echo "the smoke's outcomes hold: ${outcomes}"
 
 if [ "$mode" = "install" ]; then
-  echo "::notice title=prepublish-smoke (read not attempted)::Not a release PR: the package packed and installed into a clean consumer, and no testnet read was made. The read runs on the release PR."
-  summary "install only" "Not a release PR: \`${tarball}\` packed and installed into a clean consumer. No testnet read was attempted, so this is not a smoke pass."
+  echo "::notice title=prepublish-smoke (read not attempted)::Not a release PR: the package packed and installed into a clean consumer, and the three outcome probes ran and held (${outcomes}). No testnet read was made. The read runs on the release PR."
+  summary "install only" "Not a release PR: \`${tarball}\` packed and installed into a clean consumer, and the three outcome probes ran and held (${outcomes}). No testnet read was attempted, so this is not a smoke pass."
   exit 0
 fi
 

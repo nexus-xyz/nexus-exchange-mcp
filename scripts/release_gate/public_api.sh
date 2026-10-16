@@ -15,7 +15,8 @@
 # `bin` entries) is described in scripts/release_gate/surface.mjs. The rules
 # that turn a schema into lines are tested on synthetic input by
 # scripts/release_gate/surface.test.mjs, which runs first in every mode, so a
-# broken listing fails as a broken listing and not as a spurious diff.
+# broken listing fails as a broken listing and not as a spurious diff, and again
+# in the consumer, against the zod the packed package resolves.
 #
 # Needs the repo's dev dependencies (`npm ci`) for the build, and the registry
 # for the consumer's install, which resolves the package's dependencies the way
@@ -61,7 +62,14 @@ tarball="$(npm pack --loglevel=error --pack-destination "$work")"
 mkdir "$work/consumer"
 echo '{ "name": "prepublish-surface", "private": true, "type": "module" }' > "$work/consumer/package.json"
 (cd "$work/consumer" && npm install --loglevel=error --no-audit --no-fund "$work/$tarball")
-cp scripts/release_gate/surface.mjs scripts/release_gate/surface-lib.mjs "$work/consumer/"
+cp scripts/release_gate/surface.mjs scripts/release_gate/surface-lib.mjs scripts/release_gate/surface.test.mjs "$work/consumer/"
+# The same tests against the zod surface.mjs compares with: the packed package's,
+# which the consumer's install resolved with no lockfile, so it can be newer
+# than the repo's that the first run used.
+if ! (cd "$work/consumer" && SURFACE_PACKAGE="$name" node --test surface.test.mjs); then
+  echo "::error title=prepublish-surface (self-test)::The surface listing's own tests (scripts/release_gate/surface.test.mjs) failed against the zod the packed package resolves, so a listing from it can't be trusted. Nothing was compared with $SNAPSHOT."
+  exit 1
+fi
 (cd "$work/consumer" && node surface.mjs "$name") > "$work/public-api.txt"
 
 if [ "$mode" = "write" ]; then

@@ -1,5 +1,9 @@
 # Nexus Exchange MCP Server
 
+> [!WARNING]
+> **This repository is archived and no longer maintained.** The Nexus Exchange API it was built for is being
+> shut down, and no further releases will be published.
+
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
 
 An [MCP](https://modelcontextprotocol.io) server that exposes the Nexus

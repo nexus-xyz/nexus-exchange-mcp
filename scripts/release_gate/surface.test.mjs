@@ -1,18 +1,34 @@
 // Tests for surface-lib.mjs (ENG-18798), on synthetic schemas: how a tool's
 // input schema becomes listing lines, and the advertised-vs-zod comparison whose
 // mismatch makes surface.mjs fail. public_api.sh runs this file first, before it
-// builds or lists anything.
+// builds or lists anything, and again in the consumer that installed the packed
+// tarball, with SURFACE_PACKAGE set to the package's name.
 //
 //   node --test scripts/release_gate/surface.test.mjs
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { describe as suite, test } from "node:test";
-import { z } from "zod";
+import { pathToFileURL } from "node:url";
 import {
   UnsupportedSchema,
   describe,
   findMismatches,
   walk,
 } from "./surface-lib.mjs";
+
+// The zod surface.mjs compares with: the one the package resolves from its own
+// package.json. In the consumer that is the installed package, whose
+// dependencies resolve with no lockfile, so its zod can be newer than the
+// repo's; there SURFACE_PACKAGE names it and it is found as surface.mjs finds
+// it. In the repo, the package is the repo itself.
+const manifest = process.env.SURFACE_PACKAGE
+  ? createRequire(import.meta.url).resolve(
+      `${process.env.SURFACE_PACKAGE}/package.json`,
+    )
+  : new URL("../../package.json", import.meta.url);
+const { z } = await import(
+  pathToFileURL(createRequire(manifest).resolve("zod")).href
+);
 
 const lines = (schema) => {
   const out = [];
@@ -47,13 +63,36 @@ suite("constraints", () => {
 });
 
 suite("walk", () => {
-  test("lists properties, required-ness, items and branches", () => {
+  test("lists properties, required-ness, items, extra properties and branches", () => {
     assert.deepEqual(
       lines({
         type: "object",
         properties: {
           a: { type: "string" },
           b: { type: "array", items: { type: "number", minimum: 1 } },
+          c: {
+            allOf: [
+              {
+                type: "object",
+                properties: { id: { type: "string" } },
+                required: ["id"],
+              },
+              { type: "object", properties: { tag: { type: "string" } } },
+            ],
+          },
+          d: { anyOf: [{ type: "string", enum: ["x"] }, { type: "null" }] },
+          e: {
+            oneOf: [
+              { type: "number", minimum: 0 },
+              { type: "string", pattern: "^[0-9]+$" },
+            ],
+          },
+          f: {
+            type: "object",
+            additionalProperties: { type: "string", maxLength: 8 },
+          },
+          g: { type: "object", additionalProperties: true },
+          h: { type: "object", additionalProperties: false },
         },
         required: ["a", "gone"],
         additionalProperties: false,
@@ -62,6 +101,21 @@ suite("walk", () => {
         "tool t.a string required",
         "tool t.b array optional",
         "tool t.b[] number minimum=1",
+        "tool t.c any optional",
+        "tool t.c<allOf[0]> object",
+        "tool t.c<allOf[0]>.id string required",
+        "tool t.c<allOf[1]> object",
+        "tool t.c<allOf[1]>.tag string optional",
+        "tool t.d any optional",
+        'tool t.d<anyOf[0]> string enum=["x"]',
+        "tool t.d<anyOf[1]> null",
+        "tool t.e any optional",
+        "tool t.e<oneOf[0]> number minimum=0",
+        'tool t.e<oneOf[1]> string pattern="^[0-9]+$"',
+        "tool t.f object optional",
+        "tool t.f{} string maxLength=8",
+        "tool t.g object additionalProperties=true optional",
+        "tool t.h object additionalProperties=false optional",
         "tool t.gone undeclared required",
       ],
     );

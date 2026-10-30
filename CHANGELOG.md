@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.6.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.5.0...v0.6.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **tools:** default the register_agent nonce to the signing time (ENG-21898) ([#110](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/110))
+
+### Features
+
+* **tools:** default the register_agent nonce to the signing time (ENG-21898) ([#110](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/110)) ([e1a53f9](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/e1a53f93d8601e58b96897fff90b50e1887b900f))
+* **tools:** register_agent signs the accepted terms version (ENG-21315) ([#112](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/112)) ([4120dba](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/4120dba1665006b0e60808eb8ce7b3b3b94323d2))
+
+
+### Bug Fixes
+
+* **store:** hold the CLI's shared lock file across every config write (ENG-20052) ([#107](https://github.com/nexus-xyz/nexus-exchange-mcp/issues/107)) ([907eb6f](https://github.com/nexus-xyz/nexus-exchange-mcp/commit/907eb6f72ba7bcbb5dc91747856dd388e213a783))
+
 ## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-mcp/compare/v0.4.0...v0.5.0) (2026-10-08)
 
 
